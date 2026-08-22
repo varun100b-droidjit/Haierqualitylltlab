@@ -1,0 +1,37 @@
+{
+  "entities": {
+    "megha_chat_records": {
+      "title": "Megha Chat Records",
+      "description": "Stores user and Megha AI chat and voice conversation messages in real-time",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "sender": { "type": "string", "enum": ["user", "megha"] },
+        "text": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "dateTimeIso": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "sender", "text", "timestamp"]
+    },
+    "graphValueSheets": {
+      "title": "Graph Value Sheets",
+      "description": "Stores uploaded Excel value sheets metadata and parsed test measurement rows",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "fileName": { "type": "string" },
+        "fileSize": { "type": "number" },
+        "uploadedBy": { "type": "string" },
+        "uploadedAt": { "type": "string" },
+        "storagePath": { "type": "string" },
+        "status": { "type": "string" },
+        "rowCount": { "type": "number" },
+        "columnCount": { "type": "number" },
+        "columns": { "type": "array" },
+        "timeColumn": { "type": "string" }
+      },
+      "required": ["id", "fileName", "rowCount", "columnCount"]
+    }
+  }
+}
