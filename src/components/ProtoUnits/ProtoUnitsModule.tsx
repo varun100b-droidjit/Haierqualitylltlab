@@ -90,12 +90,12 @@ export const ProtoUnitsModule: React.FC<ProtoUnitsModuleProps> = ({
     setActiveSection(status || 'live');
   };
 
-  const handleStopUnit = (id: string) => {
-    updateProtoUnitStatus(id, 'stopped');
+  const handleStopUnit = (id: string, currentElapsedHours?: number) => {
+    updateProtoUnitStatus(id, 'stopped', currentElapsedHours);
   };
 
-  const handlePassUnit = (id: string) => {
-    updateProtoUnitStatus(id, 'finished');
+  const handlePassUnit = (id: string, currentElapsedHours?: number) => {
+    updateProtoUnitStatus(id, 'finished', currentElapsedHours);
   };
 
   const handleResumeUnit = (id: string) => {
@@ -222,50 +222,60 @@ export const ProtoUnitsModule: React.FC<ProtoUnitsModuleProps> = ({
             const reqHours = typeof unit.requiredHour === 'number' ? unit.requiredHour : parseFloat(unit.requiredHour) || 0;
             const initialDone = typeof unit.doneHour === 'number' ? unit.doneHour : parseFloat((unit as any).doneHour) || 0;
             
-            let elapsedHours = initialDone;
-            let pendingHours = Math.max(0, reqHours - initialDone);
-            let progressPercent = reqHours > 0 ? Math.min(100, Math.round((initialDone / reqHours) * 100)) : 0;
-
-            if (unit.status === 'finished') {
-              elapsedHours = reqHours;
-              pendingHours = 0;
-              progressPercent = 100;
-            } else {
-              let createdMs = NaN;
-              if (unit.createdAt) {
-                createdMs = new Date(unit.createdAt.replace(' ', 'T')).getTime();
-                if (isNaN(createdMs)) {
-                  createdMs = new Date(unit.createdAt).getTime();
-                }
+            let createdMs = NaN;
+            if (unit.createdAt) {
+              createdMs = new Date(unit.createdAt.replace(' ', 'T')).getTime();
+              if (isNaN(createdMs)) {
+                createdMs = new Date(unit.createdAt).getTime();
               }
-              const nowMs = currentTime;
+            }
+            const nowMs = currentTime;
 
-              if (!isNaN(createdMs) && createdMs <= nowMs) {
-                let endCalculatedMs = nowMs;
-                if (unit.status === 'stopped') {
-                  let updatedMs = NaN;
-                  if (unit.updatedAt) {
-                    updatedMs = new Date(unit.updatedAt.replace(' ', 'T')).getTime();
-                    if (isNaN(updatedMs)) {
-                      updatedMs = new Date(unit.updatedAt).getTime();
-                    }
-                  }
-                  if (!isNaN(updatedMs) && updatedMs >= createdMs) {
-                    endCalculatedMs = updatedMs;
+            let elapsedHours = initialDone;
+            if (unit.status === 'finished') {
+              if (typeof unit.doneHour === 'number' && unit.doneHour >= 0) {
+                elapsedHours = Math.min(reqHours, unit.doneHour);
+              } else if (!isNaN(createdMs)) {
+                let finishedMs = nowMs;
+                if (unit.updatedAt) {
+                  const upMs = new Date(unit.updatedAt.replace(' ', 'T')).getTime();
+                  if (!isNaN(upMs) && upMs >= createdMs) {
+                    finishedMs = upMs;
                   }
                 }
-
-                // Calculate exact operational hours based on active lab shift + initial done hours
+                const shiftCalculatedHours = calculateShiftElapsedExactHours(createdMs, finishedMs, activeShift);
+                elapsedHours = Math.min(reqHours, initialDone + shiftCalculatedHours);
+              } else {
+                elapsedHours = Math.min(reqHours, initialDone);
+              }
+            } else if (unit.status === 'stopped') {
+              if (typeof unit.doneHour === 'number' && unit.doneHour >= 0) {
+                elapsedHours = Math.min(reqHours, unit.doneHour);
+              } else if (!isNaN(createdMs) && createdMs <= nowMs) {
+                let endCalculatedMs = nowMs;
+                if (unit.updatedAt) {
+                  const upMs = new Date(unit.updatedAt.replace(' ', 'T')).getTime();
+                  if (!isNaN(upMs) && upMs >= createdMs) {
+                    endCalculatedMs = upMs;
+                  }
+                }
                 const shiftCalculatedHours = calculateShiftElapsedExactHours(createdMs, endCalculatedMs, activeShift);
                 elapsedHours = Math.min(reqHours, initialDone + shiftCalculatedHours);
               } else {
                 elapsedHours = Math.min(reqHours, initialDone);
               }
-
-              pendingHours = Math.max(0, reqHours - elapsedHours);
-              progressPercent = reqHours > 0 ? Math.min(100, Math.round((elapsedHours / reqHours) * 100)) : 0;
+            } else {
+              // Live status
+              if (!isNaN(createdMs) && createdMs <= nowMs) {
+                const shiftCalculatedHours = calculateShiftElapsedExactHours(createdMs, nowMs, activeShift);
+                elapsedHours = Math.min(reqHours, initialDone + shiftCalculatedHours);
+              } else {
+                elapsedHours = Math.min(reqHours, initialDone);
+              }
             }
 
+            const pendingHours = Math.max(0, reqHours - elapsedHours);
+            const progressPercent = reqHours > 0 ? Math.min(100, Math.round((elapsedHours / reqHours) * 100)) : 0;
             const doneHHMM = formatHoursToHHMM(elapsedHours);
             const pendingHHMM = formatHoursToHHMM(pendingHours);
             
@@ -405,7 +415,7 @@ export const ProtoUnitsModule: React.FC<ProtoUnitsModuleProps> = ({
                           : 'bg-emerald-950/80 text-emerald-300 border-emerald-800/80'
                       }`}>
                         {unit.status === 'finished' 
-                          ? '100% Completed' 
+                          ? `Passed (${progressPercent}%)` 
                           : unit.status === 'stopped' 
                           ? `Stopped (${progressPercent}%)` 
                           : isShiftActive
@@ -490,7 +500,7 @@ export const ProtoUnitsModule: React.FC<ProtoUnitsModuleProps> = ({
                     </button>
                   ) : unit.status === 'live' ? (
                     <button
-                      onClick={() => handleStopUnit(unit.id)}
+                      onClick={() => handleStopUnit(unit.id, elapsedHours)}
                       className="flex-1 flex items-center justify-center gap-1 py-2 px-2.5 rounded-xl text-xs font-bold text-amber-200 bg-amber-950/90 hover:bg-amber-900 border border-amber-800/80 transition-all shadow-sm cursor-pointer"
                       title="Stop Running Test"
                     >
@@ -511,7 +521,7 @@ export const ProtoUnitsModule: React.FC<ProtoUnitsModuleProps> = ({
                   {/* Pass Button */}
                   {unit.status !== 'finished' && (
                     <button
-                      onClick={() => handlePassUnit(unit.id)}
+                      onClick={() => handlePassUnit(unit.id, elapsedHours)}
                       className="flex-1 flex items-center justify-center gap-1 py-2 px-2.5 rounded-xl text-xs font-bold text-emerald-200 bg-emerald-950/90 hover:bg-emerald-900 border border-emerald-800/80 transition-all shadow-sm cursor-pointer"
                       title="Pass Test & Move to Finished"
                     >

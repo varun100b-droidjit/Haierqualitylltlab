@@ -1471,8 +1471,7 @@ export const ProtoReportGenerator: React.FC<ProtoReportGeneratorProps> = ({
             }
           }
         }}
-        title="Report Photos Gallery (Fixed 6 cm × 4 cm Centered View)"
-        subtitle="11 standardized report photos with fixed 6 cm × 4 cm centered aspect ratio for DOCX report."
+        title="Report Inspection Photos"
       />
 
       {/* 5. Action Buttons, Alerts & Download Options */}

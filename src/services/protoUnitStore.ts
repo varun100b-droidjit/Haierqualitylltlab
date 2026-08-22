@@ -212,7 +212,7 @@ export function addProtoUnit(unit: Omit<ProtoUnit, 'id' | 'createdAt' | 'updated
   return newUnit;
 }
 
-export function updateProtoUnitStatus(id: string, status: 'live' | 'finished' | 'stopped'): void {
+export function updateProtoUnitStatus(id: string, status: 'live' | 'finished' | 'stopped', doneHour?: number): void {
   const formattedDate = getFormattedNow();
 
   let targetUnit: ProtoUnit | null = null;
@@ -221,6 +221,7 @@ export function updateProtoUnitStatus(id: string, status: 'live' | 'finished' | 
       targetUnit = {
         ...u,
         status,
+        ...(typeof doneHour === 'number' ? { doneHour } : {}),
         updatedAt: formattedDate,
       };
       return targetUnit;

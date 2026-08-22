@@ -1061,8 +1061,7 @@ export const AddProtoUnitDialog: React.FC<AddProtoUnitDialogProps> = ({
           <PhotoUploadSection
             photos={photos}
             onChange={(updated) => setPhotos(updated as ProtoUnitPhotos)}
-            title="Proto Unit Photo Upload Section"
-            subtitle="Upload the 11 standard test photos. Photo keys map directly to Word Report placeholders {{PHOTO_*}}."
+            title="Proto Unit Photo Uploads"
           />
 
           {/* SECTION 5: Additional Information */}

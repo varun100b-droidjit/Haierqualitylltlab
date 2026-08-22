@@ -17,9 +17,7 @@ import {
   Grid3X3,
   SlidersHorizontal,
   Download,
-  Tag,
-  ChevronDown,
-  ChevronUp
+  Tag
 } from 'lucide-react';
 import { ProtoUnitPhotos } from '../../types';
 import { 
@@ -81,18 +79,15 @@ export interface PhotoUploadSectionProps {
   title?: string;
   subtitle?: string;
   readOnly?: boolean;
-  defaultOpen?: boolean;
 }
 
 export const PhotoUploadSection: React.FC<PhotoUploadSectionProps> = ({
   photos,
   onChange,
-  title = 'Photo Upload Section',
-  subtitle = 'Upload the 11 standard test photos. These map directly to Word Report placeholders {{PHOTO_*}}.',
+  title = 'Inspection Photos',
+  subtitle,
   readOnly = false,
-  defaultOpen = false,
 }) => {
-  const [isOpen, setIsOpen] = useState(defaultOpen);
   const [activeTab, setActiveTab] = useState<'all' | ReportSectionCategory>('all');
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
   const [previewModal, setPreviewModal] = useState<{ url: string; label: string; key: string; section?: string; page?: string } | null>(null);
@@ -361,54 +356,35 @@ export const PhotoUploadSection: React.FC<PhotoUploadSectionProps> = ({
     : PHOTO_UPLOAD_CONFIGS.filter(cfg => cfg.section === activeTab);
 
   return (
-    <div className="bg-slate-950/70 rounded-2xl border border-slate-800 shadow-lg overflow-hidden transition-all duration-300">
-      {/* Collapsible Header Banner */}
-      <div 
-        onClick={() => setIsOpen(!isOpen)}
-        className="p-4 sm:p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-3 cursor-pointer select-none hover:bg-slate-900/60 transition-colors"
-      >
+    <div className="bg-slate-950/70 rounded-2xl border border-slate-800 shadow-lg p-4 sm:p-6 space-y-5">
+      {/* Header Banner */}
+      <div className="flex items-center justify-between gap-3 border-b border-slate-800/80 pb-4">
         <div className="flex items-center gap-3">
           <div className="p-2.5 rounded-xl bg-purple-500/10 border border-purple-500/30 text-purple-400 shrink-0">
             <ImageIcon className="w-5 h-5" />
           </div>
           <div>
-            <h3 className="text-sm sm:text-base font-bold text-white flex items-center gap-2 flex-wrap">
+            <h3 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
               {title}
-              <span className="text-[11px] font-mono font-normal text-purple-400 bg-purple-950/60 border border-purple-800/60 px-2 py-0.5 rounded-full">
-                11 Standard Placeholders
+              <span className={`text-[11px] font-mono px-2 py-0.5 rounded-full border ${
+                coverage.uploaded > 0
+                  ? 'bg-purple-950/70 text-purple-300 border-purple-800/60'
+                  : 'bg-slate-900 text-slate-400 border-slate-800'
+              }`}>
+                {coverage.uploaded} / 11
               </span>
             </h3>
-            <p className="text-xs text-slate-400 mt-0.5">
-              {subtitle}
-            </p>
+            {subtitle && (
+              <p className="text-xs text-slate-400 mt-0.5">
+                {subtitle}
+              </p>
+            )}
           </div>
         </div>
 
-        {/* Status Badge, Action Buttons & Dropdown Toggle */}
-        <div className="flex flex-wrap items-center gap-2 self-start lg:self-auto shrink-0" onClick={(e) => e.stopPropagation()}>
-          {!readOnly && isOpen && (
-            <>
-              <input
-                ref={batchInputRef}
-                type="file"
-                multiple
-                accept="image/jpeg,image/jpg,image/png,image/webp"
-                className="hidden"
-                onChange={(e) => handleBatchFiles(e.target.files)}
-              />
-              <button
-                type="button"
-                onClick={() => batchInputRef.current?.click()}
-                className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-semibold flex items-center gap-1.5 shadow transition-all cursor-pointer"
-                title="Select multiple images and let the system auto-match them by name"
-              >
-                <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-                <span>Auto-Match Batch</span>
-              </button>
-            </>
-          )}
-
-          {!readOnly && isOpen && coverage.uploaded > 0 && (
+        {/* Action Buttons */}
+        <div className="flex items-center gap-2 shrink-0">
+          {!readOnly && coverage.uploaded > 0 && (
             <button
               type="button"
               onClick={downloadAllRenamedPhotos}
@@ -416,110 +392,78 @@ export const PhotoUploadSection: React.FC<PhotoUploadSectionProps> = ({
               title="Download all uploaded photos renamed to their standard match names"
             >
               <Download className="w-3.5 h-3.5" />
-              <span>Save Renamed ({coverage.uploaded})</span>
+              <span className="hidden sm:inline">Save Renamed</span> ({coverage.uploaded})
             </button>
           )}
-
-          <div className={`px-3 py-1.5 rounded-xl border text-xs font-medium flex items-center gap-1.5 ${
-            coverage.uploaded === 11 
-              ? 'bg-emerald-950/50 border-emerald-700/60 text-emerald-300' 
-              : coverage.uploaded > 0 
-                ? 'bg-amber-950/40 border-amber-700/50 text-amber-300'
-                : 'bg-slate-900 border-slate-800 text-slate-400'
-          }`}>
-            {coverage.uploaded === 11 ? (
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-            ) : (
-              <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-            )}
-            <span>Mapped: <strong>{coverage.uploaded}</strong> / 11 ({coverage.percentage}%)</span>
-          </div>
-
-          {/* Expand / Collapse Dropdown Button */}
-          <button
-            type="button"
-            onClick={() => setIsOpen(!isOpen)}
-            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer border ${
-              isOpen
-                ? 'bg-purple-950/80 hover:bg-purple-900 text-purple-300 border-purple-700/60 shadow-sm'
-                : 'bg-gradient-to-r from-purple-900/60 to-indigo-900/60 hover:from-purple-800/80 hover:to-indigo-800/80 text-purple-200 border-purple-500/40 shadow'
-            }`}
-          >
-            <span>{isOpen ? 'Collapse Gallery' : 'Open Photo Gallery'}</span>
-            <ChevronDown className={`w-4 h-4 text-purple-300 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
-          </button>
         </div>
       </div>
 
-      {/* Collapsible Content Area */}
-      {isOpen && (
-        <div className="p-4 sm:p-6 pt-0 space-y-5 border-t border-slate-800/80 animate-in fade-in slide-in-from-top-2 duration-200">
-          {batchFeedback && (
-            <div className="p-3 rounded-xl bg-purple-950/70 border border-purple-500/60 text-purple-200 text-xs flex items-center gap-2 animate-in fade-in">
-              <Sparkles className="w-4 h-4 text-purple-400 shrink-0" />
-              <span>{batchFeedback}</span>
-            </div>
-          )}
+      {batchFeedback && (
+        <div className="p-3 rounded-xl bg-purple-950/70 border border-purple-500/60 text-purple-200 text-xs flex items-center gap-2 animate-in fade-in">
+          <Sparkles className="w-4 h-4 text-purple-400 shrink-0" />
+          <span>{batchFeedback}</span>
+        </div>
+      )}
 
-          {/* Dynamic Document Section Tabs */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs border-b border-slate-800/80 scrollbar-thin">
+      {/* Dynamic Document Section Tabs */}
+      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs border-b border-slate-800/80 scrollbar-thin">
+        <button
+          type="button"
+          onClick={() => setActiveTab('all')}
+          className={`px-3 py-1.5 rounded-lg font-semibold flex items-center gap-1.5 transition-all shrink-0 cursor-pointer ${
+            activeTab === 'all'
+              ? 'bg-purple-600 text-white shadow'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+          }`}
+        >
+          <Grid3X3 className="w-3.5 h-3.5" />
+          <span>All Photos</span>
+          <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-black/30">{coverage.uploaded}/11</span>
+        </button>
+
+        {(Object.keys(REPORT_PHOTO_SECTIONS) as ReportSectionCategory[]).map(secKey => {
+          const sec = REPORT_PHOTO_SECTIONS[secKey];
+          const stats = coverage.sectionStats[secKey];
+          const isComplete = stats.uploaded === stats.total;
+
+          return (
             <button
+              key={secKey}
               type="button"
-              onClick={() => setActiveTab('all')}
+              onClick={() => setActiveTab(secKey)}
               className={`px-3 py-1.5 rounded-lg font-semibold flex items-center gap-1.5 transition-all shrink-0 cursor-pointer ${
-                activeTab === 'all'
-                  ? 'bg-purple-600 text-white shadow'
+                activeTab === secKey
+                  ? 'bg-slate-800 text-cyan-300 border border-cyan-500/40 shadow'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
               }`}
             >
-              <Grid3X3 className="w-3.5 h-3.5" />
-              <span>All 11 Placeholders</span>
-              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-black/30">{coverage.uploaded}/11</span>
-            </button>
-
-            {(Object.keys(REPORT_PHOTO_SECTIONS) as ReportSectionCategory[]).map(secKey => {
-              const sec = REPORT_PHOTO_SECTIONS[secKey];
-              const stats = coverage.sectionStats[secKey];
-              const isComplete = stats.uploaded === stats.total;
-
-              return (
-                <button
-                  key={secKey}
-                  type="button"
-                  onClick={() => setActiveTab(secKey)}
-                  className={`px-3 py-1.5 rounded-lg font-semibold flex items-center gap-1.5 transition-all shrink-0 cursor-pointer ${
-                    activeTab === secKey
-                      ? 'bg-slate-800 text-cyan-300 border border-cyan-500/40 shadow'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
-                  }`}
-                >
-                  <Layers className="w-3.5 h-3.5 text-cyan-400" />
-                  <span>{sec.title}</span>
-                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
-                    isComplete ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-slate-900 text-slate-300'
-                  }`}>
-                    {stats.uploaded}/{stats.total}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Section Description Bar when a specific tab is active */}
-          {activeTab !== 'all' && (
-            <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 flex items-center justify-between text-xs text-slate-300">
-              <div>
-                <span className="font-bold text-cyan-300 mr-2">{REPORT_PHOTO_SECTIONS[activeTab].title}</span>
-                <span className="text-slate-400">{REPORT_PHOTO_SECTIONS[activeTab].description}</span>
-              </div>
-              <span className="text-[11px] font-mono text-purple-400 bg-purple-950/60 px-2 py-0.5 rounded border border-purple-800/60 shrink-0">
-                {REPORT_PHOTO_SECTIONS[activeTab].page}
+              <Layers className="w-3.5 h-3.5 text-cyan-400" />
+              <span>{sec.title}</span>
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
+                isComplete ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-slate-900 text-slate-300'
+              }`}>
+                {stats.uploaded}/{stats.total}
               </span>
-            </div>
-          )}
+            </button>
+          );
+        })}
+      </div>
 
-          {/* 2-Column Card Grid on Desktop, 1-Column on Mobile */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      {/* Section Description Bar when a specific tab is active */}
+      {activeTab !== 'all' && (
+        <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 flex items-center justify-between text-xs text-slate-300">
+          <div>
+            <span className="font-bold text-cyan-300 mr-2">{REPORT_PHOTO_SECTIONS[activeTab].title}</span>
+            <span className="text-slate-400">{REPORT_PHOTO_SECTIONS[activeTab].description}</span>
+          </div>
+          <span className="text-[11px] font-mono text-purple-400 bg-purple-950/60 px-2 py-0.5 rounded border border-purple-800/60 shrink-0">
+            {REPORT_PHOTO_SECTIONS[activeTab].page}
+          </span>
+        </div>
+      )}
+
+      {/* 2-Column Card Grid on Desktop, 1-Column on Mobile */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {filteredConfigs.map((config, index) => {
           const photoUrl = getPhotoValue(config);
           const isUploaded = Boolean(photoUrl);
@@ -744,9 +688,7 @@ export const PhotoUploadSection: React.FC<PhotoUploadSectionProps> = ({
             </div>
           );
         })}
-          </div>
-        </div>
-      )}
+      </div>
 
       {/* Full Image Preview Modal */}
       {previewModal && (

@@ -702,7 +702,16 @@ export const ReportRoomModule: React.FC<ReportRoomModuleProps> = ({
           onClose={() => setPreviewReport(null)}
           masterTemplate={getMasterTemplate(previewReport.tag === 'C Experience' ? 'reliability' : 'proto')}
           reportTitle={previewReport.title || `${previewReport.tag} Report`}
-          unitData={previewReport.dataValuesMap}
+          unitData={{
+            ...previewReport.specs,
+            ...previewReport.dataValuesMap,
+            modelName: previewReport.modelName,
+            reportNo: previewReport.reportNo,
+            serialNo: previewReport.serialNo,
+            station: previewReport.station,
+            requestBy: previewReport.requestBy,
+            unitSource: previewReport.unitSource,
+          }}
           photoUrls={previewReport.photos || {}}
         />
       )}

@@ -165,7 +165,7 @@ export function addFieldUnit(unitData: Omit<FieldUnit, 'id' | 'createdAt' | 'upd
   return newUnit;
 }
 
-export function updateFieldUnitStatus(id: string, status: FieldUnit['status']): FieldUnit | null {
+export function updateFieldUnitStatus(id: string, status: FieldUnit['status'], doneHour?: number): FieldUnit | null {
   const formattedDate = getFormattedNow();
   let updatedUnit: FieldUnit | null = null;
 
@@ -191,6 +191,7 @@ export function updateFieldUnitStatus(id: string, status: FieldUnit['status']): 
       updatedUnit = {
         ...u,
         status,
+        ...(typeof doneHour === 'number' ? { doneHour } : {}),
         endDateTime: status === 'stopped' || status === 'finished' ? formattedDate : (status === 'live' ? undefined : u.endDateTime),
         observations: [...autoObs, ...existingObs],
         updatedAt: formattedDate

@@ -73,12 +73,12 @@ export const FieldUnitsModule: React.FC<FieldUnitsModuleProps> = ({
     };
   }, []);
 
-  const handleStop = (id: string) => {
-    updateFieldUnitStatus(id, 'stopped');
+  const handleStop = (id: string, currentElapsedHours?: number) => {
+    updateFieldUnitStatus(id, 'stopped', currentElapsedHours);
   };
 
-  const handlePass = (id: string) => {
-    updateFieldUnitStatus(id, 'finished');
+  const handlePass = (id: string, currentElapsedHours?: number) => {
+    updateFieldUnitStatus(id, 'finished', currentElapsedHours);
   };
 
   const handleResume = (id: string) => {
@@ -105,30 +105,135 @@ export const FieldUnitsModule: React.FC<FieldUnitsModuleProps> = ({
     return matchesSearch && unit.status === activeTab;
   });
 
-  const calculateProgress = (startDateTimeStr: string, requiredHour: number, initialDone: number = 0) => {
-    if (!startDateTimeStr || !requiredHour) {
+  const calculateProgress = (unit: FieldUnit) => {
+    const requiredHour = typeof unit.requiredHour === 'number' ? unit.requiredHour : parseFloat((unit as any).requiredHour) || 0;
+    const initialDone = typeof unit.doneHour === 'number' ? unit.doneHour : parseFloat((unit as any).doneHour) || 0;
+
+    if (!unit.startDateTime || !requiredHour) {
       const el = Math.min(requiredHour || 0, initialDone);
-      return { percent: requiredHour > 0 ? Math.min(100, Math.round((el / requiredHour) * 100)) : 0, elapsedHours: el, elapsedHHMM: formatHoursToHHMM(el) };
+      const pending = Math.max(0, (requiredHour || 0) - el);
+      return { 
+        percent: requiredHour > 0 ? Math.min(100, Math.round((el / requiredHour) * 100)) : 0, 
+        elapsedHours: el, 
+        elapsedHHMM: formatHoursToHHMM(el),
+        pendingHours: pending,
+        pendingHHMM: formatHoursToHHMM(pending)
+      };
     }
-    const dateFormatted = startDateTimeStr.includes('T') ? startDateTimeStr : startDateTimeStr.replace(' ', 'T');
+
+    const dateFormatted = unit.startDateTime.includes('T') ? unit.startDateTime : unit.startDateTime.replace(' ', 'T');
     const startDate = new Date(dateFormatted);
     if (isNaN(startDate.getTime())) {
       const el = Math.min(requiredHour, initialDone);
-      return { percent: Math.min(100, Math.round((el / requiredHour) * 100)), elapsedHours: el, elapsedHHMM: formatHoursToHHMM(el) };
+      const pending = Math.max(0, requiredHour - el);
+      return { 
+        percent: requiredHour > 0 ? Math.min(100, Math.round((el / requiredHour) * 100)) : 0, 
+        elapsedHours: el, 
+        elapsedHHMM: formatHoursToHHMM(el),
+        pendingHours: pending,
+        pendingHHMM: formatHoursToHHMM(pending)
+      };
+    }
+
+    if (unit.status === 'finished') {
+      if (typeof unit.doneHour === 'number' && unit.doneHour >= 0) {
+        const el = Math.min(requiredHour, unit.doneHour);
+        const pending = Math.max(0, requiredHour - el);
+        return {
+          percent: requiredHour > 0 ? Math.min(100, Math.round((el / requiredHour) * 100)) : 0,
+          elapsedHours: el,
+          elapsedHHMM: formatHoursToHHMM(el),
+          pendingHours: pending,
+          pendingHHMM: formatHoursToHHMM(pending)
+        };
+      }
+      let endMs = currentTime;
+      if (unit.endDateTime) {
+        const endFormatted = unit.endDateTime.includes('T') ? unit.endDateTime : unit.endDateTime.replace(' ', 'T');
+        const endDate = new Date(endFormatted);
+        if (!isNaN(endDate.getTime()) && endDate.getTime() >= startDate.getTime()) {
+          endMs = endDate.getTime();
+        }
+      } else if (unit.updatedAt) {
+        const upFormatted = unit.updatedAt.includes('T') ? unit.updatedAt : unit.updatedAt.replace(' ', 'T');
+        const upDate = new Date(upFormatted);
+        if (!isNaN(upDate.getTime()) && upDate.getTime() >= startDate.getTime()) {
+          endMs = upDate.getTime();
+        }
+      }
+      const shiftHours = calculateShiftElapsedExactHours(startDate.getTime(), endMs, activeShift);
+      const elapsedHours = Math.min(requiredHour, initialDone + shiftHours);
+      const pendingHours = Math.max(0, requiredHour - elapsedHours);
+      const percent = requiredHour > 0 ? Math.min(100, Math.round((elapsedHours / requiredHour) * 100)) : 0;
+      return {
+        percent,
+        elapsedHours,
+        elapsedHHMM: formatHoursToHHMM(elapsedHours),
+        pendingHours,
+        pendingHHMM: formatHoursToHHMM(pendingHours)
+      };
+    }
+
+    if (unit.status === 'stopped') {
+      if (typeof unit.doneHour === 'number' && unit.doneHour >= 0) {
+        const el = Math.min(requiredHour, unit.doneHour);
+        const pending = Math.max(0, requiredHour - el);
+        return {
+          percent: requiredHour > 0 ? Math.min(100, Math.round((el / requiredHour) * 100)) : 0,
+          elapsedHours: el,
+          elapsedHHMM: formatHoursToHHMM(el),
+          pendingHours: pending,
+          pendingHHMM: formatHoursToHHMM(pending)
+        };
+      }
+      let endMs = currentTime;
+      if (unit.endDateTime) {
+        const endFormatted = unit.endDateTime.includes('T') ? unit.endDateTime : unit.endDateTime.replace(' ', 'T');
+        const endDate = new Date(endFormatted);
+        if (!isNaN(endDate.getTime()) && endDate.getTime() >= startDate.getTime()) {
+          endMs = endDate.getTime();
+        }
+      } else if (unit.updatedAt) {
+        const upFormatted = unit.updatedAt.includes('T') ? unit.updatedAt : unit.updatedAt.replace(' ', 'T');
+        const upDate = new Date(upFormatted);
+        if (!isNaN(upDate.getTime()) && upDate.getTime() >= startDate.getTime()) {
+          endMs = upDate.getTime();
+        }
+      }
+      const shiftHours = calculateShiftElapsedExactHours(startDate.getTime(), endMs, activeShift);
+      const elapsedHours = Math.min(requiredHour, initialDone + shiftHours);
+      const pendingHours = Math.max(0, requiredHour - elapsedHours);
+      const percent = requiredHour > 0 ? Math.min(100, Math.round((elapsedHours / requiredHour) * 100)) : 0;
+      return {
+        percent,
+        elapsedHours,
+        elapsedHHMM: formatHoursToHHMM(elapsedHours),
+        pendingHours,
+        pendingHHMM: formatHoursToHHMM(pendingHours)
+      };
     }
 
     const nowTime = currentTime;
     if (nowTime <= startDate.getTime()) {
       const el = Math.min(requiredHour, initialDone);
-      return { percent: Math.min(100, Math.round((el / requiredHour) * 100)), elapsedHours: el, elapsedHHMM: formatHoursToHHMM(el) };
+      const pending = Math.max(0, requiredHour - el);
+      return { 
+        percent: requiredHour > 0 ? Math.min(100, Math.round((el / requiredHour) * 100)) : 0, 
+        elapsedHours: el, 
+        elapsedHHMM: formatHoursToHHMM(el),
+        pendingHours: pending,
+        pendingHHMM: formatHoursToHHMM(pending)
+      };
     }
 
     const shiftHours = calculateShiftElapsedExactHours(startDate.getTime(), nowTime, activeShift);
     const elapsedHours = Math.min(requiredHour, initialDone + shiftHours);
-    const percent = Math.min(100, Math.round((elapsedHours / requiredHour) * 100));
+    const pendingHours = Math.max(0, requiredHour - elapsedHours);
+    const percent = requiredHour > 0 ? Math.min(100, Math.round((elapsedHours / requiredHour) * 100)) : 0;
     const elapsedHHMM = formatHoursToHHMM(elapsedHours);
+    const pendingHHMM = formatHoursToHHMM(pendingHours);
 
-    return { percent, elapsedHours, elapsedHHMM };
+    return { percent, elapsedHours, elapsedHHMM, pendingHours, pendingHHMM };
   };
 
   return (
@@ -222,7 +327,7 @@ export const FieldUnitsModule: React.FC<FieldUnitsModuleProps> = ({
       {filteredUnits.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {filteredUnits.map((unit) => {
-            const { percent, elapsedHours, elapsedHHMM } = calculateProgress(unit.startDateTime, unit.requiredHour, unit.doneHour || 0);
+            const { percent, elapsedHours, elapsedHHMM, pendingHours, pendingHHMM } = calculateProgress(unit);
 
             return (
               <div
@@ -257,9 +362,9 @@ export const FieldUnitsModule: React.FC<FieldUnitsModuleProps> = ({
                             <span>⏸ PAUSED</span>
                           )
                         ) : unit.status === 'stopped' ? (
-                          <span>⏸ STOPPED</span>
+                          <span>⏸ STOPPED ({percent}%)</span>
                         ) : (
-                          <span>✓ PASSED</span>
+                          <span>✓ PASSED ({percent}%)</span>
                         )}
                       </span>
 
@@ -318,6 +423,19 @@ export const FieldUnitsModule: React.FC<FieldUnitsModuleProps> = ({
                     )}
                   </div>
 
+                  {/* Separate Horizontal Row for Done & Pending Hours */}
+                  <div className="flex items-center justify-between gap-2 text-xs font-mono bg-slate-950/90 px-3.5 py-2 rounded-xl border border-slate-800/80">
+                    <div className="flex items-center gap-1.5 text-emerald-400 font-bold">
+                      <span>✅ Done:</span>
+                      <span className="text-emerald-300 font-black">{elapsedHHMM}</span>
+                    </div>
+                    <div className="h-3 w-[1px] bg-slate-800" />
+                    <div className="flex items-center gap-1.5 text-amber-300 font-bold">
+                      <span>⏳ Pending:</span>
+                      <span className="text-amber-200 font-black">{pendingHHMM}</span>
+                    </div>
+                  </div>
+
                   {/* Time Progress Bar */}
                   <div className="space-y-1.5 bg-slate-950/80 p-3 rounded-xl border border-slate-800/80">
                     <div className="flex justify-between items-center text-[11px] font-bold">
@@ -334,9 +452,9 @@ export const FieldUnitsModule: React.FC<FieldUnitsModuleProps> = ({
                       />
                     </div>
 
-
                     <div className="flex justify-between text-[10px] font-mono">
-                      <span className="text-emerald-400 font-bold">Elapsed: {elapsedHHMM}</span>
+                      <span className="text-emerald-400 font-bold">Done: {elapsedHHMM}</span>
+                      <span className="text-amber-400 font-bold">Pending: {pendingHHMM}</span>
                       <span className="text-slate-400">Target: {unit.requiredHour} hrs</span>
                     </div>
                   </div>
@@ -348,7 +466,7 @@ export const FieldUnitsModule: React.FC<FieldUnitsModuleProps> = ({
                   
                   {unit.status === 'live' && (
                     <button
-                      onClick={() => handleStop(unit.id)}
+                      onClick={() => handleStop(unit.id, elapsedHours)}
                       className="flex-1 flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl text-xs font-extrabold text-amber-300 bg-amber-950/90 hover:bg-amber-900 border border-amber-800/80 transition-all cursor-pointer active:scale-95 shadow-sm"
                       title="Stop Field Test"
                     >
@@ -370,7 +488,7 @@ export const FieldUnitsModule: React.FC<FieldUnitsModuleProps> = ({
 
                   {unit.status !== 'finished' && (
                     <button
-                      onClick={() => handlePass(unit.id)}
+                      onClick={() => handlePass(unit.id, elapsedHours)}
                       className="flex-1 flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl text-xs font-extrabold text-emerald-300 bg-emerald-950/90 hover:bg-emerald-900 border border-emerald-800/80 transition-all cursor-pointer active:scale-95 shadow-sm"
                       title="Pass Field Test"
                     >

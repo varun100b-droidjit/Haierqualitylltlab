@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import { 
   X, 
   Download, 
@@ -6,11 +6,19 @@ import {
   Printer, 
   CheckCircle2, 
   Sparkles,
-  Award,
   Layers,
   Cpu,
   Package,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Clock,
+  Search,
+  Check,
+  Copy,
+  Maximize2,
+  FileCheck,
+  Eye,
+  LayoutGrid,
+  FileSpreadsheet
 } from 'lucide-react';
 import { downloadFile, downloadElementAsPdf, generateDocxBlob, generateReportBundleZip } from '../../utils/docxGenerator';
 import { MasterTemplate, getMasterTemplate } from '../../services/reportTemplateStore';
@@ -29,13 +37,170 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
   onClose,
   masterTemplate,
   reportTitle,
-  unitData,
-  photoUrls
+  unitData = {},
+  photoUrls = {}
 }) => {
   const previewContainerRef = useRef<HTMLDivElement>(null);
-  const [isZipping, setIsZipping] = React.useState(false);
+  const printableDocRef = useRef<HTMLDivElement>(null);
+  const [isZipping, setIsZipping] = useState(false);
+  const [activeTab, setActiveTab] = useState<'all' | 'general' | 'dates' | 'nameplate' | 'parts' | 'photos' | 'conclusion'>('all');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [viewMode, setViewMode] = useState<'form' | 'document'>('form');
+  const [selectedPhotoModal, setSelectedPhotoModal] = useState<{ label: string; url: string } | null>(null);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   if (!isOpen) return null;
+
+  // Safe helper to extract values from unitData with fuzzy fallbacks
+  const getVal = (keys: string[], fallback = '—'): string => {
+    if (!unitData) return fallback;
+    for (const k of keys) {
+      if (unitData[k] !== undefined && unitData[k] !== null && String(unitData[k]).trim() !== '' && String(unitData[k]).trim() !== 'undefined') {
+        return String(unitData[k]);
+      }
+    }
+    return fallback;
+  };
+
+  // Safe helper to extract photo URLs
+  const getPhotoUrl = (keys: string[]): string => {
+    if (!photoUrls) return '';
+    for (const k of keys) {
+      if (photoUrls[k] && typeof photoUrls[k] === 'string' && photoUrls[k].trim() !== '' && photoUrls[k] !== 'NA' && photoUrls[k] !== 'undefined') {
+        return photoUrls[k];
+      }
+    }
+    return '';
+  };
+
+  // Form Fields Definition
+  const formGeneral = [
+    { label: 'Model Name', value: getVal(['Model_Name', 'modelName', 'Model', 'model']), keyTag: '{{Model_Name}}', color: 'text-white font-bold' },
+    { label: 'Report Number', value: getVal(['Report_No', 'reportNo', 'Report_Number', 'reportNumber']), keyTag: '{{Report_No}}', color: 'text-cyan-300 font-mono font-bold' },
+    { label: 'Sample Type', value: getVal(['Sample_Type', 'sampleType', 'Sample Type']), keyTag: '{{Sample_Type}}', color: 'text-cyan-200' },
+    { label: 'Testing Station', value: getVal(['Station', 'station', 'Testing_Station']), keyTag: '{{Station}}', color: 'text-white' },
+    { label: 'IDU Serial Number', value: getVal(['IDU_Serial_Number', 'iduSerialNumber', 'iduSerialNo', 'iduSerial', 'Serial_No', 'serialNo']), keyTag: '{{IDU_Serial_Number}}', color: 'text-emerald-300 font-mono' },
+    { label: 'ODU Serial Number', value: getVal(['ODU_Serial_Number', 'oduSerialNumber', 'oduSerialNo', 'oduSerial']), keyTag: '{{ODU_Serial_Number}}', color: 'text-emerald-300 font-mono' },
+    { label: 'Requested By', value: getVal(['Request_By', 'requestBy', 'Requested_By']), keyTag: '{{Request_By}}', color: 'text-white' },
+    { label: 'Test Purpose', value: getVal(['Test_Purpose', 'testPurpose', 'purpose']), keyTag: '{{Test_Purpose}}', color: 'text-slate-200' },
+    { label: 'Required Hours', value: getVal(['Required_Hour', 'requiredHour', 'Required_Hours', 'requiredHours']), keyTag: '{{Required_Hour}}', color: 'text-amber-300 font-mono' },
+    { label: 'Done Hours', value: getVal(['Done_Hour', 'doneHour', 'Done_Hours', 'doneHours']), keyTag: '{{Done_Hour}}', color: 'text-emerald-400 font-mono' },
+    { label: 'Material Code', value: getVal(['Material_Code', 'materialCode']), keyTag: '{{Material_Code}}', color: 'text-slate-300 font-mono' },
+    { label: 'Version / Revision', value: getVal(['Version', 'version', 'Revision']), keyTag: '{{Version}}', color: 'text-slate-300 font-mono' },
+  ];
+
+  const formDates = [
+    { label: 'Sample Received Date', value: getVal(['Sample_Received_Date', 'Sample_Received', 'sampleReceivedDate']), keyTag: '{{Sample_Received_Date}}', color: 'text-slate-200 font-mono' },
+    { label: 'Test Commenced Date', value: getVal(['Test_Commenced_Date', 'Test_Commenced', 'testCommencedDate']), keyTag: '{{Test_Commenced_Date}}', color: 'text-slate-200 font-mono' },
+    { label: 'Test Completed Date', value: getVal(['Test_Completed_Date', 'Test_Completed', 'testCompletedDate']), keyTag: '{{Test_Completed_Date}}', color: 'text-slate-200 font-mono' },
+  ];
+
+  const formNameplate = [
+    { label: 'Cooling Capacity', value: getVal(['Cooling_Capacity', 'Cooling_capacity', 'coolingCapacity']), keyTag: '{{Cooling_Capacity}}', color: 'text-cyan-300 font-bold' },
+    { label: 'Rated Power', value: getVal(['Rated_Power', 'ratedPower']), keyTag: '{{Rated_Power}}', color: 'text-white' },
+    { label: 'Rated Current', value: getVal(['Rated_Current', 'ratedCurrent']), keyTag: '{{Rated_Current}}', color: 'text-white' },
+    { label: 'Voltage / Supply', value: getVal(['Voltage', 'voltage']), keyTag: '{{Voltage}}', color: 'text-white' },
+    { label: 'Refrigerant', value: getVal(['Refrigerant', 'refrigerant']), keyTag: '{{Refrigerant}}', color: 'text-emerald-300 font-mono' },
+    { label: 'Gas Quantity', value: getVal(['Gas_Qty', 'gasQty', 'Gas_Quantity']), keyTag: '{{Gas_Qty}}', color: 'text-white' },
+    { label: 'ISEER / Rating', value: getVal(['ISEER', 'iseer', 'ISEER_Rating']), keyTag: '{{ISEER}}', color: 'text-emerald-400 font-bold' },
+    { label: 'Power Mode', value: getVal(['Power_mode', 'Power_Mode', 'powerMode']), keyTag: '{{Power_mode}}', color: 'text-white' },
+    { label: 'Gas Injection Vol', value: getVal(['Gas_injection_Volume', 'Gas_Injection_Volume', 'gasInjectionVolume']), keyTag: '{{Gas_injection_Volume}}', color: 'text-slate-300 font-mono' },
+    { label: 'IDU Main Checksum', value: getVal(['Main_Program_Checksum_IDU', 'mainProgramChecksumIdu']), keyTag: '{{Main_Program_Checksum_IDU}}', color: 'text-cyan-300 font-mono' },
+    { label: 'ODU Main Checksum', value: getVal(['Main_Program_Checksum_ODU', 'mainProgramChecksumOdu']), keyTag: '{{Main_Program_Checksum_ODU}}', color: 'text-cyan-300 font-mono' },
+    { label: 'IDU EE Checksum', value: getVal(['EE_Checksum_IDU', 'eeChecksumIdu']), keyTag: '{{EE_Checksum_IDU}}', color: 'text-indigo-300 font-mono' },
+    { label: 'ODU EE Checksum', value: getVal(['EE_Checksum_ODU', 'eeChecksumOdu']), keyTag: '{{EE_Checksum_ODU}}', color: 'text-indigo-300 font-mono' },
+  ];
+
+  const formParts = [
+    {
+      title: 'IDU Fan Motor',
+      accentColor: 'text-cyan-300',
+      spec: getVal(['IDU_Motor_Spec', 'iduMotorSpec']),
+      partCode: getVal(['IDU_Motor_Part_Code', 'iduMotorPartCode']),
+      supplier: getVal(['IDU_Motor_Supplier', 'iduMotorSupplier']),
+    },
+    {
+      title: 'IDU Main PCB',
+      accentColor: 'text-cyan-300',
+      spec: 'Main Control Micro-Controller Board',
+      partCode: getVal(['IDU_PCB_Part_Code', 'iduPcbPartCode']),
+      supplier: getVal(['IDU_PCB_Supplier', 'iduPcbSupplier']),
+    },
+    {
+      title: 'ODU Fan Motor',
+      accentColor: 'text-indigo-300',
+      spec: getVal(['ODU_Motor_Spec', 'oduMotorSpec']),
+      partCode: getVal(['ODU_Motor_Part_Code', 'oduMotorPartCode']),
+      supplier: getVal(['ODU_Motor_Supplier', 'oduMotorSupplier']),
+    },
+    {
+      title: 'ODU Inverter PCB',
+      accentColor: 'text-indigo-300',
+      spec: 'Inverter Drive Power Board',
+      partCode: getVal(['ODU_PCB_Part_Code', 'oduPcbPartCode']),
+      supplier: getVal(['ODU_PCB_Supplier', 'oduPcbSupplier']),
+    },
+    {
+      title: 'Compressor',
+      accentColor: 'text-emerald-300',
+      spec: getVal(['Compressor_Spec', 'Compressor _Spec', 'compressorSpec']),
+      partCode: getVal(['Compressor_Part_Code', 'compressorPartCode']),
+      supplier: getVal(['Compressor_Supplier', 'compressorSupplier']),
+    },
+    {
+      title: 'Electronic Expansion Valve (EEV)',
+      accentColor: 'text-emerald-300',
+      spec: getVal(['EEV_Spec', 'eevSpec']),
+      partCode: getVal(['EEV_Part_Code', 'eevPartCode']),
+      supplier: getVal(['EEV_Supplier', 'eevSupplier']),
+    },
+  ];
+
+  const photoCategories = [
+    {
+      name: 'Packaging & Unboxing',
+      icon: '📦',
+      photos: [
+        { label: 'Product Packing', key: 'PHOTO_Product_Packing', url: getPhotoUrl(['PHOTO_Product_Packing', 'PHOTO_PRODUCT_PACKING', 'productPhoto', 'productPacking']) },
+        { label: 'Packing Box', key: 'PHOTO_Packing_Box', url: getPhotoUrl(['PHOTO_Packing_Box', 'PHOTO_PACKING_BOX', 'packingBoxPhoto', 'packingBox']) },
+      ]
+    },
+    {
+      name: 'Indoor Unit (IDU) Assembly',
+      icon: '🏢',
+      photos: [
+        { label: 'IDU Motor', key: 'PHOTO_IDU_Motor', url: getPhotoUrl(['PHOTO_IDU_Motor', 'PHOTO_IDU_MOTOR', 'iduMotorPhoto', 'motorPhoto']) },
+        { label: 'IDU PCB', key: 'PHOTO_IDU_PCB', url: getPhotoUrl(['PHOTO_IDU_PCB', 'PHOTO_IDU_Pcb', 'iduPcbPhoto']) },
+        { label: 'IDU Name Plate', key: 'PHOTO_IDU_Product_Name_Plate', url: getPhotoUrl(['PHOTO_IDU_Product_Name_Plate', 'PHOTO_IDU_PRODUCT_NAME_PLATE', 'PHOTO_IDU_Name_Plate', 'iduNameplatePhoto']) },
+        { label: 'Remote', key: 'PHOTO_Remote', url: getPhotoUrl(['PHOTO_Remote', 'PHOTO_REMOTE', 'remotePhoto', 'stickerPhoto']) },
+      ]
+    },
+    {
+      name: 'Outdoor Unit (ODU) Assembly',
+      icon: '⚙️',
+      photos: [
+        { label: 'ODU Name Plate', key: 'PHOTO_ODU_Name_Plate', url: getPhotoUrl(['PHOTO_ODU_Name_Plate', 'PHOTO_ODU_NAME_PLATE', 'oduNameplatePhoto']) },
+        { label: 'ODU Motor', key: 'PHOTO_ODU_Motor', url: getPhotoUrl(['PHOTO_ODU_Motor', 'PHOTO_ODU_MOTOR', 'oduMotorPhoto']) },
+        { label: 'ODU PCB', key: 'PHOTO_ODU_PCB', url: getPhotoUrl(['PHOTO_ODU_PCB', 'PHOTO_ODU_Pcb', 'oduPcbPhoto']) },
+      ]
+    },
+    {
+      name: 'Refrigeration & Expansion Circuit',
+      icon: '❄️',
+      photos: [
+        { label: 'Electronic Expansion Valve (EEV)', key: 'PHOTO_Electronic_Expansion_Valve', url: getPhotoUrl(['PHOTO_Electronic_Expansion_Valve', 'PHOTO_ELECTRONIC_EXPANSION_VALVE', 'PHOTO_EEV', 'oduEevPhoto', 'eevPhoto']) },
+        { label: 'ODU Compressor', key: 'PHOTO_ODU_Compressor', url: getPhotoUrl(['PHOTO_ODU_Compressor', 'PHOTO_Compressor', 'oduCompressorPhoto', 'compressorPhoto']) },
+      ]
+    }
+  ];
+
+  const totalPhotosAttached = photoCategories.reduce((acc, cat) => acc + cat.photos.filter(p => !!p.url).length, 0);
+
+  const testConclusion = getVal(['Test_Conclusion', 'testConclusion', 'conclusion'], 'Sample unit underwent complete performance and thermal stress testing according to standard protocols. All components and electrical parameters met design specifications without defects.');
+  const remarks = getVal(['Remarks', 'remarks'], 'Quality Lab Certified Pass. Verified by Testing Incharge.');
+
+  const modelName = getVal(['Model_Name', 'modelName', 'Model'], 'Proto Unit');
+  const reportNo = getVal(['Report_No', 'reportNo'], 'REP-2026-001');
 
   const getEffectiveTemplate = (): MasterTemplate | null => {
     if (masterTemplate && masterTemplate.base64Data) return masterTemplate;
@@ -52,7 +217,7 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
 
     try {
       const docxBlob = generateDocxBlob(tpl.base64Data, unitData, photoUrls);
-      const safeName = (unitData.Model_Name || unitData.modelName || 'Proto_Unit').replace(/\s+/g, '_');
+      const safeName = modelName.replace(/\s+/g, '_');
       downloadFile(docxBlob, `${reportTitle.replace(/\s+/g, '_')}_${safeName}.docx`);
     } catch (err) {
       console.error(err);
@@ -85,40 +250,96 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
   };
 
   const handleDownloadPdf = async () => {
-    if (!previewContainerRef.current) return;
-    const safeName = (unitData.Model_Name || unitData.modelName || 'Proto_Unit').replace(/\s+/g, '_');
-    await downloadElementAsPdf(previewContainerRef.current, `${reportTitle.replace(/\s+/g, '_')}_${safeName}.pdf`);
+    const target = printableDocRef.current || previewContainerRef.current;
+    if (!target) return;
+    const safeName = modelName.replace(/\s+/g, '_');
+    await downloadElementAsPdf(target, `${reportTitle.replace(/\s+/g, '_')}_${safeName}.pdf`);
+  };
+
+  const handleCopyValue = (val: string, keyId: string) => {
+    if (!val || val === '—') return;
+    navigator.clipboard.writeText(val);
+    setCopiedKey(keyId);
+    setTimeout(() => setCopiedKey(null), 1500);
+  };
+
+  const q = searchQuery.toLowerCase().trim();
+  const matchFilter = (label: string, val: string) => {
+    if (!q) return true;
+    return label.toLowerCase().includes(q) || val.toLowerCase().includes(q);
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
-      <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-5xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden my-auto animate-in fade-in zoom-in-95">
+    <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 md:p-6 overflow-y-auto">
+      <div 
+        ref={previewContainerRef}
+        className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-6xl max-h-[94vh] flex flex-col shadow-2xl overflow-hidden my-auto animate-in fade-in zoom-in-95"
+      >
         
-        {/* Modal Top Toolbar */}
-        <div className="p-4 sm:p-5 bg-slate-950 border-b border-slate-800 flex items-center justify-between gap-4 shrink-0">
+        {/* Top Header & Action Bar */}
+        <div className="p-4 sm:p-5 bg-slate-950 border-b border-slate-800 flex items-center justify-between gap-3 shrink-0 flex-wrap">
           <div className="flex items-center gap-3">
-            <div className="p-2 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 text-white font-bold shadow-md">
+            <div className="p-2.5 rounded-2xl bg-gradient-to-r from-cyan-600 to-blue-600 text-white font-bold shadow-lg shadow-cyan-900/30">
               <FileText className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-base font-black text-white flex items-center gap-2">
-                <span>{reportTitle}</span>
-                <span className="text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-0.5 rounded-full font-bold uppercase">
-                  Live Preview
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-base sm:text-lg font-black text-white tracking-wide">
+                  {reportTitle}
+                </h2>
+                <span className="text-[10px] bg-cyan-950 text-cyan-300 border border-cyan-800 px-2 py-0.5 rounded-full font-mono font-bold">
+                  #{reportNo}
                 </span>
-              </h2>
-              <p className="text-xs text-slate-400">
-                Official Laboratory Inspection Report Preview
+                <span className="text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-0.5 rounded-full font-bold uppercase flex items-center gap-1">
+                  <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                  Verified Preview
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 flex items-center gap-2 mt-0.5">
+                <span className="font-semibold text-slate-300">{modelName}</span>
+                <span>•</span>
+                <span>Industrial Testing &amp; Compliance Data</span>
+                <span>•</span>
+                <span className="text-cyan-400 font-mono font-bold">{totalPhotosAttached}/11 Photos</span>
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
+            {/* View Mode Toggle */}
+            <div className="bg-slate-900 p-1 rounded-xl border border-slate-800 flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setViewMode('form')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                  viewMode === 'form'
+                    ? 'bg-cyan-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <LayoutGrid className="w-3.5 h-3.5" />
+                <span>Form UI</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('document')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                  viewMode === 'document'
+                    ? 'bg-cyan-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+                <span>A4 Sheet</span>
+              </button>
+            </div>
+
+            {/* Download Package (.ZIP) */}
             <button
               type="button"
               disabled={isZipping}
               onClick={handleDownloadZipPackage}
-              className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-black text-xs flex items-center gap-1.5 shadow-md transition-all active:scale-95 cursor-pointer ring-1 ring-cyan-400/40"
+              className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-black text-xs flex items-center gap-1.5 shadow-md shadow-cyan-900/30 transition-all active:scale-95 cursor-pointer ring-1 ring-cyan-400/40"
               title="Download full package with DOCX report and named Photos folder"
             >
               {isZipping ? (
@@ -126,371 +347,600 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
               ) : (
                 <Package className="w-4 h-4" />
               )}
-              <span className="hidden sm:inline">{isZipping ? 'Packing...' : 'Download Package (.ZIP)'}</span>
+              <span className="hidden sm:inline">{isZipping ? 'Packing...' : 'Download ZIP'}</span>
             </button>
 
+            {/* DOCX */}
             <button
               type="button"
               onClick={handleDownloadDocx}
               className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-xs flex items-center gap-1.5 shadow-sm transition-all active:scale-95 cursor-pointer"
+              title="Download DOCX Report"
             >
-              <Download className="w-4 h-4 text-cyan-400" />
+              <Download className="w-3.5 h-3.5 text-cyan-400" />
               <span className="hidden sm:inline">DOCX</span>
             </button>
 
+            {/* PDF */}
             <button
               type="button"
               onClick={handleDownloadPdf}
               className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-xs flex items-center gap-1.5 shadow-sm transition-all active:scale-95 cursor-pointer"
+              title="Print or Save PDF"
             >
-              <Printer className="w-4 h-4 text-indigo-400" />
+              <Printer className="w-3.5 h-3.5 text-indigo-400" />
               <span className="hidden sm:inline">PDF</span>
             </button>
 
+            {/* Close */}
             <button
               type="button"
               onClick={onClose}
               className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+              title="Close Preview"
             >
               <X className="w-5 h-5" />
             </button>
           </div>
         </div>
 
-        {/* Modal Content / Printable Document Area */}
-        <div className="flex-1 p-4 sm:p-8 overflow-y-auto bg-slate-950/60">
-          <div 
-            ref={previewContainerRef}
-            className="max-w-4xl mx-auto bg-white text-slate-900 rounded-xl shadow-2xl p-6 sm:p-12 space-y-8 font-sans border border-slate-200"
-            style={{ minHeight: '1000px' }}
-          >
-            {/* Document Header */}
-            <div className="border-b-4 border-cyan-800 pb-5 flex items-start justify-between gap-4">
+        {/* ===================== VIEW MODE: FORM UI (Default) ===================== */}
+        {viewMode === 'form' ? (
+          <div className="flex-1 flex flex-col overflow-hidden">
+            {/* Category Navigation Bar & Search */}
+            <div className="p-3 bg-slate-950/70 border-b border-slate-800/80 flex items-center justify-between gap-3 overflow-x-auto shrink-0">
+              <div className="flex items-center gap-1.5 flex-nowrap shrink-0">
+                {[
+                  { id: 'all', label: 'All Sections' },
+                  { id: 'general', label: '1. General Info' },
+                  { id: 'dates', label: '2. Dates & Schedule' },
+                  { id: 'nameplate', label: '3. Nameplate Specs' },
+                  { id: 'parts', label: '4. Critical Parts' },
+                  { id: 'photos', label: `5. Photographs (${totalPhotosAttached}/11)` },
+                  { id: 'conclusion', label: '6. Conclusion' },
+                ].map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setActiveTab(tab.id as any)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+                      activeTab === tab.id
+                        ? 'bg-cyan-950 text-cyan-300 border border-cyan-800 shadow-sm'
+                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900 border border-transparent'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Quick Search inside preview */}
+              <div className="relative w-48 sm:w-56 shrink-0">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Filter parameters..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-8 pr-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-cyan-500 transition-colors"
+                />
+                {searchQuery && (
+                  <button
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Scrollable Form Content */}
+            <div className="flex-1 p-4 sm:p-6 overflow-y-auto space-y-6 bg-slate-950/40">
+              
+              {/* SECTION 1: General & Identification Information */}
+              {(activeTab === 'all' || activeTab === 'general') && (
+                <div className="p-4 sm:p-5 rounded-2xl bg-slate-900/60 border border-slate-800/80 space-y-4">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+                    <span className="text-xs sm:text-sm font-black text-cyan-400 uppercase tracking-wider flex items-center gap-2">
+                      <FileCheck className="w-4 h-4 text-cyan-400" />
+                      1. General &amp; Identification Information
+                    </span>
+                    <span className="text-[11px] text-slate-500 font-mono font-bold">12 Parameters</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+                    {formGeneral.filter(item => matchFilter(item.label, item.value)).map((item, idx) => (
+                      <div key={idx} className="space-y-1.5 bg-slate-950/80 p-2.5 rounded-xl border border-slate-800/90 group hover:border-slate-700 transition-all">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">
+                            {item.label}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleCopyValue(item.value, `gen-${idx}`)}
+                            className="text-slate-500 hover:text-cyan-300 transition-colors p-0.5 cursor-pointer opacity-0 group-hover:opacity-100"
+                            title="Copy Value"
+                          >
+                            {copiedKey === `gen-${idx}` ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                          </button>
+                        </div>
+                        <div className="bg-slate-900/90 border border-slate-800 rounded-lg p-2 flex items-center justify-between min-h-[34px]">
+                          <span className={`${item.color} text-xs truncate max-w-full font-medium`}>
+                            {item.value}
+                          </span>
+                          <span className="text-[8px] font-mono text-slate-600 ml-1 shrink-0">{item.keyTag}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* SECTION 2: Dates & Schedule */}
+              {(activeTab === 'all' || activeTab === 'dates') && (
+                <div className="p-4 sm:p-5 rounded-2xl bg-slate-900/60 border border-slate-800/80 space-y-4">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+                    <span className="text-xs sm:text-sm font-black text-indigo-400 uppercase tracking-wider flex items-center gap-2">
+                      <Clock className="w-4 h-4 text-indigo-400" />
+                      2. Testing Dates &amp; Timeline
+                    </span>
+                    <span className="text-[11px] text-slate-500 font-mono font-bold">3 Parameters</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                    {formDates.filter(item => matchFilter(item.label, item.value)).map((item, idx) => (
+                      <div key={idx} className="space-y-1.5 bg-slate-950/80 p-2.5 rounded-xl border border-slate-800/90 group hover:border-slate-700 transition-all">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">
+                            {item.label}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleCopyValue(item.value, `date-${idx}`)}
+                            className="text-slate-500 hover:text-cyan-300 transition-colors p-0.5 cursor-pointer opacity-0 group-hover:opacity-100"
+                            title="Copy Value"
+                          >
+                            {copiedKey === `date-${idx}` ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                          </button>
+                        </div>
+                        <div className="bg-slate-900/90 border border-slate-800 rounded-lg p-2 flex items-center justify-between min-h-[34px]">
+                          <span className={`${item.color} text-xs truncate max-w-full font-medium`}>
+                            {item.value}
+                          </span>
+                          <span className="text-[8px] font-mono text-slate-600 ml-1 shrink-0">{item.keyTag}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* SECTION 3: Nameplate Specifications & Electrical Parameters */}
+              {(activeTab === 'all' || activeTab === 'nameplate') && (
+                <div className="p-4 sm:p-5 rounded-2xl bg-slate-900/60 border border-slate-800/80 space-y-4">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+                    <span className="text-xs sm:text-sm font-black text-amber-400 uppercase tracking-wider flex items-center gap-2">
+                      <Layers className="w-4 h-4 text-amber-400" />
+                      3. Nameplate Specifications &amp; Ratings
+                    </span>
+                    <span className="text-[11px] text-slate-500 font-mono font-bold">13 Parameters</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+                    {formNameplate.filter(item => matchFilter(item.label, item.value)).map((item, idx) => (
+                      <div key={idx} className="space-y-1.5 bg-slate-950/80 p-2.5 rounded-xl border border-slate-800/90 group hover:border-slate-700 transition-all">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">
+                            {item.label}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleCopyValue(item.value, `np-${idx}`)}
+                            className="text-slate-500 hover:text-cyan-300 transition-colors p-0.5 cursor-pointer opacity-0 group-hover:opacity-100"
+                            title="Copy Value"
+                          >
+                            {copiedKey === `np-${idx}` ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                          </button>
+                        </div>
+                        <div className="bg-slate-900/90 border border-slate-800 rounded-lg p-2 flex items-center justify-between min-h-[34px]">
+                          <span className={`${item.color} text-xs truncate max-w-full font-medium`}>
+                            {item.value}
+                          </span>
+                          <span className="text-[8px] font-mono text-slate-600 ml-1 shrink-0">{item.keyTag}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* SECTION 4: Critical Parts & Components */}
+              {(activeTab === 'all' || activeTab === 'parts') && (
+                <div className="p-4 sm:p-5 rounded-2xl bg-slate-900/60 border border-slate-800/80 space-y-4">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+                    <span className="text-xs sm:text-sm font-black text-emerald-400 uppercase tracking-wider flex items-center gap-2">
+                      <Cpu className="w-4 h-4 text-emerald-400" />
+                      4. Critical Parts &amp; Components (Spec, Part Code, Supplier)
+                    </span>
+                    <span className="text-[11px] text-slate-500 font-mono font-bold">6 Sub-Assemblies</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 text-xs">
+                    {formParts.map((part, idx) => (
+                      <div key={idx} className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-2.5 hover:border-slate-700 transition-all">
+                        <span className={`text-xs font-black ${part.accentColor} uppercase tracking-wider block border-b border-slate-800/80 pb-1.5`}>
+                          {part.title}
+                        </span>
+                        
+                        <div className="space-y-2">
+                          <div className="bg-slate-900/80 p-2 rounded-lg border border-slate-800/80">
+                            <span className="text-[9px] text-slate-400 uppercase font-bold block mb-0.5">Specification:</span>
+                            <span className="text-white text-xs font-medium block truncate">{part.spec}</span>
+                          </div>
+
+                          <div className="bg-slate-900/80 p-2 rounded-lg border border-slate-800/80">
+                            <span className="text-[9px] text-slate-400 uppercase font-bold block mb-0.5">Part Code:</span>
+                            <span className="text-cyan-300 font-mono text-xs font-bold block truncate">{part.partCode}</span>
+                          </div>
+
+                          <div className="bg-slate-900/80 p-2 rounded-lg border border-slate-800/80">
+                            <span className="text-[9px] text-slate-400 uppercase font-bold block mb-0.5">Supplier:</span>
+                            <span className="text-slate-200 text-xs font-medium block truncate">{part.supplier}</span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* SECTION 5: Sample Photographs Gallery */}
+              {(activeTab === 'all' || activeTab === 'photos') && (
+                <div className="p-4 sm:p-5 rounded-2xl bg-slate-900/60 border border-slate-800/80 space-y-5">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+                    <span className="text-xs sm:text-sm font-black text-cyan-400 uppercase tracking-wider flex items-center gap-2">
+                      <ImageIcon className="w-4 h-4 text-cyan-400" />
+                      5. Inspection Photographs Gallery
+                    </span>
+                    <span className="text-[11px] font-bold text-cyan-300 bg-cyan-950/80 px-2.5 py-0.5 rounded-full border border-cyan-800">
+                      {totalPhotosAttached} Attached of 11 Total
+                    </span>
+                  </div>
+
+                  <div className="space-y-6">
+                    {photoCategories.map((cat, cIdx) => (
+                      <div key={cIdx} className="space-y-2.5">
+                        <div className="flex items-center gap-2 border-b border-slate-800/80 pb-1.5">
+                          <span className="text-sm">{cat.icon}</span>
+                          <h4 className="text-xs font-black uppercase tracking-wider text-slate-300">
+                            {cat.name}
+                          </h4>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+                          {cat.photos.map((item, pIdx) => {
+                            const hasPhoto = !!item.url;
+                            return (
+                              <div 
+                                key={pIdx}
+                                className="bg-slate-950 border border-slate-800/90 p-3 rounded-2xl flex flex-col items-center space-y-2 group hover:border-cyan-500/60 transition-all shadow-sm"
+                              >
+                                <div className="flex items-center justify-between w-full px-1">
+                                  <span className="text-[11px] font-bold text-slate-200 truncate max-w-[140px]">
+                                    {item.label}
+                                  </span>
+                                  {hasPhoto ? (
+                                    <span className="text-[9px] font-bold text-emerald-300 bg-emerald-950 px-1.5 py-0.5 rounded border border-emerald-800">
+                                      Attached
+                                    </span>
+                                  ) : (
+                                    <span className="text-[9px] font-semibold text-slate-500 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800">
+                                      Empty
+                                    </span>
+                                  )}
+                                </div>
+
+                                <div 
+                                  onClick={() => hasPhoto && setSelectedPhotoModal({ label: item.label, url: item.url })}
+                                  className={`w-full aspect-[4/3] max-h-[160px] bg-slate-900/90 border border-slate-800 rounded-xl overflow-hidden flex items-center justify-center relative shadow-inner ${
+                                    hasPhoto ? 'cursor-pointer group-hover:shadow-lg group-hover:shadow-cyan-950/40' : ''
+                                  }`}
+                                >
+                                  {hasPhoto ? (
+                                    <>
+                                      <img 
+                                        src={item.url} 
+                                        alt={item.label} 
+                                        className="w-full h-full object-contain p-1.5 transition-transform duration-300 group-hover:scale-105" 
+                                      />
+                                      <div className="absolute inset-0 bg-slate-950/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white backdrop-blur-[1px]">
+                                        <div className="p-1.5 rounded-lg bg-slate-900/90 border border-slate-700 text-cyan-300 flex items-center gap-1 text-[10px] font-bold shadow-md">
+                                          <Maximize2 className="w-3.5 h-3.5" />
+                                          <span>Zoom</span>
+                                        </div>
+                                      </div>
+                                    </>
+                                  ) : (
+                                    <div className="text-[10px] text-slate-500 font-medium text-center p-3 flex flex-col items-center justify-center gap-1.5">
+                                      <ImageIcon className="w-6 h-6 text-slate-700" />
+                                      <span>No Photo Attached</span>
+                                    </div>
+                                  )}
+                                </div>
+
+                                <span className="text-[9px] font-mono text-slate-500 text-center truncate max-w-full">
+                                  {item.key}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* SECTION 6: Conclusion & Remarks */}
+              {(activeTab === 'all' || activeTab === 'conclusion') && (
+                <div className="p-4 sm:p-5 rounded-2xl bg-slate-900/60 border border-slate-800/80 space-y-4">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+                    <span className="text-xs sm:text-sm font-black text-emerald-400 uppercase tracking-wider flex items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                      6. Final Test Conclusion &amp; Quality Remarks
+                    </span>
+                    <span className="text-[11px] text-slate-500 font-mono font-bold">Certified Pass</span>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="bg-slate-950 p-4 rounded-xl border border-slate-800/90 space-y-1.5">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                        Test Conclusion Statement
+                      </span>
+                      <p className="text-xs sm:text-sm text-slate-200 leading-relaxed font-medium italic">
+                        "{testConclusion}"
+                      </p>
+                    </div>
+
+                    <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800/90 flex items-center justify-between flex-wrap gap-2 text-xs">
+                      <div>
+                        <span className="text-[10px] font-bold text-slate-400 uppercase block">Remarks / Authorization:</span>
+                        <span className="text-emerald-300 font-semibold">{remarks}</span>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-[10px] text-slate-500 block font-mono">Date Verified:</span>
+                        <span className="text-slate-300 font-mono font-bold">{new Date().toLocaleDateString()}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+            </div>
+          </div>
+        ) : (
+          /* ===================== VIEW MODE: PRINTABLE A4 SHEET ===================== */
+          <div className="flex-1 p-4 sm:p-8 overflow-y-auto bg-slate-950/60">
+            <div 
+              ref={printableDocRef}
+              className="max-w-4xl mx-auto bg-white text-slate-900 rounded-xl shadow-2xl p-6 sm:p-12 space-y-8 font-sans border border-slate-200"
+              style={{ minHeight: '1000px' }}
+            >
+              {/* Document Header */}
+              <div className="border-b-4 border-cyan-800 pb-5 flex items-start justify-between gap-4">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-black text-2xl text-cyan-900 tracking-wider">LLT LABS</span>
+                    <span className="text-xs font-bold text-slate-500 uppercase border-l-2 border-slate-300 pl-2">Industrial Test Division</span>
+                  </div>
+                  <h1 className="text-xl font-extrabold text-slate-900 mt-2 uppercase tracking-wide">
+                    OFFICIAL {reportTitle.toUpperCase()}
+                  </h1>
+                  <p className="text-xs text-slate-500 font-medium">
+                    Document Reference: <strong className="text-slate-800 font-mono">{reportNo}</strong>
+                  </p>
+                </div>
+
+                <div className="text-right space-y-1">
+                  <div className="inline-block px-3 py-1 rounded bg-slate-100 border border-slate-300 text-slate-800 font-mono font-extrabold text-xs">
+                    {modelName}
+                  </div>
+                  <p className="text-[11px] text-slate-500 font-mono">
+                    Station: {getVal(['Station', 'station'], 'Station 01')}
+                  </p>
+                  <p className="text-[10px] text-emerald-700 font-bold uppercase">
+                    Status: VERIFIED &amp; COMPLIANT
+                  </p>
+                </div>
+              </div>
+
+              {/* General Unit Information Grid */}
               <div>
-                <div className="flex items-center gap-2">
-                  <span className="font-black text-2xl text-cyan-900 tracking-wider">LLT LABS</span>
-                  <span className="text-xs font-bold text-slate-500 uppercase border-l-2 border-slate-300 pl-2">Industrial Test Division</span>
-                </div>
-                <h1 className="text-xl font-extrabold text-slate-900 mt-2 uppercase tracking-wide">
-                  OFFICIAL {reportTitle.toUpperCase()}
-                </h1>
-                <p className="text-xs text-slate-500 font-medium">
-                  Document Reference: <strong className="text-slate-800 font-mono">{unitData.Report_No || 'PRT-2026-001'}</strong>
-                </p>
-              </div>
-
-              <div className="text-right space-y-1">
-                <div className="inline-block px-3 py-1 rounded bg-slate-100 border border-slate-300 text-slate-800 font-mono font-extrabold text-xs">
-                  {unitData.Model_Name || 'MODEL-X'}
-                </div>
-                <p className="text-[11px] text-slate-500 font-mono">
-                  Station: {unitData.Station || 'Station 01'}
-                </p>
-                <p className="text-[10px] text-emerald-700 font-bold uppercase">
-                  Status: VERIFIED & COMPLIANT
-                </p>
-              </div>
-            </div>
-
-            {/* General Unit Information Grid */}
-            <div>
-              <h3 className="text-xs font-black uppercase tracking-wider text-cyan-900 bg-cyan-50 p-2 rounded border-l-4 border-cyan-700 mb-3">
-                1. General Sample Details
-              </h3>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs bg-slate-50 p-4 rounded-xl border border-slate-200">
-                <div>
-                  <span className="text-slate-500 block font-bold">Model Name:</span>
-                  <strong className="text-slate-900 text-sm">{unitData.Model_Name || 'N/A'}</strong>
-                </div>
-                <div>
-                  <span className="text-slate-500 block font-bold">Sample Type:</span>
-                  <strong className="text-cyan-900 font-bold">{unitData.Sample_Type || unitData["Sample Type"] || 'N/A'}</strong>
-                </div>
-                <div>
-                  <span className="text-slate-500 block font-bold">Report Number:</span>
-                  <strong className="text-slate-900 font-mono">{unitData.Report_No || 'N/A'}</strong>
-                </div>
-                <div>
-                  <span className="text-slate-500 block font-bold">Requested By:</span>
-                  <strong className="text-slate-900">{unitData.Request_By || 'N/A'}</strong>
-                </div>
-                <div>
-                  <span className="text-slate-500 block font-bold">Sample Received:</span>
-                  <strong className="text-slate-900 font-mono">{unitData.Sample_Received || 'N/A'}</strong>
-                </div>
-                <div>
-                  <span className="text-slate-500 block font-bold">Test Commenced:</span>
-                  <strong className="text-slate-900 font-mono">{unitData.Test_Commenced || 'N/A'}</strong>
-                </div>
-                <div>
-                  <span className="text-slate-500 block font-bold">Test Completed:</span>
-                  <strong className="text-slate-900 font-mono">{unitData.Test_Completed || 'N/A'}</strong>
-                </div>
-              </div>
-            </div>
-
-            {/* Performance Specifications */}
-            <div>
-              <h3 className="text-xs font-black uppercase tracking-wider text-cyan-900 bg-cyan-50 p-2 rounded border-l-4 border-cyan-700 mb-3">
-                2. Rating & Performance Metrics
-              </h3>
-              <table className="w-full text-left text-xs border-collapse border border-slate-200">
-                <thead>
-                  <tr className="bg-slate-100 text-slate-700 font-bold uppercase text-[11px]">
-                    <th className="p-2.5 border border-slate-200">Parameter</th>
-                    <th className="p-2.5 border border-slate-200">Value</th>
-                    <th className="p-2.5 border border-slate-200">Parameter</th>
-                    <th className="p-2.5 border border-slate-200">Value</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200">
-                  <tr>
-                    <td className="p-2.5 font-bold border border-slate-200">Cooling Capacity:</td>
-                    <td className="p-2.5 font-mono text-cyan-900 font-extrabold border border-slate-200">{unitData.Cooling_capacity || unitData.Cooling_Capacity || 'N/A'}</td>
-                    <td className="p-2.5 font-bold border border-slate-200">Power Mode:</td>
-                    <td className="p-2.5 border border-slate-200">{unitData.Power_mode || unitData.Power_Mode || unitData.powerMode || 'N/A'}</td>
-                  </tr>
-                  <tr>
-                    <td className="p-2.5 font-bold border border-slate-200">Refrigerant:</td>
-                    <td className="p-2.5 font-mono border border-slate-200">{unitData.Refrigerant || unitData.refrigerant || 'N/A'}</td>
-                    <td className="p-2.5 font-bold border border-slate-200">Gas Injection Volume:</td>
-                    <td className="p-2.5 font-mono border border-slate-200">{unitData.Gas_injection_Volume || unitData.Gas_Injection_Volume || unitData.gasInjectionVolume || 'N/A'}</td>
-                  </tr>
-                  <tr>
-                    <td className="p-2.5 font-bold border border-slate-200">ISEER Rating:</td>
-                    <td className="p-2.5 font-mono text-emerald-800 font-bold border border-slate-200">{unitData.ISEER || unitData.iseer || 'N/A'}</td>
-                    <td className="p-2.5 font-bold border border-slate-200">Compressor Spec:</td>
-                    <td className="p-2.5 border border-slate-200">{unitData.Compressor_Spec || unitData["Compressor _Spec"] || unitData.compressorSpec || 'N/A'}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-
-            {/* Parts & Components Specification Table */}
-            <div>
-              <h3 className="text-xs font-black uppercase tracking-wider text-cyan-900 bg-cyan-50 p-2 rounded border-l-4 border-cyan-700 mb-3">
-                3. Sub-Assembly & Parts Bill of Materials (BOM)
-              </h3>
-              <table className="w-full text-left text-xs border-collapse border border-slate-200">
-                <thead>
-                  <tr className="bg-slate-100 text-slate-800 font-bold uppercase text-[11px]">
-                    <th className="p-2 border border-slate-200">Sub-Assembly</th>
-                    <th className="p-2 border border-slate-200">Specification</th>
-                    <th className="p-2 border border-slate-200">Part Code</th>
-                    <th className="p-2 border border-slate-200">Supplier</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200 font-medium">
-                  <tr>
-                    <td className="p-2 font-bold border border-slate-200">IDU Motor</td>
-                    <td className="p-2 border border-slate-200">{unitData.IDU_Motor_Spec || 'BLDC 230V'}</td>
-                    <td className="p-2 font-mono text-cyan-900 border border-slate-200">{unitData.IDU_Motor_Part_Code || 'N/A'}</td>
-                    <td className="p-2 border border-slate-200">{unitData.IDU_Motor_Supplier || 'N/A'}</td>
-                  </tr>
-                  <tr>
-                    <td className="p-2 font-bold border border-slate-200">IDU PCB</td>
-                    <td className="p-2 border border-slate-200">Main Control Micro-Controller</td>
-                    <td className="p-2 font-mono text-cyan-900 border border-slate-200">{unitData.IDU_PCB_Part_Code || 'N/A'}</td>
-                    <td className="p-2 border border-slate-200">{unitData.IDU_PCB_Supplier || 'N/A'}</td>
-                  </tr>
-                  <tr>
-                    <td className="p-2 font-bold border border-slate-200">ODU Motor</td>
-                    <td className="p-2 border border-slate-200">{unitData.ODU_Motor_Spec || 'Axial Fan Motor'}</td>
-                    <td className="p-2 font-mono text-cyan-900 border border-slate-200">{unitData.ODU_Motor_Part_Code || 'N/A'}</td>
-                    <td className="p-2 border border-slate-200">{unitData.ODU_Motor_Supplier || 'N/A'}</td>
-                  </tr>
-                  <tr>
-                    <td className="p-2 font-bold border border-slate-200">ODU PCB</td>
-                    <td className="p-2 border border-slate-200">Inverter Drive Power Board</td>
-                    <td className="p-2 font-mono text-cyan-900 border border-slate-200">{unitData.ODU_PCB_Part_Code || 'N/A'}</td>
-                    <td className="p-2 border border-slate-200">{unitData.ODU_PCB_Supplier || 'N/A'}</td>
-                  </tr>
-                  <tr>
-                    <td className="p-2 font-bold border border-slate-200">Compressor</td>
-                    <td className="p-2 border border-slate-200">{unitData.Compressor_Spec || 'Rotary Inverter'}</td>
-                    <td className="p-2 font-mono text-cyan-900 border border-slate-200">{unitData.Compressor_Part_Code || 'N/A'}</td>
-                    <td className="p-2 border border-slate-200">{unitData.Compressor_Supplier || 'N/A'}</td>
-                  </tr>
-                  <tr>
-                    <td className="p-2 font-bold border border-slate-200">EEV Valve</td>
-                    <td className="p-2 border border-slate-200">{unitData.EEV_Spec || 'Pulse Expansion Valve'}</td>
-                    <td className="p-2 font-mono text-cyan-900 border border-slate-200">{unitData.EEV_Part_Code || 'N/A'}</td>
-                    <td className="p-2 border border-slate-200">{unitData.EEV_Supplier || 'N/A'}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-
-            {/* Section 4: Automatic Photo Placement Gallery (Fixed 6cm x 4cm aspect ratio, centered) */}
-            <div className="space-y-4">
-              <div className="flex items-center justify-between bg-cyan-50 p-2.5 rounded-lg border-l-4 border-cyan-700">
-                <h3 className="text-xs font-black uppercase tracking-wider text-cyan-950">
-                  4. Sample Photographs Gallery
+                <h3 className="text-xs font-black uppercase tracking-wider text-cyan-900 bg-cyan-50 p-2 rounded border-l-4 border-cyan-700 mb-3">
+                  1. General Sample Details
                 </h3>
-                <span className="text-[10px] font-bold text-cyan-800 bg-cyan-100 px-2 py-0.5 rounded border border-cyan-300">
-                  11 Inspection Photos
-                </span>
-              </div>
-
-              {/* Packaging Photos */}
-              <div className="space-y-2">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block border-b border-slate-200 pb-1">
-                  📦 Packaging & Unboxing
-                </span>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {[
-                    { label: 'Product Packing', key: 'PHOTO_Product_Packing', url: photoUrls.PHOTO_Product_Packing || photoUrls.productPhoto },
-                    { label: 'Packing Box', key: 'PHOTO_Packing_Box', url: photoUrls.PHOTO_Packing_Box || photoUrls.packingBoxPhoto }
-                  ].map((item, idx) => (
-                    <div key={idx} className="bg-slate-50 border border-slate-200 p-3 rounded-xl flex flex-col items-center justify-center space-y-1.5">
-                      <div className="flex items-center justify-between w-full px-1">
-                        <span className="text-[11px] font-bold text-slate-800">{item.label}</span>
-                        {item.url && item.url !== 'NA' && (
-                          <span className="text-[9px] font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">Attached</span>
-                        )}
-                      </div>
-                      <div className="w-[226px] h-[151px] bg-white border border-slate-300 rounded overflow-hidden flex items-center justify-center shadow-inner">
-                        {item.url && item.url !== 'NA' ? (
-                          <img src={item.url} alt={item.label} className="w-full h-full object-contain p-1" />
-                        ) : (
-                          <div className="text-[10px] text-slate-400 font-medium text-center p-2 flex flex-col items-center justify-center gap-1">
-                            <ImageIcon className="w-6 h-6 text-slate-300 opacity-60" />
-                            <span>No Photo Attached</span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ))}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs bg-slate-50 p-4 rounded-xl border border-slate-200">
+                  <div>
+                    <span className="text-slate-500 block font-bold">Model Name:</span>
+                    <strong className="text-slate-900 text-sm">{modelName}</strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block font-bold">Sample Type:</span>
+                    <strong className="text-cyan-900 font-bold">{getVal(['Sample_Type', 'sampleType'], 'Proto')}</strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block font-bold">Report Number:</span>
+                    <strong className="text-slate-900 font-mono">{reportNo}</strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block font-bold">Requested By:</span>
+                    <strong className="text-slate-900">{getVal(['Request_By', 'requestBy'], 'Indrajit')}</strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block font-bold">Sample Received:</span>
+                    <strong className="text-slate-900 font-mono">{getVal(['Sample_Received_Date', 'Sample_Received', 'sampleReceivedDate'], '—')}</strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block font-bold">Test Commenced:</span>
+                    <strong className="text-slate-900 font-mono">{getVal(['Test_Commenced_Date', 'Test_Commenced', 'testCommencedDate'], '—')}</strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block font-bold">Test Completed:</span>
+                    <strong className="text-slate-900 font-mono">{getVal(['Test_Completed_Date', 'Test_Completed', 'testCompletedDate'], '—')}</strong>
+                  </div>
                 </div>
               </div>
 
-              {/* IDU Photos */}
-              <div className="space-y-2 pt-2">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block border-b border-slate-200 pb-1">
-                  🏢 Indoor Unit (IDU) Assembly
-                </span>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                  {[
-                    { label: 'IDU Motor', key: 'PHOTO_IDU_Motor', url: photoUrls.PHOTO_IDU_Motor || photoUrls.iduMotorPhoto || photoUrls.motorPhoto },
-                    { label: 'IDU PCB', key: 'PHOTO_IDU_PCB', url: photoUrls.PHOTO_IDU_PCB || photoUrls.iduPcbPhoto },
-                    { label: 'IDU Name Plate', key: 'PHOTO_IDU_Product_Name_Plate', url: photoUrls.PHOTO_IDU_Product_Name_Plate || photoUrls.PHOTO_IDU_Name_Plate || photoUrls.iduNameplatePhoto },
-                    { label: 'Remote', key: 'PHOTO_Remote', url: photoUrls.PHOTO_Remote || photoUrls.remotePhoto || photoUrls.stickerPhoto }
-                  ].map((item, idx) => (
-                    <div key={idx} className="bg-slate-50 border border-slate-200 p-2.5 rounded-xl flex flex-col items-center justify-center space-y-1.5">
-                      <div className="flex items-center justify-between w-full px-1">
-                        <span className="text-[10px] font-bold text-slate-800 truncate">{item.label}</span>
-                        {item.url && item.url !== 'NA' && (
-                          <span className="text-[8px] font-semibold text-emerald-700 bg-emerald-50 px-1 py-0.2 rounded border border-emerald-200">Attached</span>
-                        )}
-                      </div>
-                      <div className="w-[180px] h-[120px] bg-white border border-slate-300 rounded overflow-hidden flex items-center justify-center shadow-inner">
-                        {item.url && item.url !== 'NA' ? (
-                          <img src={item.url} alt={item.label} className="w-full h-full object-contain p-1" />
-                        ) : (
-                          <div className="text-[9px] text-slate-400 font-medium text-center p-2 flex flex-col items-center justify-center gap-1">
-                            <ImageIcon className="w-5 h-5 text-slate-300 opacity-60" />
-                            <span>No Photo</span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* ODU Photos */}
-              <div className="space-y-2 pt-2">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block border-b border-slate-200 pb-1">
-                  ⚙️ Outdoor Unit (ODU) Assembly
-                </span>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  {[
-                    { label: 'ODU Name Plate', key: 'PHOTO_ODU_Name_Plate', url: photoUrls.PHOTO_ODU_Name_Plate || photoUrls.oduNameplatePhoto },
-                    { label: 'ODU Motor', key: 'PHOTO_ODU_Motor', url: photoUrls.PHOTO_ODU_Motor || photoUrls.oduMotorPhoto },
-                    { label: 'ODU PCB', key: 'PHOTO_ODU_PCB', url: photoUrls.PHOTO_ODU_PCB || photoUrls.oduPcbPhoto }
-                  ].map((item, idx) => (
-                    <div key={idx} className="bg-slate-50 border border-slate-200 p-2.5 rounded-xl flex flex-col items-center justify-center space-y-1.5">
-                      <div className="flex items-center justify-between w-full px-1">
-                        <span className="text-[10px] font-bold text-slate-800 truncate">{item.label}</span>
-                        {item.url && item.url !== 'NA' && (
-                          <span className="text-[8px] font-semibold text-emerald-700 bg-emerald-50 px-1 py-0.2 rounded border border-emerald-200">Attached</span>
-                        )}
-                      </div>
-                      <div className="w-[180px] h-[120px] bg-white border border-slate-300 rounded overflow-hidden flex items-center justify-center shadow-inner">
-                        {item.url && item.url !== 'NA' ? (
-                          <img src={item.url} alt={item.label} className="w-full h-full object-contain p-1" />
-                        ) : (
-                          <div className="text-[9px] text-slate-400 font-medium text-center p-2 flex flex-col items-center justify-center gap-1">
-                            <ImageIcon className="w-5 h-5 text-slate-300 opacity-60" />
-                            <span>No Photo</span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Refrigeration & Valves */}
-              <div className="space-y-2 pt-2">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block border-b border-slate-200 pb-1">
-                  ❄️ Refrigeration & Expansion Circuit
-                </span>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {[
-                    { label: 'Electronic Expansion Valve (EEV)', key: 'PHOTO_Electronic_Expansion_Valve', url: photoUrls.PHOTO_Electronic_Expansion_Valve || photoUrls.PHOTO_EEV || photoUrls.oduEevPhoto || photoUrls.eevPhoto },
-                    { label: 'ODU Compressor', key: 'PHOTO_ODU_Compressor', url: photoUrls.PHOTO_ODU_Compressor || photoUrls.PHOTO_Compressor || photoUrls.oduCompressorPhoto || photoUrls.compressorPhoto }
-                  ].map((item, idx) => (
-                    <div key={idx} className="bg-slate-50 border border-slate-200 p-3 rounded-xl flex flex-col items-center justify-center space-y-1.5">
-                      <div className="flex items-center justify-between w-full px-1">
-                        <span className="text-[11px] font-bold text-slate-800">{item.label}</span>
-                        {item.url && item.url !== 'NA' && (
-                          <span className="text-[9px] font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">Attached</span>
-                        )}
-                      </div>
-                      <div className="w-[226px] h-[151px] bg-white border border-slate-300 rounded overflow-hidden flex items-center justify-center shadow-inner">
-                        {item.url && item.url !== 'NA' ? (
-                          <img src={item.url} alt={item.label} className="w-full h-full object-contain p-1" />
-                        ) : (
-                          <div className="text-[10px] text-slate-400 font-medium text-center p-2 flex flex-col items-center justify-center gap-1">
-                            <ImageIcon className="w-6 h-6 text-slate-300 opacity-60" />
-                            <span>No Photo Attached</span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {/* Section 5: Test Conclusion */}
-            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2">
-              <h3 className="text-xs font-black uppercase tracking-wider text-slate-800">
-                5. Final Test Conclusion
-              </h3>
-              <p className="text-xs text-slate-700 leading-relaxed italic font-medium">
-                "{unitData.Test_Conclusion || 'Sample unit underwent complete performance and thermal stress testing according to standard protocols. All components and electrical parameters met design specifications without defects.'}"
-              </p>
-            </div>
-
-            {/* Signatures Footer */}
-            <div className="pt-8 border-t border-slate-300 flex items-end justify-between text-xs text-slate-600">
+              {/* Performance Specifications */}
               <div>
-                <p><strong>Tested By:</strong> Indrajit Sharma (Testing Lead)</p>
-                <p><strong>LLT Quality Lab:</strong> Certified Pass</p>
+                <h3 className="text-xs font-black uppercase tracking-wider text-cyan-900 bg-cyan-50 p-2 rounded border-l-4 border-cyan-700 mb-3">
+                  2. Rating &amp; Performance Metrics
+                </h3>
+                <table className="w-full text-left text-xs border-collapse border border-slate-200">
+                  <thead>
+                    <tr className="bg-slate-100 text-slate-700 font-bold uppercase text-[11px]">
+                      <th className="p-2.5 border border-slate-200">Parameter</th>
+                      <th className="p-2.5 border border-slate-200">Value</th>
+                      <th className="p-2.5 border border-slate-200">Parameter</th>
+                      <th className="p-2.5 border border-slate-200">Value</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200">
+                    <tr>
+                      <td className="p-2.5 font-bold border border-slate-200">Cooling Capacity:</td>
+                      <td className="p-2.5 font-mono text-cyan-900 font-extrabold border border-slate-200">{getVal(['Cooling_Capacity', 'Cooling_capacity', 'coolingCapacity'])}</td>
+                      <td className="p-2.5 font-bold border border-slate-200">Power Mode:</td>
+                      <td className="p-2.5 border border-slate-200">{getVal(['Power_mode', 'Power_Mode', 'powerMode'])}</td>
+                    </tr>
+                    <tr>
+                      <td className="p-2.5 font-bold border border-slate-200">Refrigerant:</td>
+                      <td className="p-2.5 font-mono border border-slate-200">{getVal(['Refrigerant', 'refrigerant'])}</td>
+                      <td className="p-2.5 font-bold border border-slate-200">Gas Injection Volume:</td>
+                      <td className="p-2.5 font-mono border border-slate-200">{getVal(['Gas_injection_Volume', 'Gas_Injection_Volume', 'gasInjectionVolume'])}</td>
+                    </tr>
+                    <tr>
+                      <td className="p-2.5 font-bold border border-slate-200">ISEER Rating:</td>
+                      <td className="p-2.5 font-mono text-emerald-800 font-bold border border-slate-200">{getVal(['ISEER', 'iseer'])}</td>
+                      <td className="p-2.5 font-bold border border-slate-200">Compressor Spec:</td>
+                      <td className="p-2.5 border border-slate-200">{getVal(['Compressor_Spec', 'Compressor _Spec', 'compressorSpec'])}</td>
+                    </tr>
+                  </tbody>
+                </table>
               </div>
 
-              <div className="text-right">
-                <p className="font-mono text-[10px]">Date Generated: {new Date().toLocaleDateString()}</p>
-                <div className="mt-6 border-t border-slate-400 pt-1 font-bold text-slate-800 inline-block px-4">
-                  Authorized Signatory Signature
+              {/* Parts & Components Specification Table */}
+              <div>
+                <h3 className="text-xs font-black uppercase tracking-wider text-cyan-900 bg-cyan-50 p-2 rounded border-l-4 border-cyan-700 mb-3">
+                  3. Sub-Assembly &amp; Parts Bill of Materials (BOM)
+                </h3>
+                <table className="w-full text-left text-xs border-collapse border border-slate-200">
+                  <thead>
+                    <tr className="bg-slate-100 text-slate-800 font-bold uppercase text-[11px]">
+                      <th className="p-2 border border-slate-200">Sub-Assembly</th>
+                      <th className="p-2 border border-slate-200">Specification</th>
+                      <th className="p-2 border border-slate-200">Part Code</th>
+                      <th className="p-2 border border-slate-200">Supplier</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200 font-medium">
+                    {formParts.map((p, idx) => (
+                      <tr key={idx}>
+                        <td className="p-2 font-bold border border-slate-200">{p.title}</td>
+                        <td className="p-2 border border-slate-200">{p.spec}</td>
+                        <td className="p-2 font-mono text-cyan-900 border border-slate-200 font-bold">{p.partCode}</td>
+                        <td className="p-2 border border-slate-200">{p.supplier}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Photos Grid */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between bg-cyan-50 p-2.5 rounded-lg border-l-4 border-cyan-700">
+                  <h3 className="text-xs font-black uppercase tracking-wider text-cyan-950">
+                    4. Sample Photographs Gallery
+                  </h3>
+                  <span className="text-[10px] font-bold text-cyan-800 bg-cyan-100 px-2 py-0.5 rounded border border-cyan-300">
+                    {totalPhotosAttached} Photos Attached
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  {photoCategories.flatMap(c => c.photos).map((item, idx) => (
+                    <div key={idx} className="bg-slate-50 border border-slate-200 p-2 rounded-xl flex flex-col items-center space-y-1">
+                      <span className="text-[10px] font-bold text-slate-800 truncate w-full text-center">{item.label}</span>
+                      <div className="w-full h-[120px] bg-white border border-slate-300 rounded overflow-hidden flex items-center justify-center">
+                        {item.url ? (
+                          <img src={item.url} alt={item.label} className="w-full h-full object-contain p-1" />
+                        ) : (
+                          <span className="text-[9px] text-slate-400">No Photo</span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Test Conclusion */}
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2">
+                <h3 className="text-xs font-black uppercase tracking-wider text-slate-800">
+                  5. Final Test Conclusion
+                </h3>
+                <p className="text-xs text-slate-700 leading-relaxed italic font-medium">
+                  "{testConclusion}"
+                </p>
+              </div>
+
+              {/* Signatures Footer */}
+              <div className="pt-8 border-t border-slate-300 flex items-end justify-between text-xs text-slate-600">
+                <div>
+                  <p><strong>Tested By:</strong> Indrajit Sharma (Testing Lead)</p>
+                  <p><strong>LLT Quality Lab:</strong> Certified Pass</p>
+                </div>
+
+                <div className="text-right">
+                  <p className="font-mono text-[10px]">Date Generated: {new Date().toLocaleDateString()}</p>
+                  <div className="mt-6 border-t border-slate-400 pt-1 font-bold text-slate-800 inline-block px-4">
+                    Authorized Signatory Signature
+                  </div>
                 </div>
               </div>
             </div>
           </div>
-        </div>
+        )}
+
       </div>
+
+      {/* Full-Screen Photo Lightbox Modal */}
+      {selectedPhotoModal && (
+        <div className="fixed inset-0 z-60 bg-black/90 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="max-w-4xl w-full bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl flex flex-col">
+            <div className="p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
+              <span className="text-sm font-bold text-white flex items-center gap-2">
+                <ImageIcon className="w-4 h-4 text-cyan-400" />
+                {selectedPhotoModal.label}
+              </span>
+              <button
+                type="button"
+                onClick={() => setSelectedPhotoModal(null)}
+                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-4 bg-black/60 flex items-center justify-center max-h-[75vh] overflow-hidden">
+              <img 
+                src={selectedPhotoModal.url} 
+                alt={selectedPhotoModal.label} 
+                className="max-h-[70vh] max-w-full object-contain rounded-lg"
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };
