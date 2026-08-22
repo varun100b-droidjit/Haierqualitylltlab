@@ -9,7 +9,8 @@ import {
   Award,
   Layers,
   Cpu,
-  Package
+  Package,
+  Image as ImageIcon
 } from 'lucide-react';
 import { downloadFile, downloadElementAsPdf, generateDocxBlob, generateReportBundleZip } from '../../utils/docxGenerator';
 import { MasterTemplate, getMasterTemplate } from '../../services/reportTemplateStore';
@@ -107,7 +108,7 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
                 </span>
               </h2>
               <p className="text-xs text-slate-400">
-                Exact automatic placeholder mapping and photo placement
+                Official Laboratory Inspection Report Preview
               </p>
             </div>
           </div>
@@ -324,17 +325,17 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
             <div className="space-y-4">
               <div className="flex items-center justify-between bg-cyan-50 p-2.5 rounded-lg border-l-4 border-cyan-700">
                 <h3 className="text-xs font-black uppercase tracking-wider text-cyan-950">
-                  4. Sample Photographs Gallery (Fixed 6 cm × 4 cm Dynamic OpenXML Mapping)
+                  4. Sample Photographs Gallery
                 </h3>
                 <span className="text-[10px] font-bold text-cyan-800 bg-cyan-100 px-2 py-0.5 rounded border border-cyan-300">
-                  11 Standard Placeholders
+                  11 Inspection Photos
                 </span>
               </div>
 
               {/* Packaging Photos */}
               <div className="space-y-2">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block border-b border-slate-200 pb-1">
-                  📦 Document Page 4 (Top): Packaging & Unboxing
+                  📦 Packaging & Unboxing
                 </span>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {[
@@ -344,14 +345,17 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
                     <div key={idx} className="bg-slate-50 border border-slate-200 p-3 rounded-xl flex flex-col items-center justify-center space-y-1.5">
                       <div className="flex items-center justify-between w-full px-1">
                         <span className="text-[11px] font-bold text-slate-800">{item.label}</span>
-                        <code className="text-[9px] font-mono text-cyan-700 bg-cyan-50 px-1 py-0.5 rounded border border-cyan-200">{`{{${item.key}}}`}</code>
+                        {item.url && item.url !== 'NA' && (
+                          <span className="text-[9px] font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">Attached</span>
+                        )}
                       </div>
                       <div className="w-[226px] h-[151px] bg-white border border-slate-300 rounded overflow-hidden flex items-center justify-center shadow-inner">
                         {item.url && item.url !== 'NA' ? (
                           <img src={item.url} alt={item.label} className="w-full h-full object-contain p-1" />
                         ) : (
-                          <div className="text-[10px] text-slate-400 font-mono text-center p-2">
-                            Placeholder Pending<br/><span className="text-[9px] text-slate-300">(Fixed 6cm × 4cm)</span>
+                          <div className="text-[10px] text-slate-400 font-medium text-center p-2 flex flex-col items-center justify-center gap-1">
+                            <ImageIcon className="w-6 h-6 text-slate-300 opacity-60" />
+                            <span>No Photo Attached</span>
                           </div>
                         )}
                       </div>
@@ -363,7 +367,7 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
               {/* IDU Photos */}
               <div className="space-y-2 pt-2">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block border-b border-slate-200 pb-1">
-                  🏢 Document Page 4 (Bottom): Indoor Unit (IDU) Assembly
+                  🏢 Indoor Unit (IDU) Assembly
                 </span>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                   {[
@@ -375,14 +379,17 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
                     <div key={idx} className="bg-slate-50 border border-slate-200 p-2.5 rounded-xl flex flex-col items-center justify-center space-y-1.5">
                       <div className="flex items-center justify-between w-full px-1">
                         <span className="text-[10px] font-bold text-slate-800 truncate">{item.label}</span>
-                        <code className="text-[8px] font-mono text-cyan-700 bg-cyan-50 px-1 py-0.2 rounded border border-cyan-200">{`{{${item.key}}}`}</code>
+                        {item.url && item.url !== 'NA' && (
+                          <span className="text-[8px] font-semibold text-emerald-700 bg-emerald-50 px-1 py-0.2 rounded border border-emerald-200">Attached</span>
+                        )}
                       </div>
                       <div className="w-[180px] h-[120px] bg-white border border-slate-300 rounded overflow-hidden flex items-center justify-center shadow-inner">
                         {item.url && item.url !== 'NA' ? (
                           <img src={item.url} alt={item.label} className="w-full h-full object-contain p-1" />
                         ) : (
-                          <div className="text-[9px] text-slate-400 font-mono text-center p-2">
-                            Placeholder Pending<br/><span className="text-[8px] text-slate-300">(6cm × 4cm)</span>
+                          <div className="text-[9px] text-slate-400 font-medium text-center p-2 flex flex-col items-center justify-center gap-1">
+                            <ImageIcon className="w-5 h-5 text-slate-300 opacity-60" />
+                            <span>No Photo</span>
                           </div>
                         )}
                       </div>
@@ -394,7 +401,7 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
               {/* ODU Photos */}
               <div className="space-y-2 pt-2">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block border-b border-slate-200 pb-1">
-                  ⚙️ Document Page 5 (Top): Outdoor Unit (ODU) Assembly
+                  ⚙️ Outdoor Unit (ODU) Assembly
                 </span>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   {[
@@ -405,14 +412,17 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
                     <div key={idx} className="bg-slate-50 border border-slate-200 p-2.5 rounded-xl flex flex-col items-center justify-center space-y-1.5">
                       <div className="flex items-center justify-between w-full px-1">
                         <span className="text-[10px] font-bold text-slate-800 truncate">{item.label}</span>
-                        <code className="text-[8px] font-mono text-cyan-700 bg-cyan-50 px-1 py-0.2 rounded border border-cyan-200">{`{{${item.key}}}`}</code>
+                        {item.url && item.url !== 'NA' && (
+                          <span className="text-[8px] font-semibold text-emerald-700 bg-emerald-50 px-1 py-0.2 rounded border border-emerald-200">Attached</span>
+                        )}
                       </div>
                       <div className="w-[180px] h-[120px] bg-white border border-slate-300 rounded overflow-hidden flex items-center justify-center shadow-inner">
                         {item.url && item.url !== 'NA' ? (
                           <img src={item.url} alt={item.label} className="w-full h-full object-contain p-1" />
                         ) : (
-                          <div className="text-[9px] text-slate-400 font-mono text-center p-2">
-                            Placeholder Pending<br/><span className="text-[8px] text-slate-300">(6cm × 4cm)</span>
+                          <div className="text-[9px] text-slate-400 font-medium text-center p-2 flex flex-col items-center justify-center gap-1">
+                            <ImageIcon className="w-5 h-5 text-slate-300 opacity-60" />
+                            <span>No Photo</span>
                           </div>
                         )}
                       </div>
@@ -424,7 +434,7 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
               {/* Refrigeration & Valves */}
               <div className="space-y-2 pt-2">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block border-b border-slate-200 pb-1">
-                  ❄️ Document Page 5 (Bottom): Refrigeration & Expansion Circuit
+                  ❄️ Refrigeration & Expansion Circuit
                 </span>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {[
@@ -434,14 +444,17 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
                     <div key={idx} className="bg-slate-50 border border-slate-200 p-3 rounded-xl flex flex-col items-center justify-center space-y-1.5">
                       <div className="flex items-center justify-between w-full px-1">
                         <span className="text-[11px] font-bold text-slate-800">{item.label}</span>
-                        <code className="text-[9px] font-mono text-cyan-700 bg-cyan-50 px-1 py-0.5 rounded border border-cyan-200">{`{{${item.key}}}`}</code>
+                        {item.url && item.url !== 'NA' && (
+                          <span className="text-[9px] font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">Attached</span>
+                        )}
                       </div>
                       <div className="w-[226px] h-[151px] bg-white border border-slate-300 rounded overflow-hidden flex items-center justify-center shadow-inner">
                         {item.url && item.url !== 'NA' ? (
                           <img src={item.url} alt={item.label} className="w-full h-full object-contain p-1" />
                         ) : (
-                          <div className="text-[10px] text-slate-400 font-mono text-center p-2">
-                            Placeholder Pending<br/><span className="text-[9px] text-slate-300">(Fixed 6cm × 4cm)</span>
+                          <div className="text-[10px] text-slate-400 font-medium text-center p-2 flex flex-col items-center justify-center gap-1">
+                            <ImageIcon className="w-6 h-6 text-slate-300 opacity-60" />
+                            <span>No Photo Attached</span>
                           </div>
                         )}
                       </div>

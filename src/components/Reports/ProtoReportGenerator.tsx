@@ -1476,40 +1476,6 @@ export const ProtoReportGenerator: React.FC<ProtoReportGeneratorProps> = ({
       />
 
       {/* 5. Action Buttons, Alerts & Download Options */}
-      {existingReportInRoom && (
-        <div className="p-4 rounded-2xl bg-amber-950/60 border border-amber-500/80 shadow-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-in fade-in slide-in-from-top-2">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/40 shrink-0">
-              <Lock className="w-5 h-5" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h4 className="text-xs sm:text-sm font-black text-amber-300">
-                  Report Already Archived in Report Room
-                </h4>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-900 text-amber-200 border border-amber-700">
-                  Tag: {existingReportInRoom.tag}
-                </span>
-              </div>
-              <p className="text-[11px] text-slate-300 mt-0.5 leading-relaxed">
-                Machine <strong className="text-white">{existingReportInRoom.modelName}</strong> (Sr.No: <span className="font-mono text-cyan-300">{existingReportInRoom.serialNo || selectedSerialNo}</span>) already has an official report in Report Room as <strong className="font-mono text-amber-300">#{existingReportInRoom.reportNo}</strong> ({existingReportInRoom.generatedDate}). Duplicate generation is locked.
-              </p>
-            </div>
-          </div>
-
-          {onNavigateToReportRoom && (
-            <button
-              type="button"
-              onClick={onNavigateToReportRoom}
-              className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-black transition-all shadow-md flex items-center gap-1.5 shrink-0 cursor-pointer active:scale-95"
-            >
-              <FolderArchive className="w-4 h-4" />
-              <span>Open in Report Room</span>
-            </button>
-          )}
-        </div>
-      )}
-
       {savedBanner?.show && !existingReportInRoom && (
         <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-950/80 to-slate-950 border border-emerald-500/60 shadow-lg flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-in fade-in slide-in-from-top-2">
           <div className="flex items-center gap-3">

@@ -197,8 +197,106 @@ export function extractPlaceholdersFromDocx(base64Template: string): DetectedPla
   return result;
 }
 
+export interface PhotoItemMeta {
+  rId: string;
+  cx: number;
+  cy: number;
+  width?: number;
+  height?: number;
+}
+
 /**
- * Creates OpenXML DrawingML string for an inline image (6 cm x 4 cm standard photo box)
+ * Extracts natural image dimensions (width & height) from raw image bytes
+ */
+export function getImageDimensions(bytes: Uint8Array): { width: number; height: number } | null {
+  if (!bytes || bytes.length < 24) return null;
+  try {
+    // 1. PNG check
+    if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4E && bytes[3] === 0x47) {
+      const width = (bytes[16] << 24) | (bytes[17] << 16) | (bytes[18] << 8) | bytes[19];
+      const height = (bytes[20] << 24) | (bytes[21] << 16) | (bytes[22] << 8) | bytes[23];
+      if (width > 0 && height > 0) return { width, height };
+    }
+    // 2. JPEG check
+    if (bytes[0] === 0xFF && bytes[1] === 0xD8) {
+      let offset = 2;
+      while (offset < bytes.length - 8) {
+        if (bytes[offset] !== 0xFF) {
+          offset++;
+          continue;
+        }
+        const marker = bytes[offset + 1];
+        if (marker >= 0xC0 && marker <= 0xC3) {
+          const height = (bytes[offset + 5] << 8) | bytes[offset + 6];
+          const width = (bytes[offset + 7] << 8) | bytes[offset + 8];
+          if (width > 0 && height > 0) return { width, height };
+        }
+        const len = (bytes[offset + 2] << 8) | bytes[offset + 3];
+        if (len <= 0) break;
+        offset += 2 + len;
+      }
+    }
+    // 3. GIF check
+    if (bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46) {
+      const width = bytes[6] | (bytes[7] << 8);
+      const height = bytes[8] | (bytes[9] << 8);
+      if (width > 0 && height > 0) return { width, height };
+    }
+    // 4. WEBP check
+    if (bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
+        bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50) {
+      if (bytes[12] === 0x56 && bytes[13] === 0x50 && bytes[14] === 0x38 && bytes[15] === 0x20) {
+        const width = (bytes[26] | (bytes[27] << 8)) & 0x3fff;
+        const height = (bytes[28] | (bytes[29] << 8)) & 0x3fff;
+        if (width > 0 && height > 0) return { width, height };
+      }
+      if (bytes[12] === 0x56 && bytes[13] === 0x50 && bytes[14] === 0x38 && bytes[15] === 0x4C) {
+        const width = 1 + (((bytes[22] & 0x3F) << 8) | bytes[21]);
+        const height = 1 + (((bytes[24] & 0xF) << 10) | (bytes[23] << 2) | ((bytes[22] & 0xC0) >> 6));
+        if (width > 0 && height > 0) return { width, height };
+      }
+    }
+  } catch {
+    // fallback
+  }
+  return null;
+}
+
+/**
+ * Calculates EMU dimensions fitting exactly within max bounds (6cm x 4cm)
+ * while strictly preserving the image's original dimensions and aspect ratio
+ */
+export function calculateEmuDimensions(
+  origWidth?: number,
+  origHeight?: number,
+  maxCmWidth: number = 6,
+  maxCmHeight: number = 4
+): { cx: number; cy: number } {
+  const maxEmuWidth = Math.round(maxCmWidth * 360000); // 6 cm = 2,160,000 EMUs
+  const maxEmuHeight = Math.round(maxCmHeight * 360000); // 4 cm = 1,440,000 EMUs
+
+  if (!origWidth || !origHeight || origWidth <= 0 || origHeight <= 0) {
+    return { cx: maxEmuWidth, cy: maxEmuHeight };
+  }
+
+  const aspectRatio = origWidth / origHeight;
+  const targetRatio = maxEmuWidth / maxEmuHeight; // 1.5
+
+  if (aspectRatio >= targetRatio) {
+    // Width limited (wider image)
+    const cx = maxEmuWidth;
+    const cy = Math.round(maxEmuWidth / aspectRatio);
+    return { cx, cy: Math.min(cy, maxEmuHeight) };
+  } else {
+    // Height limited (taller image)
+    const cy = maxEmuHeight;
+    const cx = Math.round(maxEmuHeight * aspectRatio);
+    return { cx: Math.min(cx, maxEmuWidth), cy };
+  }
+}
+
+/**
+ * Creates OpenXML DrawingML string for an inline image preserving aspect ratio within 6 cm x 4 cm
  * 1 cm = 360,000 EMUs -> 6cm = 2,160,000 EMUs, 4cm = 1,440,000 EMUs
  */
 export function createDrawingML(
@@ -241,6 +339,9 @@ export function createDrawingML(
   </w:drawing>`;
 }
 
+// Global photo metadata store for the current generation run
+export const currentPhotoMetaMap = new Map<string, PhotoItemMeta>();
+
 /**
  * Injects photos into the DOCX zip package (updating Content_Types, rels, and media files)
  */
@@ -250,6 +351,7 @@ export function injectPhotosIntoZip(
   logsMap?: Map<string, PhotoInsertionLog>
 ): Map<string, string> {
   const photoRIdMap = new Map<string, string>();
+  currentPhotoMetaMap.clear();
 
   // 1. Ensure Content_Types has png & jpeg defaults
   let contentTypesXml = zip.file('[Content_Types].xml')?.asText() || '';
@@ -295,6 +397,17 @@ export function injectPhotosIntoZip(
         const rId = `rIdPhoto_${def.photoKey}`;
         const mediaFileName = `media/photo_${def.photoKey}.${parsed.extension}`;
 
+        // Compute proportional size under 6cm x 4cm
+        const dims = getImageDimensions(parsed.bytes);
+        const emuDims = calculateEmuDimensions(dims?.width, dims?.height, 6, 4);
+        const meta: PhotoItemMeta = {
+          rId,
+          cx: emuDims.cx,
+          cy: emuDims.cy,
+          width: dims?.width,
+          height: dims?.height
+        };
+
         // Write binary to zip media directory
         zip.file(`word/${mediaFileName}`, parsed.bytes);
         
@@ -303,10 +416,16 @@ export function injectPhotosIntoZip(
         photoRIdMap.set(def.id, rId);
         photoRIdMap.set(def.photoKey.toLowerCase(), rId);
         photoRIdMap.set(def.label.toLowerCase(), rId);
+        currentPhotoMetaMap.set(def.photoKey, meta);
+        currentPhotoMetaMap.set(def.id, meta);
+        currentPhotoMetaMap.set(def.photoKey.toLowerCase(), meta);
+
         def.aliases.forEach(alias => {
           photoRIdMap.set(alias, rId);
           photoRIdMap.set(alias.toLowerCase(), rId);
           photoRIdMap.set(alias.replace(/[\s_]+/g, '').toLowerCase(), rId);
+          currentPhotoMetaMap.set(alias, meta);
+          currentPhotoMetaMap.set(alias.toLowerCase(), meta);
         });
 
         // Add relationship if not already in document.xml.rels
@@ -337,9 +456,21 @@ export function injectPhotosIntoZip(
       const rId = `rIdPhoto_custom_${safeKey}`;
       const mediaFileName = `media/photo_custom_${safeKey}.${parsed.extension}`;
 
+      const dims = getImageDimensions(parsed.bytes);
+      const emuDims = calculateEmuDimensions(dims?.width, dims?.height, 6, 4);
+      const meta: PhotoItemMeta = {
+        rId,
+        cx: emuDims.cx,
+        cy: emuDims.cy,
+        width: dims?.width,
+        height: dims?.height
+      };
+
       zip.file(`word/${mediaFileName}`, parsed.bytes);
       photoRIdMap.set(customKey, rId);
       photoRIdMap.set(customKey.toLowerCase(), rId);
+      currentPhotoMetaMap.set(customKey, meta);
+      currentPhotoMetaMap.set(customKey.toLowerCase(), meta);
 
       if (!relsXml.includes(`Id="${rId}"`)) {
         const relEntry = `  <Relationship Id="${rId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="${mediaFileName}"/>\n`;
@@ -418,7 +549,10 @@ export function insertPhotosIntoContentControls(
       return sdtBlock.replace(/(<a:blip\b[^>]*r:embed=")([^"]+)(")/gi, `$1${rId}$3`);
     }
 
-    const drawingXml = createDrawingML(rId, 600, matchedDef.photoKey, 2160000, 1440000);
+    const meta = currentPhotoMetaMap.get(matchedDef.photoKey) || currentPhotoMetaMap.get(matchedDef.photoKey.toLowerCase());
+    const cx = meta?.cx ?? 2160000;
+    const cy = meta?.cy ?? 1440000;
+    const drawingXml = createDrawingML(rId, 600, matchedDef.photoKey, cx, cy);
     const replacementContent = `<w:sdtContent><w:p><w:pPr><w:jc w:val="center"/><w:spacing w:before="60" w:after="60"/></w:pPr><w:r>${drawingXml}</w:r></w:p></w:sdtContent>`;
     
     let newSdt = sdtBlock;
@@ -457,7 +591,10 @@ export function insertPhotosIntoContentControls(
         log.imageInserted = true;
         log.status = 'inserted';
       }
-      const drawingXml = createDrawingML(rId, 700, matchedDef.photoKey, 2160000, 1440000);
+      const meta = currentPhotoMetaMap.get(matchedDef.photoKey) || currentPhotoMetaMap.get(matchedDef.photoKey.toLowerCase());
+      const cx = meta?.cx ?? 2160000;
+      const cy = meta?.cy ?? 1440000;
+      const drawingXml = createDrawingML(rId, 700, matchedDef.photoKey, cx, cy);
       return `</w:t></w:r><w:r>${drawingXml}</w:r><w:r><w:t>`;
     }
 
@@ -479,7 +616,10 @@ export function insertPhotosIntoContentControls(
           log.imageInserted = true;
           log.status = 'inserted';
         }
-        const drawingXml = createDrawingML(rId, 800, matchedDef.photoKey, 2160000, 1440000);
+        const meta = currentPhotoMetaMap.get(matchedDef.photoKey) || currentPhotoMetaMap.get(matchedDef.photoKey.toLowerCase());
+        const cx = meta?.cx ?? 2160000;
+        const cy = meta?.cy ?? 1440000;
+        const drawingXml = createDrawingML(rId, 800, matchedDef.photoKey, cx, cy);
         return `</w:t></w:r><w:r>${drawingXml}</w:r><w:r><w:t>`;
       }
     }
@@ -504,8 +644,9 @@ export function createSamplePhotographsTableXml(
     const right = PHOTO_FIELD_DEFINITIONS[i + 1];
 
     const leftRId = photoRIdMap.get(left.photoKey);
+    const leftMeta = currentPhotoMetaMap.get(left.photoKey) || currentPhotoMetaMap.get(left.photoKey.toLowerCase());
     const leftDrawing = leftRId 
-      ? `<w:r>${createDrawingML(leftRId, 200 + i, left.label, 2160000, 1440000)}</w:r>` 
+      ? `<w:r>${createDrawingML(leftRId, 200 + i, left.label, leftMeta?.cx ?? 2160000, leftMeta?.cy ?? 1440000)}</w:r>` 
       : `<w:r><w:rPr><w:color w:val="94A3B8"/><w:i/><w:sz w:val="18"/></w:rPr><w:t>[ Photo Not Uploaded ]</w:t></w:r>`;
 
     if (leftRId && logsMap) {
@@ -518,9 +659,10 @@ export function createSamplePhotographsTableXml(
     }
 
     const rightRId = right ? photoRIdMap.get(right.photoKey) : null;
+    const rightMeta = right ? (currentPhotoMetaMap.get(right.photoKey) || currentPhotoMetaMap.get(right.photoKey.toLowerCase())) : null;
     const rightDrawing = right
       ? (rightRId 
-          ? `<w:r>${createDrawingML(rightRId, 201 + i, right.label, 2160000, 1440000)}</w:r>` 
+          ? `<w:r>${createDrawingML(rightRId, 201 + i, right.label, rightMeta?.cx ?? 2160000, rightMeta?.cy ?? 1440000)}</w:r>` 
           : `<w:r><w:rPr><w:color w:val="94A3B8"/><w:i/><w:sz w:val="18"/></w:rPr><w:t>[ Photo Not Uploaded ]</w:t></w:r>`)
       : `<w:r><w:t></w:t></w:r>`;
 

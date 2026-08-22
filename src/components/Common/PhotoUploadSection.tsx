@@ -12,13 +12,14 @@ import {
   Sparkles,
   AlertCircle,
   Layers,
-  ArrowRightLeft,
   FileCheck,
   FolderArchive,
   Grid3X3,
   SlidersHorizontal,
   Download,
-  Tag
+  Tag,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 import { ProtoUnitPhotos } from '../../types';
 import { 
@@ -80,6 +81,7 @@ export interface PhotoUploadSectionProps {
   title?: string;
   subtitle?: string;
   readOnly?: boolean;
+  defaultOpen?: boolean;
 }
 
 export const PhotoUploadSection: React.FC<PhotoUploadSectionProps> = ({
@@ -88,11 +90,12 @@ export const PhotoUploadSection: React.FC<PhotoUploadSectionProps> = ({
   title = 'Photo Upload Section',
   subtitle = 'Upload the 11 standard test photos. These map directly to Word Report placeholders {{PHOTO_*}}.',
   readOnly = false,
+  defaultOpen = false,
 }) => {
+  const [isOpen, setIsOpen] = useState(defaultOpen);
   const [activeTab, setActiveTab] = useState<'all' | ReportSectionCategory>('all');
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
   const [previewModal, setPreviewModal] = useState<{ url: string; label: string; key: string; section?: string; page?: string } | null>(null);
-  const [swapModal, setSwapModal] = useState<{ sourceKey: string; sourceLabel: string; sourceUrl: string } | null>(null);
   const [uploadFeedback, setUploadFeedback] = useState<{ [key: string]: string }>({});
   const [batchFeedback, setBatchFeedback] = useState<string | null>(null);
 
@@ -293,29 +296,6 @@ export const PhotoUploadSection: React.FC<PhotoUploadSectionProps> = ({
     }
   };
 
-  const handleSwapPhotos = (targetKey: string) => {
-    if (!swapModal) return;
-    const sourceKey = swapModal.sourceKey;
-    if (sourceKey === targetKey) {
-      setSwapModal(null);
-      return;
-    }
-
-    const updated = { ...photos };
-    const sourceUrl = photos[sourceKey] || '';
-    const targetUrl = photos[targetKey] || '';
-
-    if (targetUrl) {
-      updated[sourceKey] = targetUrl;
-    } else {
-      delete updated[sourceKey];
-    }
-    updated[targetKey] = sourceUrl;
-
-    onChange(updated);
-    setSwapModal(null);
-  };
-
   const handleFileSelect = (config: PhotoFieldConfig, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -381,17 +361,20 @@ export const PhotoUploadSection: React.FC<PhotoUploadSectionProps> = ({
     : PHOTO_UPLOAD_CONFIGS.filter(cfg => cfg.section === activeTab);
 
   return (
-    <div className="bg-slate-950/70 p-4 sm:p-6 rounded-2xl border border-slate-800 space-y-5 shadow-lg">
-      {/* Header Banner */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
+    <div className="bg-slate-950/70 rounded-2xl border border-slate-800 shadow-lg overflow-hidden transition-all duration-300">
+      {/* Collapsible Header Banner */}
+      <div 
+        onClick={() => setIsOpen(!isOpen)}
+        className="p-4 sm:p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-3 cursor-pointer select-none hover:bg-slate-900/60 transition-colors"
+      >
         <div className="flex items-center gap-3">
-          <div className="p-2.5 rounded-xl bg-purple-500/10 border border-purple-500/30 text-purple-400">
+          <div className="p-2.5 rounded-xl bg-purple-500/10 border border-purple-500/30 text-purple-400 shrink-0">
             <ImageIcon className="w-5 h-5" />
           </div>
           <div>
-            <h3 className="text-base font-bold text-white flex items-center gap-2">
+            <h3 className="text-sm sm:text-base font-bold text-white flex items-center gap-2 flex-wrap">
               {title}
-              <span className="text-xs font-mono font-normal text-purple-400 bg-purple-950/60 border border-purple-800/60 px-2 py-0.5 rounded-full">
+              <span className="text-[11px] font-mono font-normal text-purple-400 bg-purple-950/60 border border-purple-800/60 px-2 py-0.5 rounded-full">
                 11 Standard Placeholders
               </span>
             </h3>
@@ -401,9 +384,9 @@ export const PhotoUploadSection: React.FC<PhotoUploadSectionProps> = ({
           </div>
         </div>
 
-        {/* Status Badge & Batch Upload Action */}
-        <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
-          {!readOnly && (
+        {/* Status Badge, Action Buttons & Dropdown Toggle */}
+        <div className="flex flex-wrap items-center gap-2 self-start lg:self-auto shrink-0" onClick={(e) => e.stopPropagation()}>
+          {!readOnly && isOpen && (
             <>
               <input
                 ref={batchInputRef}
@@ -425,7 +408,7 @@ export const PhotoUploadSection: React.FC<PhotoUploadSectionProps> = ({
             </>
           )}
 
-          {!readOnly && coverage.uploaded > 0 && (
+          {!readOnly && isOpen && coverage.uploaded > 0 && (
             <button
               type="button"
               onClick={downloadAllRenamedPhotos}
@@ -451,75 +434,92 @@ export const PhotoUploadSection: React.FC<PhotoUploadSectionProps> = ({
             )}
             <span>Mapped: <strong>{coverage.uploaded}</strong> / 11 ({coverage.percentage}%)</span>
           </div>
+
+          {/* Expand / Collapse Dropdown Button */}
+          <button
+            type="button"
+            onClick={() => setIsOpen(!isOpen)}
+            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer border ${
+              isOpen
+                ? 'bg-purple-950/80 hover:bg-purple-900 text-purple-300 border-purple-700/60 shadow-sm'
+                : 'bg-gradient-to-r from-purple-900/60 to-indigo-900/60 hover:from-purple-800/80 hover:to-indigo-800/80 text-purple-200 border-purple-500/40 shadow'
+            }`}
+          >
+            <span>{isOpen ? 'Collapse Gallery' : 'Open Photo Gallery'}</span>
+            <ChevronDown className={`w-4 h-4 text-purple-300 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
+          </button>
         </div>
       </div>
 
-      {batchFeedback && (
-        <div className="p-3 rounded-xl bg-purple-950/70 border border-purple-500/60 text-purple-200 text-xs flex items-center gap-2 animate-in fade-in">
-          <Sparkles className="w-4 h-4 text-purple-400 shrink-0" />
-          <span>{batchFeedback}</span>
-        </div>
-      )}
+      {/* Collapsible Content Area */}
+      {isOpen && (
+        <div className="p-4 sm:p-6 pt-0 space-y-5 border-t border-slate-800/80 animate-in fade-in slide-in-from-top-2 duration-200">
+          {batchFeedback && (
+            <div className="p-3 rounded-xl bg-purple-950/70 border border-purple-500/60 text-purple-200 text-xs flex items-center gap-2 animate-in fade-in">
+              <Sparkles className="w-4 h-4 text-purple-400 shrink-0" />
+              <span>{batchFeedback}</span>
+            </div>
+          )}
 
-      {/* Dynamic Document Section Tabs */}
-      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs border-b border-slate-800/80 scrollbar-thin">
-        <button
-          type="button"
-          onClick={() => setActiveTab('all')}
-          className={`px-3 py-1.5 rounded-lg font-semibold flex items-center gap-1.5 transition-all shrink-0 cursor-pointer ${
-            activeTab === 'all'
-              ? 'bg-purple-600 text-white shadow'
-              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
-          }`}
-        >
-          <Grid3X3 className="w-3.5 h-3.5" />
-          <span>All 11 Placeholders</span>
-          <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-black/30">{coverage.uploaded}/11</span>
-        </button>
-
-        {(Object.keys(REPORT_PHOTO_SECTIONS) as ReportSectionCategory[]).map(secKey => {
-          const sec = REPORT_PHOTO_SECTIONS[secKey];
-          const stats = coverage.sectionStats[secKey];
-          const isComplete = stats.uploaded === stats.total;
-
-          return (
+          {/* Dynamic Document Section Tabs */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs border-b border-slate-800/80 scrollbar-thin">
             <button
-              key={secKey}
               type="button"
-              onClick={() => setActiveTab(secKey)}
+              onClick={() => setActiveTab('all')}
               className={`px-3 py-1.5 rounded-lg font-semibold flex items-center gap-1.5 transition-all shrink-0 cursor-pointer ${
-                activeTab === secKey
-                  ? 'bg-slate-800 text-cyan-300 border border-cyan-500/40 shadow'
+                activeTab === 'all'
+                  ? 'bg-purple-600 text-white shadow'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
               }`}
             >
-              <Layers className="w-3.5 h-3.5 text-cyan-400" />
-              <span>{sec.title}</span>
-              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
-                isComplete ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-slate-900 text-slate-300'
-              }`}>
-                {stats.uploaded}/{stats.total}
-              </span>
+              <Grid3X3 className="w-3.5 h-3.5" />
+              <span>All 11 Placeholders</span>
+              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-black/30">{coverage.uploaded}/11</span>
             </button>
-          );
-        })}
-      </div>
 
-      {/* Section Description Bar when a specific tab is active */}
-      {activeTab !== 'all' && (
-        <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 flex items-center justify-between text-xs text-slate-300">
-          <div>
-            <span className="font-bold text-cyan-300 mr-2">{REPORT_PHOTO_SECTIONS[activeTab].title}</span>
-            <span className="text-slate-400">{REPORT_PHOTO_SECTIONS[activeTab].description}</span>
+            {(Object.keys(REPORT_PHOTO_SECTIONS) as ReportSectionCategory[]).map(secKey => {
+              const sec = REPORT_PHOTO_SECTIONS[secKey];
+              const stats = coverage.sectionStats[secKey];
+              const isComplete = stats.uploaded === stats.total;
+
+              return (
+                <button
+                  key={secKey}
+                  type="button"
+                  onClick={() => setActiveTab(secKey)}
+                  className={`px-3 py-1.5 rounded-lg font-semibold flex items-center gap-1.5 transition-all shrink-0 cursor-pointer ${
+                    activeTab === secKey
+                      ? 'bg-slate-800 text-cyan-300 border border-cyan-500/40 shadow'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+                  }`}
+                >
+                  <Layers className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>{sec.title}</span>
+                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
+                    isComplete ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-slate-900 text-slate-300'
+                  }`}>
+                    {stats.uploaded}/{stats.total}
+                  </span>
+                </button>
+              );
+            })}
           </div>
-          <span className="text-[11px] font-mono text-purple-400 bg-purple-950/60 px-2 py-0.5 rounded border border-purple-800/60 shrink-0">
-            {REPORT_PHOTO_SECTIONS[activeTab].page}
-          </span>
-        </div>
-      )}
 
-      {/* 2-Column Card Grid on Desktop, 1-Column on Mobile */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Section Description Bar when a specific tab is active */}
+          {activeTab !== 'all' && (
+            <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 flex items-center justify-between text-xs text-slate-300">
+              <div>
+                <span className="font-bold text-cyan-300 mr-2">{REPORT_PHOTO_SECTIONS[activeTab].title}</span>
+                <span className="text-slate-400">{REPORT_PHOTO_SECTIONS[activeTab].description}</span>
+              </div>
+              <span className="text-[11px] font-mono text-purple-400 bg-purple-950/60 px-2 py-0.5 rounded border border-purple-800/60 shrink-0">
+                {REPORT_PHOTO_SECTIONS[activeTab].page}
+              </span>
+            </div>
+          )}
+
+          {/* 2-Column Card Grid on Desktop, 1-Column on Mobile */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {filteredConfigs.map((config, index) => {
           const photoUrl = getPhotoValue(config);
           const isUploaded = Boolean(photoUrl);
@@ -542,28 +542,14 @@ export const PhotoUploadSection: React.FC<PhotoUploadSectionProps> = ({
               }`}
             >
               {/* Card Header */}
-              <div className="flex items-start justify-between gap-2">
-                <div className="space-y-0.5">
-                  <div className="flex items-center gap-2">
-                    <span className="w-5 h-5 rounded-full bg-slate-800 border border-slate-700 text-[10px] font-bold text-slate-300 flex items-center justify-center">
-                      {globalIdx + 1}
-                    </span>
-                    <h4 className="text-xs sm:text-sm font-semibold text-slate-100">
-                      {config.label}
-                    </h4>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-1.5 pl-7">
-                    <span className="text-[10px] font-mono text-purple-400 bg-purple-950/50 px-1.5 py-0.5 rounded border border-purple-900/60">
-                      {`{{${config.key}}}`}
-                    </span>
-                    <span className="text-[10px] text-cyan-400 bg-cyan-950/50 px-1.5 py-0.5 rounded border border-cyan-900/60 font-mono">
-                      {config.documentPage}
-                    </span>
-                    <span className="text-[10px] text-amber-300 bg-amber-950/40 px-1.5 py-0.5 rounded border border-amber-800/50 font-mono flex items-center gap-1" title="Standardized Filename for Auto-Mapping">
-                      <Tag className="w-2.5 h-2.5" />
-                      {config.suggestedFilename}
-                    </span>
-                  </div>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="w-5 h-5 rounded-full bg-slate-800 border border-slate-700 text-[10px] font-bold text-slate-300 flex items-center justify-center shrink-0">
+                    {globalIdx + 1}
+                  </span>
+                  <h4 className="text-xs sm:text-sm font-semibold text-slate-100">
+                    {config.label}
+                  </h4>
                 </div>
 
                 {/* Status Indicator */}
@@ -571,12 +557,12 @@ export const PhotoUploadSection: React.FC<PhotoUploadSectionProps> = ({
                   {isUploaded ? (
                     <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-400 bg-emerald-950/60 border border-emerald-800/60 px-2 py-0.5 rounded-full">
                       <CheckCircle2 className="w-3 h-3" />
-                      Mapped (6×4 cm)
+                      Uploaded
                     </span>
                   ) : (
                     <span className="inline-flex items-center gap-1 text-[10px] text-slate-400 bg-slate-800/60 border border-slate-700/60 px-2 py-0.5 rounded-full">
                       <span className="w-1.5 h-1.5 rounded-full bg-slate-500" />
-                      Placeholder Pending
+                      Not Uploaded
                     </span>
                   )}
                 </div>
@@ -646,15 +632,6 @@ export const PhotoUploadSection: React.FC<PhotoUploadSectionProps> = ({
                           </button>
                           <button
                             type="button"
-                            onClick={() => setSwapModal({ sourceKey: config.key, sourceLabel: config.label, sourceUrl: photoUrl })}
-                            className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-medium flex items-center gap-1 transition-colors cursor-pointer shadow-md"
-                            title="Re-assign / Swap with another placeholder"
-                          >
-                            <ArrowRightLeft className="w-3.5 h-3.5" />
-                            <span>Re-map</span>
-                          </button>
-                          <button
-                            type="button"
                             onClick={() => fileInputRefs.current[config.key]?.click()}
                             className="px-2.5 py-1.5 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-xs font-medium flex items-center gap-1 transition-colors cursor-pointer shadow-md"
                             title="Replace Photo"
@@ -696,15 +673,6 @@ export const PhotoUploadSection: React.FC<PhotoUploadSectionProps> = ({
                         >
                           <Camera className="w-3 h-3 text-purple-400" />
                           <span>Camera</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setSwapModal({ sourceKey: config.key, sourceLabel: config.label, sourceUrl: photoUrl })}
-                          className="px-2 py-1 bg-slate-800/80 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-medium flex items-center gap-1 border border-slate-700 transition-colors cursor-pointer"
-                          title="Swap with another section"
-                        >
-                          <ArrowRightLeft className="w-3 h-3 text-indigo-400" />
-                          <span>Swap</span>
                         </button>
                       </div>
 
@@ -776,86 +744,6 @@ export const PhotoUploadSection: React.FC<PhotoUploadSectionProps> = ({
             </div>
           );
         })}
-      </div>
-
-      {/* Swap / Re-map Target Modal */}
-      {swapModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md animate-fade-in">
-          <div className="relative max-w-lg w-full bg-slate-900 border border-slate-700 rounded-2xl overflow-hidden shadow-2xl flex flex-col">
-            <div className="flex items-center justify-between px-5 py-3.5 bg-slate-950 border-b border-slate-800">
-              <div className="flex items-center gap-2">
-                <ArrowRightLeft className="w-4 h-4 text-indigo-400" />
-                <h4 className="text-sm font-bold text-white">Re-map or Swap Photo</h4>
-              </div>
-              <button
-                type="button"
-                onClick={() => setSwapModal(null)}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="p-5 space-y-4">
-              <div className="flex items-center gap-3 p-3 bg-slate-950 rounded-xl border border-slate-800">
-                <img src={swapModal.sourceUrl} alt="Source" className="w-14 h-14 object-contain rounded border border-slate-700 bg-black/40" />
-                <div>
-                  <span className="text-[10px] text-slate-400 uppercase font-bold">Current Assignment</span>
-                  <p className="text-xs font-bold text-white">{swapModal.sourceLabel}</p>
-                  <code className="text-[10px] text-purple-400 font-mono">{`{{${swapModal.sourceKey}}}`}</code>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-xs font-bold text-slate-300">Select Target Section / Placeholder to Move To:</label>
-                <div className="max-h-60 overflow-y-auto space-y-1.5 pr-1 scrollbar-thin">
-                  {PHOTO_UPLOAD_CONFIGS.map((target) => {
-                    const isCurrent = target.key === swapModal.sourceKey;
-                    const hasExisting = Boolean(getPhotoValue(target));
-
-                    return (
-                      <button
-                        key={target.key}
-                        type="button"
-                        disabled={isCurrent}
-                        onClick={() => handleSwapPhotos(target.key)}
-                        className={`w-full p-2.5 rounded-xl border text-left flex items-center justify-between transition-all cursor-pointer ${
-                          isCurrent 
-                            ? 'bg-slate-950/40 border-slate-800 opacity-50 cursor-not-allowed'
-                            : 'bg-slate-950 hover:bg-slate-800 border-slate-800 hover:border-indigo-500/60 text-slate-200'
-                        }`}
-                      >
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs font-semibold text-white">{target.label}</span>
-                            <span className="text-[10px] font-mono text-cyan-400 bg-cyan-950/60 px-1.5 py-0.2 rounded border border-cyan-800">
-                              {target.documentPage}
-                            </span>
-                          </div>
-                          <span className="text-[10px] font-mono text-purple-400">{`{{${target.key}}}`}</span>
-                        </div>
-
-                        <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${
-                          hasExisting ? 'bg-amber-950/70 text-amber-300 border border-amber-800' : 'bg-emerald-950/70 text-emerald-300 border border-emerald-800'
-                        }`}>
-                          {hasExisting ? 'Will Swap' : 'Empty Slot'}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-
-            <div className="px-5 py-3 bg-slate-950 border-t border-slate-800 flex justify-end">
-              <button
-                type="button"
-                onClick={() => setSwapModal(null)}
-                className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-semibold transition-colors cursor-pointer"
-              >
-                Cancel
-              </button>
-            </div>
           </div>
         </div>
       )}
