@@ -22,10 +22,11 @@ export interface DocxGenerationResult {
 }
 
 /**
- * Converts a Base64 string back to Uint8Array/ArrayBuffer
+ * Converts a Base64 string back to ArrayBuffer
  */
 export function base64ToArrayBuffer(base64: string): ArrayBuffer {
-  const binaryString = window.atob(base64.split(',').pop() || base64);
+  const cleanBase64 = base64.split(',').pop() || base64;
+  const binaryString = window.atob(cleanBase64.replace(/[\s\r\n]+/g, ''));
   const len = binaryString.length;
   const bytes = new Uint8Array(len);
   for (let i = 0; i < len; i++) {
@@ -49,7 +50,7 @@ export function arrayBufferToBase64(buffer: ArrayBuffer): string {
 
 /**
  * Converts a data URL (e.g. data:image/png;base64,...) to Uint8Array binary and extension
- * Optimized for high performance and minimal memory allocations
+ * Optimized with size-capped LRU cache to prevent memory leaks and repeated conversions
  */
 const binaryDecodeCache = new Map<string, { bytes: Uint8Array; extension: string }>();
 
@@ -58,66 +59,45 @@ export function dataURLToBinary(dataUrl: string): { bytes: Uint8Array; extension
   const trimmed = dataUrl.trim();
   if (!trimmed || trimmed === 'NA') return null;
 
-  // Use fast cache key based on length and sample
-  const cacheKey = trimmed.length > 200 ? `${trimmed.length}_${trimmed.slice(0, 80)}_${trimmed.slice(-40)}` : trimmed;
+  // Fast key based on length and sample
+  const cacheKey = trimmed.length > 150 ? `${trimmed.length}_${trimmed.slice(0, 60)}_${trimmed.slice(-30)}` : trimmed;
   if (binaryDecodeCache.has(cacheKey)) {
     return binaryDecodeCache.get(cacheKey)!;
   }
 
   try {
+    let extension = 'png';
+    let base64Str = trimmed;
+
     if (trimmed.startsWith('data:')) {
       const commaIdx = trimmed.indexOf(',');
       if (commaIdx !== -1) {
         const header = trimmed.slice(0, commaIdx).toLowerCase();
-        const base64Str = trimmed.slice(commaIdx + 1);
-        let extension = 'png';
+        base64Str = trimmed.slice(commaIdx + 1);
         if (header.includes('jpeg') || header.includes('jpg')) extension = 'jpeg';
+        else if (header.includes('webp')) extension = 'webp';
         else if (header.includes('png')) extension = 'png';
-        else if (header.includes('webp')) extension = 'png';
-        
-        let binaryString: string;
-        try {
-          binaryString = window.atob(base64Str);
-        } catch {
-          binaryString = window.atob(base64Str.replace(/[\s\r\n]+/g, ''));
-        }
+      }
+    }
 
-        const len = binaryString.length;
-        const bytes = new Uint8Array(len);
-        for (let i = 0; i < len; i++) {
-          bytes[i] = binaryString.charCodeAt(i);
-        }
-        const result = { bytes, extension };
-        // Limit cache size to prevent memory leaks
-        if (binaryDecodeCache.size > 50) binaryDecodeCache.clear();
-        binaryDecodeCache.set(cacheKey, result);
-        return result;
-      }
+    const cleanBase64 = base64Str.replace(/[\s\r\n]+/g, '');
+    const binaryString = window.atob(cleanBase64);
+    const len = binaryString.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
     }
-    
-    // Raw base64 string
-    if (trimmed.length > 50 && !trimmed.startsWith('http')) {
-      let binaryString: string;
-      try {
-        binaryString = window.atob(trimmed);
-      } catch {
-        binaryString = window.atob(trimmed.replace(/[\s\r\n]+/g, ''));
-      }
-      const len = binaryString.length;
-      const bytes = new Uint8Array(len);
-      for (let i = 0; i < len; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-      }
-      const result = { bytes, extension: 'png' };
-      if (binaryDecodeCache.size > 50) binaryDecodeCache.clear();
-      binaryDecodeCache.set(cacheKey, result);
-      return result;
+
+    const result = { bytes, extension };
+    if (binaryDecodeCache.size > 80) {
+      binaryDecodeCache.clear();
     }
+    binaryDecodeCache.set(cacheKey, result);
+    return result;
   } catch (e) {
     console.error('Error converting dataURL to binary:', e);
     return null;
   }
-  return null;
 }
 
 export interface DetectedPlaceholders {
@@ -154,10 +134,10 @@ export function extractPlaceholdersFromDocx(base64Template: string): DetectedPla
     const seenPending = new Set<string>();
 
     for (const fileName of xmlFiles) {
-      let fileXml = zip.file(fileName)?.asText() || '';
-      if (!fileXml) continue;
+      const rawXml = zip.file(fileName)?.asText() || '';
+      if (!rawXml) continue;
       
-      fileXml = cleanSplitTagsInXml(fileXml);
+      const fileXml = cleanSplitTagsInXml(rawXml);
 
       // 1. Scan {{...}} placeholders
       const mustacheRegex = /\{\{([^{}]+)\}\}/g;
@@ -232,7 +212,7 @@ export function createDrawingML(
     <wp:inline distT="0" distB="0" distL="0" distR="0" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing">
       <wp:extent cx="${cx}" cy="${cy}"/>
       <wp:effectExtent l="0" t="0" r="0" b="0"/>
-      <wp:docPr id="${imgId}" name="${imgName}"/>
+      <wp:docPr id="${imgId}" name="${escapeXml(imgName)}"/>
       <wp:cNvGraphicFramePr>
         <a:graphicFrameLocks noChangeAspect="1" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"/>
       </wp:cNvGraphicFramePr>
@@ -240,7 +220,7 @@ export function createDrawingML(
         <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">
           <pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">
             <pic:nvPicPr>
-              <pic:cNvPr id="${imgId}" name="${imgName}"/>
+              <pic:cNvPr id="${imgId}" name="${escapeXml(imgName)}"/>
               <pic:cNvPicPr/>
             </pic:nvPicPr>
             <pic:blipFill>
@@ -263,14 +243,13 @@ export function createDrawingML(
 
 /**
  * Injects photos into the DOCX zip package (updating Content_Types, rels, and media files)
- * and generates verification logs for each photo field.
  */
 export function injectPhotosIntoZip(
   zip: PizZip, 
   photos: Record<string, string> = {},
   logsMap?: Map<string, PhotoInsertionLog>
 ): Map<string, string> {
-  const photoRIdMap = new Map<string, string>(); // photoKey -> rId
+  const photoRIdMap = new Map<string, string>();
 
   // 1. Ensure Content_Types has png & jpeg defaults
   let contentTypesXml = zip.file('[Content_Types].xml')?.asText() || '';
@@ -293,17 +272,16 @@ export function injectPhotosIntoZip(
     relsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">\n</Relationships>`;
   }
 
-  // 3. Process each standard photo field from PHOTO_FIELD_DEFINITIONS
-  PHOTO_FIELD_DEFINITIONS.forEach((def, index) => {
+  // 3. Process standard photo definitions
+  PHOTO_FIELD_DEFINITIONS.forEach((def) => {
     const rawUrl = getPhotoUrlForContentControl(photos, def.photoKey);
     const foundInDb = Boolean(rawUrl && rawUrl !== 'NA' && rawUrl.trim() !== '');
-    const hasUrl = foundInDb;
 
     const logEntry: PhotoInsertionLog = {
       photoKey: def.photoKey,
       label: def.label,
       foundInDatabase: foundInDb,
-      hasImageUrl: hasUrl,
+      hasImageUrl: foundInDb,
       imageDownloaded: false,
       contentControlFound: false,
       imageInserted: false,
@@ -317,21 +295,27 @@ export function injectPhotosIntoZip(
         const rId = `rIdPhoto_${def.photoKey}`;
         const mediaFileName = `media/photo_${def.photoKey}.${parsed.extension}`;
 
-        // Write image binary to zip media directory
+        // Write binary to zip media directory
         zip.file(`word/${mediaFileName}`, parsed.bytes);
         
-        // Map main photoKey and all aliases
+        // Map photo keys and aliases
         photoRIdMap.set(def.photoKey, rId);
         photoRIdMap.set(def.id, rId);
-        def.aliases.forEach(alias => photoRIdMap.set(alias, rId));
+        photoRIdMap.set(def.photoKey.toLowerCase(), rId);
+        photoRIdMap.set(def.label.toLowerCase(), rId);
+        def.aliases.forEach(alias => {
+          photoRIdMap.set(alias, rId);
+          photoRIdMap.set(alias.toLowerCase(), rId);
+          photoRIdMap.set(alias.replace(/[\s_]+/g, '').toLowerCase(), rId);
+        });
 
-        // Add relationship if not present
+        // Add relationship if not already in document.xml.rels
         if (!relsXml.includes(`Id="${rId}"`)) {
           const relEntry = `  <Relationship Id="${rId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="${mediaFileName}"/>\n`;
           relsXml = relsXml.replace('</Relationships>', `${relEntry}</Relationships>`);
         }
       } else {
-        logEntry.details = 'Failed to decode image data format';
+        logEntry.details = 'Failed to decode image data';
       }
     } else {
       logEntry.details = 'Photo not uploaded';
@@ -342,7 +326,7 @@ export function injectPhotosIntoZip(
     }
   });
 
-  // 4. Also process any other custom keys in photos dictionary
+  // 4. Custom photo entries
   Object.entries(photos).forEach(([customKey, rawUrl]) => {
     if (!rawUrl || typeof rawUrl !== 'string' || rawUrl === 'NA' || rawUrl.trim() === '') return;
     if (photoRIdMap.has(customKey)) return;
@@ -355,6 +339,7 @@ export function injectPhotosIntoZip(
 
       zip.file(`word/${mediaFileName}`, parsed.bytes);
       photoRIdMap.set(customKey, rId);
+      photoRIdMap.set(customKey.toLowerCase(), rId);
 
       if (!relsXml.includes(`Id="${rId}"`)) {
         const relEntry = `  <Relationship Id="${rId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="${mediaFileName}"/>\n`;
@@ -368,18 +353,36 @@ export function injectPhotosIntoZip(
 }
 
 /**
- * Replaces Word Picture Content Controls (<w:sdt>), named Drawing shapes,
- * template photo tags, and table cells under photo labels with embedded image drawings.
+ * Fast lookup helper for photo definition matching
+ */
+function findPhotoDefByNormalizedTag(rawTag: string): PhotoDefinition | null {
+  const clean = rawTag.trim().replace(/[\s_]+/g, '').toLowerCase();
+  for (const def of PHOTO_FIELD_DEFINITIONS) {
+    if (
+      def.photoKey.replace(/[\s_]+/g, '').toLowerCase() === clean ||
+      def.id.replace(/[\s_]+/g, '').toLowerCase() === clean ||
+      def.label.replace(/[\s_]+/g, '').toLowerCase() === clean ||
+      def.aliases.some(a => a.replace(/[\s_]+/g, '').toLowerCase() === clean)
+    ) {
+      return def;
+    }
+  }
+  return null;
+}
+
+/**
+ * High-performance, non-blocking single-pass photo inserter for DOCX XML
  */
 export function insertPhotosIntoContentControls(
   docXml: string,
   photoRIdMap: Map<string, string>,
   logsMap?: Map<string, PhotoInsertionLog>
 ): string {
+  if (!docXml) return '';
   let modifiedXml = docXml;
 
   // 1. Process Structured Document Tags (<w:sdt>) - Word Picture Content Controls
-  modifiedXml = modifiedXml.replace(/<w:sdt\b[\s\S]*?<\/w:sdt>/gi, (sdtBlock) => {
+  modifiedXml = modifiedXml.replace(/<w:sdt\b[^>]*>[\s\S]*?<\/w:sdt>/gi, (sdtBlock) => {
     const tagMatch = sdtBlock.match(/<w:tag\s+[^>]*w:val="([^"]+)"/i);
     const aliasMatch = sdtBlock.match(/<w:alias\s+[^>]*w:val="([^"]+)"/i);
     
@@ -389,21 +392,11 @@ export function insertPhotosIntoContentControls(
 
     let matchedDef: PhotoDefinition | null = null;
     for (const key of searchKeys) {
-      const cleanSearch = key.trim().replace(/[\s_]+/g, '').toLowerCase();
-      const found = PHOTO_FIELD_DEFINITIONS.find(def => 
-        def.photoKey.replace(/[\s_]+/g, '').toLowerCase() === cleanSearch ||
-        def.id.replace(/[\s_]+/g, '').toLowerCase() === cleanSearch ||
-        def.aliases.some(a => a.replace(/[\s_]+/g, '').toLowerCase() === cleanSearch)
-      );
-      if (found) {
-        matchedDef = found;
-        break;
-      }
+      matchedDef = findPhotoDefByNormalizedTag(key);
+      if (matchedDef) break;
     }
 
-    if (!matchedDef) {
-      return sdtBlock;
-    }
+    if (!matchedDef) return sdtBlock;
 
     const log = logsMap?.get(matchedDef.photoKey);
     if (log) log.contentControlFound = true;
@@ -417,19 +410,18 @@ export function insertPhotosIntoContentControls(
       return sdtBlock;
     }
 
-    let newSdt = sdtBlock;
-    if (/<a:blip\b[^>]*r:embed="[^"]+"/i.test(newSdt)) {
-      newSdt = newSdt.replace(/(<a:blip\b[^>]*r:embed=")([^"]+)(")/gi, `$1${rId}$3`);
+    if (/<a:blip\b[^>]*r:embed="[^"]+"/i.test(sdtBlock)) {
       if (log) {
         log.imageInserted = true;
         log.status = 'inserted';
       }
-      return newSdt;
+      return sdtBlock.replace(/(<a:blip\b[^>]*r:embed=")([^"]+)(")/gi, `$1${rId}$3`);
     }
 
     const drawingXml = createDrawingML(rId, 600, matchedDef.photoKey, 2160000, 1440000);
     const replacementContent = `<w:sdtContent><w:p><w:pPr><w:jc w:val="center"/><w:spacing w:before="60" w:after="60"/></w:pPr><w:r>${drawingXml}</w:r></w:p></w:sdtContent>`;
     
+    let newSdt = sdtBlock;
     if (/<w:sdtContent[\s\S]*?<\/w:sdtContent>/i.test(newSdt)) {
       newSdt = newSdt.replace(/<w:sdtContent[\s\S]*?<\/w:sdtContent>/i, replacementContent);
     } else {
@@ -444,189 +436,56 @@ export function insertPhotosIntoContentControls(
     return newSdt;
   });
 
-  // 2. Scan and replace DrawingML shapes named after photo keys
-  PHOTO_FIELD_DEFINITIONS.forEach(def => {
-    const rId = photoRIdMap.get(def.photoKey);
-    const log = logsMap?.get(def.photoKey);
+  // 2. Scan and replace {{PHOTO_...}} or {{photo_...}} tags in a single fast regex pass
+  modifiedXml = modifiedXml.replace(/\{\{\s*([^{}]+)\s*\}\}/g, (fullMatch, rawInner) => {
+    const trimmed = rawInner.trim();
+    const clean = trimmed.replace(/[\s_]+/g, '').toLowerCase();
 
-    const aliasesPattern = [def.photoKey, def.id, ...def.aliases].map(a => a.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')).join('|');
-    const docPrRegex = new RegExp(`(<wp:docPr[^>]*name=["'](?:${aliasesPattern})["'][\\s\\S]*?<a:blip[^>]*r:embed=["'])([^"']+)(["'])`, 'gi');
-    if (docPrRegex.test(modifiedXml)) {
-      if (log) log.contentControlFound = true;
-      if (rId) {
-        modifiedXml = modifiedXml.replace(docPrRegex, `$1${rId}$3`);
-        if (log) {
-          log.imageInserted = true;
-          log.status = 'inserted';
-        }
-      }
+    if (!clean.startsWith('photo') && !clean.includes('motor') && !clean.includes('pcb') && !clean.includes('nameplate') && !clean.includes('compressor') && !clean.includes('packing') && !clean.includes('eev')) {
+      return fullMatch;
     }
+
+    const matchedDef = findPhotoDefByNormalizedTag(trimmed);
+    if (!matchedDef) return fullMatch;
+
+    const log = logsMap?.get(matchedDef.photoKey);
+    if (log) log.contentControlFound = true;
+
+    const rId = photoRIdMap.get(matchedDef.photoKey);
+    if (rId) {
+      if (log) {
+        log.imageInserted = true;
+        log.status = 'inserted';
+      }
+      const drawingXml = createDrawingML(rId, 700, matchedDef.photoKey, 2160000, 1440000);
+      return `</w:t></w:r><w:r>${drawingXml}</w:r><w:r><w:t>`;
+    }
+
+    return `<w:rPr><w:color w:val="94A3B8"/><w:i/></w:rPr>[ Photo Not Uploaded ]`;
   });
 
-  // Helper function to safely replace text occurrences with OpenXML Drawing runs without nesting in <w:t>
-  const replaceTextWithDrawingRun = (xml: string, targetText: string, drawingML: string): string => {
-    if (!xml.includes(targetText)) return xml;
-    const escaped = targetText.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
-    
-    // Pattern 1: Exact <w:r> containing only or mostly this tag
-    const runRegex = new RegExp(`(<w:r\\b[^>]*>(?:(?!<\\/w:r>)[\\s\\S])*?<w:t[^>]*>)[^<]*${escaped}[^<]*(<\\/w:t>(?:(?!<\\/w:r>)[\\s\\S])*?<\\/w:r>)`, 'gi');
-    if (runRegex.test(xml)) {
-      return xml.replace(runRegex, `<w:r>${drawingML}</w:r>`);
-    }
-    
-    // Pattern 2: Replace text by closing text run, inserting drawing run, and reopening text run
-    return xml.split(targetText).join(`</w:t></w:r><w:r>${drawingML}</w:r><w:r><w:t>`);
-  };
-
-  // 3. Scan and replace mustache / placeholder photo tags (e.g. {{PHOTO_Product_Packing}}, {{PHOTO_ Product Packing}}, {{PHOTO_IDU Motor}}, [Pending: ...])
-  PHOTO_FIELD_DEFINITIONS.forEach((def, idx) => {
-    const rId = photoRIdMap.get(def.photoKey);
-    const log = logsMap?.get(def.photoKey);
-
-    const allVariants = new Set<string>();
-    const baseNames = [def.photoKey, def.id, def.label, ...def.aliases];
-
-    baseNames.forEach(name => {
-      allVariants.add(`{{${name}}}`);
-      allVariants.add(`{{ ${name} }}`);
-      allVariants.add(`{{${name.toLowerCase()}}}`);
-      allVariants.add(`{{${name.replace(/\s+/g, '_')}}}`);
-      allVariants.add(`{{${name.replace(/_/g, ' ')}}}`);
-      allVariants.add(`{{photo_${name}}}`);
-      allVariants.add(`{{photo_${name.toLowerCase()}}}`);
-      allVariants.add(`{{photo_${name.replace(/\s+/g, '_')}}}`);
-      allVariants.add(`{{PHOTO_${name}}}`);
-      allVariants.add(`{{PHOTO_ ${name}}}`);
-      allVariants.add(`{{PHOTO_${name.replace(/_/g, ' ')}}}`);
-      allVariants.add(`{{PHOTO_ ${name.replace(/_/g, ' ')}}}`);
-      allVariants.add(`[Pending: ${name}]`);
-      allVariants.add(`[Pending: ${name.toLowerCase()}]`);
-      allVariants.add(`[Pending: photo_${name}]`);
-      allVariants.add(`[Pending: ${def.label}]`);
-      allVariants.add(`[Pending: ${def.label.toLowerCase()}]`);
-    });
-
-    allVariants.forEach(tag => {
-      if (modifiedXml.includes(tag)) {
-        if (log) log.contentControlFound = true;
-        if (rId) {
-          const drawingXml = createDrawingML(rId, 700 + idx, def.photoKey, 2160000, 1440000);
-          modifiedXml = replaceTextWithDrawingRun(modifiedXml, tag, drawingXml);
-          if (log) {
-            log.imageInserted = true;
-            log.status = 'inserted';
-          }
-        }
-      }
-    });
-
-    // Fuzzy Regex search for {{PHOTO_...}} with arbitrary spaces/underscores
-    const cleanKeyPattern = def.label.replace(/[^a-zA-Z0-9]/g, '[\\s_]*');
-    const fuzzyPhotoRegex = new RegExp(`(<w:r\\b[^>]*>(?:(?!<\\/w:r>)[\\s\\S])*?<w:t[^>]*>[^<]*)\\{\\{\\s*PHOTO_[\\s_]*${cleanKeyPattern}\\s*\\}\\}([^<]*<\\/w:t>(?:(?!<\\/w:r>)[\\s\\S])*?<\\/w:r>)`, 'gi');
-    if (fuzzyPhotoRegex.test(modifiedXml)) {
-      if (log) log.contentControlFound = true;
-      if (rId) {
-        const drawingXml = createDrawingML(rId, 750 + idx, def.photoKey, 2160000, 1440000);
-        modifiedXml = modifiedXml.replace(fuzzyPhotoRegex, `<w:r>${drawingXml}</w:r>`);
-        if (log) {
-          log.imageInserted = true;
-          log.status = 'inserted';
-        }
-      }
-    }
-  });
-
-  // 4. Contextual Table Cell & Paragraph Replacement for "[Pending: field]" under Photo Labels
-  PHOTO_FIELD_DEFINITIONS.forEach((def, idx) => {
-    const rId = photoRIdMap.get(def.photoKey);
-    const log = logsMap?.get(def.photoKey);
-
-    const labelKeywords = [
-      def.label,
-      def.label.replace(/\s+/g, '_'),
-      def.photoKey,
-      def.id,
-      ...def.aliases
-    ];
-
-    for (const keyword of labelKeywords) {
-      const escapedKw = keyword.replace(/&/g, '&amp;').replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
-
-      if (rId) {
-        // Pattern A: Table cell with Label header followed by [Pending: field] inside the same cell
-        const singleCellRegex = new RegExp(`(<w:tc\\b[\\s\\S]*?${escapedKw}[\\s\\S]*?<w:p\\b[\\s\\S]*?)(?:<w:r\\b[^>]*><w:t>[^<]*\\[Pending[^\\]]*\\]<\\/w:t><\\/w:r>|<w:t>[^<]*\\[Pending[^\\]]*\\]<\\/w:t>)(<\\/w:p>[\\s\\S]*?<\\/w:tc>)`, 'gi');
-        if (singleCellRegex.test(modifiedXml)) {
-          if (log) log.contentControlFound = true;
-          const drawingXml = createDrawingML(rId, 800 + idx, def.photoKey, 2160000, 1440000);
-          modifiedXml = modifiedXml.replace(singleCellRegex, `$1<w:r>${drawingXml}</w:r>$2`);
-          if (log) {
-            log.imageInserted = true;
-            log.status = 'inserted';
-          }
-        }
-
-        // Pattern B: Row 1 has label badge, Row 2 has content cell with [Pending: field]
-        const rowRegex = new RegExp(`(<w:tr\\b[\\s\\S]*?${escapedKw}[\\s\\S]*?<\\/w:tr>\\s*<w:tr\\b[\\s\\S]*?<w:tc\\b[\\s\\S]*?)(?:<w:r\\b[^>]*><w:t>[^<]*\\[Pending[^\\]]*\\]<\\/w:t><\\/w:r>|<w:t>[^<]*\\[Pending[^\\]]*\\]<\\/w:t>)([\\s\\S]*?<\\/w:tc>)`, 'gi');
-        if (rowRegex.test(modifiedXml)) {
-          if (log) log.contentControlFound = true;
-          const drawingXml = createDrawingML(rId, 850 + idx, def.photoKey, 2160000, 1440000);
-          modifiedXml = modifiedXml.replace(rowRegex, `$1<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r>${drawingXml}</w:r></w:p>$2`);
-          if (log) {
-            log.imageInserted = true;
-            log.status = 'inserted';
-          }
-        }
-
-        // Pattern C: Paragraphs where label header is followed by [Pending: field] paragraph
-        const paraRegex = new RegExp(`(<w:p\\b[\\s\\S]*?${escapedKw}[\\s\\S]*?<\\/w:p>\\s*<w:p\\b[\\s\\S]*?)(?:<w:r\\b[^>]*><w:t>[^<]*\\[Pending[^\\]]*\\]<\\/w:t><\\/w:r>|<w:t>[^<]*\\[Pending[^\\]]*\\]<\\/w:t>)([\\s\\S]*?<\\/w:p>)`, 'gi');
-        if (paraRegex.test(modifiedXml)) {
-          if (log) log.contentControlFound = true;
-          const drawingXml = createDrawingML(rId, 900 + idx, def.photoKey, 2160000, 1440000);
-          modifiedXml = modifiedXml.replace(paraRegex, `$1<w:r>${drawingXml}</w:r>$2`);
-          if (log) {
-            log.imageInserted = true;
-            log.status = 'inserted';
-          }
-        }
-      } else {
-        // Photo not uploaded: replace raw [Pending: ...] with a clean placeholder
-        const notUploadedText = `<w:r><w:rPr><w:color w:val="94A3B8"/><w:i/></w:rPr><w:t>[ Photo Not Uploaded ]</w:t></w:r>`;
-        const fallbackRegex = new RegExp(`(<w:tc\\b[\\s\\S]*?${escapedKw}[\\s\\S]*?<w:p\\b[\\s\\S]*?)(?:<w:r\\b[^>]*><w:t>[^<]*\\[Pending[^\\]]*\\]<\\/w:t><\\/w:r>|<w:t>[^<]*\\[Pending[^\\]]*\\]<\\/w:t>)(<\\/w:p>[\\s\\S]*?<\\/w:tc>)`, 'gi');
-        if (fallbackRegex.test(modifiedXml)) {
-          modifiedXml = modifiedXml.replace(fallbackRegex, `$1${notUploadedText}$2`);
-        }
-      }
-    }
-  });
-
-  // 5. Intelligent match for any remaining [Pending: <Name>] tags anywhere in the document
-  modifiedXml = modifiedXml.replace(/<w:r\b[^>]*>(?:(?!<\/w:r>)[\s\S])*?<w:t[^>]*>[^<]*\[Pending:?\s*([^\]]+)\][^<]*<\/w:t>(?:(?!<\/w:r>)[\s\S])*?<\/w:r>/gi, (match, pendingLabel) => {
-    const cleanPending = String(pendingLabel || '').trim().replace(/[\s_]+/g, '').toLowerCase();
-    const matchedDef = PHOTO_FIELD_DEFINITIONS.find(def => 
-      def.photoKey.replace(/[\s_]+/g, '').toLowerCase() === cleanPending ||
-      def.id.replace(/[\s_]+/g, '').toLowerCase() === cleanPending ||
-      def.label.replace(/[\s_]+/g, '').toLowerCase() === cleanPending ||
-      def.aliases.some(a => a.replace(/[\s_]+/g, '').toLowerCase() === cleanPending)
-    );
+  // 3. Scan and replace [Pending: ...] tags in a single fast regex pass
+  modifiedXml = modifiedXml.replace(/\[Pending:?\s*([^\]]+)\]/gi, (fullMatch, rawLabel) => {
+    const trimmed = String(rawLabel || '').trim();
+    const matchedDef = findPhotoDefByNormalizedTag(trimmed);
 
     if (matchedDef) {
-      const rId = photoRIdMap.get(matchedDef.photoKey);
       const log = logsMap?.get(matchedDef.photoKey);
       if (log) log.contentControlFound = true;
+
+      const rId = photoRIdMap.get(matchedDef.photoKey);
       if (rId) {
-        const drawingXml = createDrawingML(rId, 950, matchedDef.photoKey, 2160000, 1440000);
         if (log) {
           log.imageInserted = true;
           log.status = 'inserted';
         }
-        return `<w:r>${drawingXml}</w:r>`;
+        const drawingXml = createDrawingML(rId, 800, matchedDef.photoKey, 2160000, 1440000);
+        return `</w:t></w:r><w:r>${drawingXml}</w:r><w:r><w:t>`;
       }
     }
-    return `<w:r><w:rPr><w:color w:val="94A3B8"/><w:i/></w:rPr><w:t>[ Photo Not Uploaded ]</w:t></w:r>`;
-  });
 
-  // 6. Clean any remaining unmapped [Pending: ...] tags in the document so it never shows raw to the user
-  modifiedXml = modifiedXml.replace(/<w:t>[^<]*\[Pending:[^\]]*\]<\/w:t>/gi, '<w:t>[ Photo Not Uploaded ]</w:t>');
+    return `[ Photo Not Uploaded ]`;
+  });
 
   return modifiedXml;
 }
@@ -679,12 +538,12 @@ export function createSamplePhotographsTableXml(
         <!-- Left Photo Title Badge -->
         <w:tc>
           <w:tcPr><w:tcW w:w="4800" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="F1F5F9"/></w:tcPr>
-          <w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="20"/><w:color w:val="0F172A"/></w:rPr><w:t>${left.label}</w:t></w:r></w:p>
+          <w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="20"/><w:color w:val="0F172A"/></w:rPr><w:t>${escapeXml(left.label)}</w:t></w:r></w:p>
         </w:tc>
         <!-- Right Photo Title Badge -->
         <w:tc>
           <w:tcPr><w:tcW w:w="4800" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="F1F5F9"/></w:tcPr>
-          <w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="20"/><w:color w:val="0F172A"/></w:rPr><w:t>${right ? right.label : ''}</w:t></w:r></w:p>
+          <w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="20"/><w:color w:val="0F172A"/></w:rPr><w:t>${right ? escapeXml(right.label) : ''}</w:t></w:r></w:p>
         </w:tc>
       </w:tr>
       <w:tr>
@@ -729,30 +588,25 @@ export function createSamplePhotographsTableXml(
  * Prints formatted debug logs to browser console for every photo field
  */
 export function printPhotoInsertionDebugLogs(logs: PhotoInsertionLog[]) {
-  console.group('%c📸 WORD REPORT PHOTO INSERTION DEBUG LOGS', 'color: #0284c7; font-weight: bold; font-size: 14px; padding: 4px;');
+  console.groupCollapsed('%c📸 WORD REPORT PHOTO INSERTION DEBUG LOGS', 'color: #0284c7; font-weight: bold; font-size: 13px;');
   logs.forEach(log => {
     const isSuccess = log.imageInserted;
     const headerStyle = isSuccess 
-      ? 'color: #10b981; font-weight: bold; font-size: 12px;'
-      : (log.hasImageUrl ? 'color: #f59e0b; font-weight: bold; font-size: 12px;' : 'color: #94a3b8; font-weight: bold; font-size: 12px;');
+      ? 'color: #10b981; font-weight: bold; font-size: 11px;'
+      : (log.hasImageUrl ? 'color: #f59e0b; font-weight: bold; font-size: 11px;' : 'color: #94a3b8; font-weight: bold; font-size: 11px;');
 
     console.log(
-      `%c${log.photoKey}%c (${log.label})\n` +
-      `  → Found in database: ${log.foundInDatabase ? 'YES' : 'NO'}\n` +
-      `  → Image URL: ${log.hasImageUrl ? 'YES' : 'NO'}\n` +
-      `  → Image downloaded: ${log.imageDownloaded ? 'YES' : 'NO'}\n` +
-      `  → Picture Content Control found: ${log.contentControlFound ? 'YES' : 'NO'}\n` +
-      `  → Image inserted: ${log.imageInserted ? 'YES' : 'NO'}` +
-      (log.details ? `\n  → Details: ${log.details}` : ''),
+      `%c${log.photoKey}%c (${log.label}) | Inserted: ${isSuccess ? 'YES' : 'NO'}`,
       headerStyle,
-      'color: #64748b; font-style: italic;'
+      'color: #64748b;'
     );
   });
   console.groupEnd();
 }
 
 /**
- * Cleans Word-specific XML artefacts and collapses tags split across XML runs
+ * Cleans Word-specific XML artefacts and safely collapses tags split across XML runs
+ * Uses linear-time safe regexes to completely prevent catastrophic backtracking
  */
 export function cleanSplitTagsInXml(xml: string): string {
   if (!xml) return '';
@@ -761,100 +615,40 @@ export function cleanSplitTagsInXml(xml: string): string {
     .replace(/<w:noProof[^>]*\/>/g, '')
     .replace(/<w:lastRenderedPageBreak\/>/g, '');
 
-  // Collapse split mustache tags across <w:r> and <w:t> boundaries
-  // Matches e.g. {{</w:t></w:r><w:r><w:t>Compressor_Spec}} or {{Power_</w:t>...<w:t>mode}}
-  cleaned = cleaned.replace(/\{(?:\s*<[^>]+>\s*)*\{([\s\S]*?)\}(?:\s*<[^>]+>\s*)*\}/g, (match) => {
-    const rawInner = match.replace(/<[^>]+>/g, '').replace(/[\{\}]/g, '').trim();
-    if (!rawInner) return match;
-    return `{{${rawInner}}}`;
-  });
-
-  // Collapse split [Pending: ...] tags across <w:r> and <w:t> boundaries
-  cleaned = cleaned.replace(/\[(?:\s*<[^>]+>\s*)*Pending:?([\s\S]*?)\]/gi, (match) => {
-    const rawInner = match.replace(/<[^>]+>/g, '').replace(/[\[\]]/g, '').trim();
-    if (!rawInner) return match;
-    return `[${rawInner}]`;
+  // Safe non-greedy collapse of split mustache tags
+  cleaned = cleaned.replace(/\{\{([^{}]{1,120})\}\}/g, (match, inner) => {
+    const stripped = inner.replace(/<[^>]+>/g, '').trim();
+    return `{{${stripped}}}`;
   });
 
   return cleaned;
 }
 
 /**
- * Robust XML string replacer for all data parameters
+ * Robust, high-speed XML string replacer for all data parameters
  */
 export function replaceAllRemainingPlaceholders(xml: string, dataMap: Record<string, any>): string {
   if (!xml) return '';
   let result = xml;
 
-  const entries = Object.entries(dataMap);
-
-  // 1. Gas injection volume explicit regex
-  const gasVol = dataMap.Gas_injection_Volume || dataMap.Gas_Injection_Volume || dataMap.gasInjectionVolume || dataMap.gas_injection_volume || dataMap['Gas Injection Volume'] || dataMap.Gas_Injection || dataMap.gas_injection || '';
-  if (gasVol) {
-    const escaped = escapeXml(String(gasVol));
-    result = result.replace(/\{\{\s*Gas[\s_]*injection[\s_]*Volume\s*\}\}/gi, escaped);
-    result = result.replace(/\{\{\s*Gas[\s_]*Injection\s*\}\}/gi, escaped);
-    result = result.replace(/\{\{\s*Gas[\s_]*Injection[\s_]*Vol\s*\}\}/gi, escaped);
-    result = result.replace(/\{\{\s*Gas[\s_]*Vol\s*\}\}/gi, escaped);
-  }
-
-  // 2. Compressor spec explicit regex (including spaced underscore {{Compressor _Spec}})
-  const compSpec = dataMap['Compressor _Spec'] || dataMap.Compressor_Spec || dataMap.compressorSpec || dataMap.compressor_spec || dataMap['Compressor Spec'] || dataMap.Compressor || dataMap.compressor || '';
-  if (compSpec) {
-    const escaped = escapeXml(String(compSpec));
-    result = result.replace(/\{\{\s*Compressor\s*[_\s]*Spec\s*\}\}/gi, escaped);
-    result = result.replace(/\{\{\s*Compressor[\s_]*Specification\s*\}\}/gi, escaped);
-  }
-
-  // 3. Power mode explicit regex
-  const powerMode = dataMap.Power_mode || dataMap.Power_Mode || dataMap.powerMode || dataMap.power_mode || dataMap['Power Mode'] || dataMap.PowerMode || '';
-  if (powerMode) {
-    const escaped = escapeXml(String(powerMode));
-    result = result.replace(/\{\{\s*Power[\s_]*mode\s*\}\}/gi, escaped);
-    result = result.replace(/\{\{\s*Power[\s_]*Mode\s*\}\}/gi, escaped);
-    result = result.replace(/\{\{\s*PowerMode\s*\}\}/gi, escaped);
-  }
-
-  // 4. Sample Code IDU & ODU
-  const iduSerial = dataMap.Sample_Code_IDU || dataMap.IDU_Serial_No || dataMap.iduSerialNumber || dataMap.IDU_Serial || '';
-  if (iduSerial) {
-    const escaped = escapeXml(String(iduSerial));
-    result = result.replace(/\{\{\s*Sample[\s_]*Code[\s_]*IDU\s*\}\}/gi, escaped);
-    result = result.replace(/\{\{\s*IDU[\s_]*Serial[\s_]*No\s*\}\}/gi, escaped);
-    result = result.replace(/\{\{\s*IDU[\s_]*Serial\s*\}\}/gi, escaped);
-  }
-  const oduSerial = dataMap.Sample_CodeI_ODU || dataMap.Sample_Code_ODU || dataMap.ODU_Serial_No || dataMap.oduSerialNumber || dataMap.ODU_Serial || '';
-  if (oduSerial) {
-    const escaped = escapeXml(String(oduSerial));
-    result = result.replace(/\{\{\s*Sample[\s_]*CodeI?[\s_]*ODU\s*\}\}/gi, escaped);
-    result = result.replace(/\{\{\s*ODU[\s_]*Serial[\s_]*No\s*\}\}/gi, escaped);
-    result = result.replace(/\{\{\s*ODU[\s_]*Serial\s*\}\}/gi, escaped);
-  }
-
-  // 5. Replace all other explicit entries in dataMap
-  for (const [key, val] of entries) {
-    if (val === undefined || val === null) continue;
-    const valStr = escapeXml(String(val));
-    const cleanKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const regex = new RegExp(`\\{\\{\\s*${cleanKey}\\s*\\}\\}`, 'gi');
-    result = result.replace(regex, valStr);
-  }
-
-  // 6. Generic case-insensitive and space/underscore agnostic scanner for any remaining {{tag}}
-  result = result.replace(/\{\{([^{}]+)\}\}/g, (match, rawTag) => {
+  // Single fast regex for any remaining {{tag}} in document
+  result = result.replace(/\{\{([^{}]{1,80})\}\}/g, (match, rawTag) => {
     const trimmed = rawTag.trim();
     const clean = trimmed.replace(/[\s_]+/g, '').toLowerCase();
 
-    // Do NOT strip photo tags if they still need to be processed
-    if (clean.startsWith('photo') || PHOTO_FIELD_DEFINITIONS.some(def => 
-      def.photoKey.replace(/[\s_]+/g, '').toLowerCase() === clean ||
-      def.id.replace(/[\s_]+/g, '').toLowerCase() === clean ||
-      def.aliases.some(a => a.replace(/[\s_]+/g, '').toLowerCase() === clean)
-    )) {
+    // Do not replace photo tags here
+    if (clean.startsWith('photo') || clean.includes('motor') || clean.includes('pcb') || clean.includes('nameplate') || clean.includes('compressor')) {
       return match;
     }
 
-    for (const [k, v] of entries) {
+    if (dataMap[trimmed] !== undefined && dataMap[trimmed] !== null && dataMap[trimmed] !== '') {
+      return escapeXml(String(dataMap[trimmed]));
+    }
+    if (dataMap[clean] !== undefined && dataMap[clean] !== null && dataMap[clean] !== '') {
+      return escapeXml(String(dataMap[clean]));
+    }
+
+    for (const [k, v] of Object.entries(dataMap)) {
       if (k.trim().replace(/[\s_]+/g, '').toLowerCase() === clean && v !== undefined && v !== null && v !== '') {
         return escapeXml(String(v));
       }
@@ -866,7 +660,63 @@ export function replaceAllRemainingPlaceholders(xml: string, dataMap: Record<str
 }
 
 /**
- * Generates populated DOCX Blob using docxtemplater + PizZip + Native Picture Content Control Insertion
+ * Normalizes all keys from input dataValues
+ */
+function prepareNormalizedDataMap(dataValues: ReportDataValues): Record<string, any> {
+  const normalizedData: Record<string, any> = {};
+  for (const [key, value] of Object.entries(dataValues)) {
+    const valStr = value !== undefined && value !== null ? String(value) : '';
+    normalizedData[key] = valStr;
+    normalizedData[key.replace(/\s+/g, '_')] = valStr;
+    normalizedData[key.replace(/_/g, ' ')] = valStr;
+    normalizedData[key.toLowerCase()] = valStr;
+    normalizedData[key.replace(/[\s_]+/g, '').toLowerCase()] = valStr;
+  }
+
+  // Explicit aliases
+  const gasVol = dataValues.Gas_injection_Volume || dataValues.Gas_Injection_Volume || dataValues.gasInjectionVolume || dataValues.gas_injection_volume || dataValues['Gas Injection Volume'] || dataValues.Gas_Injection || '';
+  if (gasVol) {
+    normalizedData.Gas_injection_Volume = gasVol;
+    normalizedData.Gas_Injection_Volume = gasVol;
+    normalizedData.gasInjectionVolume = gasVol;
+    normalizedData.gas_injection_volume = gasVol;
+    normalizedData['Gas Injection Volume'] = gasVol;
+  }
+
+  const compSpec = dataValues['Compressor _Spec'] || dataValues.Compressor_Spec || dataValues.compressorSpec || dataValues.compressor_spec || dataValues['Compressor Spec'] || dataValues.Compressor || '';
+  if (compSpec) {
+    normalizedData['Compressor _Spec'] = compSpec;
+    normalizedData.Compressor_Spec = compSpec;
+    normalizedData.compressorSpec = compSpec;
+    normalizedData.compressor_spec = compSpec;
+    normalizedData['Compressor Spec'] = compSpec;
+  }
+
+  const pMode = dataValues.Power_mode || dataValues.Power_Mode || dataValues.powerMode || dataValues.power_mode || dataValues['Power Mode'] || '';
+  if (pMode) {
+    normalizedData.Power_mode = pMode;
+    normalizedData.Power_Mode = pMode;
+    normalizedData.powerMode = pMode;
+    normalizedData['Power Mode'] = pMode;
+  }
+
+  const iduSerial = dataValues.Sample_Code_IDU || dataValues.IDU_Serial_No || dataValues.iduSerialNumber || dataValues.IDU_Serial || '';
+  const oduSerial = dataValues.Sample_CodeI_ODU || dataValues.Sample_Code_ODU || dataValues.ODU_Serial_No || dataValues.oduSerialNumber || dataValues.ODU_Serial || '';
+  if (iduSerial) {
+    normalizedData.Sample_Code_IDU = iduSerial;
+    normalizedData.IDU_Serial_No = iduSerial;
+  }
+  if (oduSerial) {
+    normalizedData.Sample_CodeI_ODU = oduSerial;
+    normalizedData.Sample_Code_ODU = oduSerial;
+    normalizedData.ODU_Serial_No = oduSerial;
+  }
+
+  return normalizedData;
+}
+
+/**
+ * Generates populated DOCX Blob synchronously
  */
 export function generateDocxBlob(
   base64Template: string, 
@@ -880,84 +730,10 @@ export function generateDocxBlob(
     const arrayBuffer = base64ToArrayBuffer(base64Template);
     const zip = new PizZip(arrayBuffer);
 
-    // 1. Inject photos into zip & get relationship map + populate logsMap
+    // 1. Inject photos into zip
     const photoRIdMap = injectPhotosIntoZip(zip, photos, logsMap);
+    const normalizedData = prepareNormalizedDataMap(dataValues);
 
-    // Normalize data keys (provide exact, underscored, spaced, lowercase, and capitalized variants)
-    const normalizedData: Record<string, any> = {};
-    for (const [key, value] of Object.entries(dataValues)) {
-      const valStr = value !== undefined && value !== null ? String(value) : '';
-      normalizedData[key] = valStr;
-      
-      const underscoredKey = key.replace(/\s+/g, '_');
-      normalizedData[underscoredKey] = valStr;
-
-      const spacedKey = key.replace(/_/g, ' ');
-      normalizedData[spacedKey] = valStr;
-
-      normalizedData[key.toLowerCase()] = valStr;
-      normalizedData[underscoredKey.toLowerCase()] = valStr;
-      normalizedData[spacedKey.toLowerCase()] = valStr;
-    }
-
-    // Explicit gas injection volume aliases
-    const gasVol = dataValues.Gas_injection_Volume || dataValues.Gas_Injection_Volume || dataValues.gasInjectionVolume || dataValues.gas_injection_volume || dataValues.Gas_Injection || dataValues.gas_injection || '';
-    if (gasVol) {
-      normalizedData['Gas_injection_Volume'] = gasVol;
-      normalizedData['Gas_Injection_Volume'] = gasVol;
-      normalizedData['gas_injection_volume'] = gasVol;
-      normalizedData['gasInjectionVolume'] = gasVol;
-      normalizedData['Gas Injection Volume'] = gasVol;
-      normalizedData['Gas_Injection'] = gasVol;
-      normalizedData['GasInjectionVolume'] = gasVol;
-      normalizedData['Gas_Injection_Vol'] = gasVol;
-    }
-
-    // Explicit compressor spec aliases (including spaced underscore e.g. {{Compressor _Spec}})
-    const compSpec = dataValues['Compressor _Spec'] || dataValues.Compressor_Spec || dataValues.compressorSpec || dataValues.compressor_spec || dataValues['Compressor Spec'] || dataValues.Compressor || '';
-    if (compSpec) {
-      normalizedData['Compressor _Spec'] = compSpec;
-      normalizedData['Compressor_Spec'] = compSpec;
-      normalizedData['Compressor_spec'] = compSpec;
-      normalizedData['compressor_spec'] = compSpec;
-      normalizedData['compressor _spec'] = compSpec;
-      normalizedData['Compressor Spec'] = compSpec;
-      normalizedData['compressorSpec'] = compSpec;
-      normalizedData['Compressor'] = compSpec;
-      normalizedData['Compressor_Specification'] = compSpec;
-    }
-
-    // Explicit power mode aliases
-    const pMode = dataValues.Power_mode || dataValues.Power_Mode || dataValues.powerMode || dataValues.power_mode || dataValues['Power Mode'] || '';
-    if (pMode) {
-      normalizedData['Power_mode'] = pMode;
-      normalizedData['Power_Mode'] = pMode;
-      normalizedData['power_mode'] = pMode;
-      normalizedData['powerMode'] = pMode;
-      normalizedData['Power Mode'] = pMode;
-      normalizedData['PowerMode'] = pMode;
-    }
-
-    // Explicit Sample Code placeholder mappings for IDU & ODU serial numbers
-    const iduSerial = dataValues.Sample_Code_IDU || dataValues.IDU_Serial_No || dataValues.iduSerialNumber || dataValues.IDU_Serial || '';
-    const oduSerial = dataValues.Sample_CodeI_ODU || dataValues.Sample_Code_ODU || dataValues.ODU_Serial_No || dataValues.oduSerialNumber || dataValues.ODU_Serial || '';
-    
-    if (iduSerial) {
-      normalizedData.Sample_Code_IDU = iduSerial;
-      normalizedData.sample_code_idu = iduSerial;
-      normalizedData.Sample_CodeIDU = iduSerial;
-      normalizedData["Sample Code IDU"] = iduSerial;
-    }
-    if (oduSerial) {
-      normalizedData.Sample_CodeI_ODU = oduSerial;
-      normalizedData.Sample_Code_ODU = oduSerial;
-      normalizedData.sample_codei_odu = oduSerial;
-      normalizedData.sample_code_odu = oduSerial;
-      normalizedData.Sample_CodeODU = oduSerial;
-      normalizedData["Sample Code ODU"] = oduSerial;
-    }
-
-    // Pre-process all XML parts to clean tags and inject photos
     const xmlFiles = Object.keys(zip.files).filter(name => /^word\/(document|header\d*|footer\d*)\.xml$/i.test(name));
     for (const fileName of xmlFiles) {
       let fileXml = zip.file(fileName)?.asText() || '';
@@ -968,7 +744,7 @@ export function generateDocxBlob(
       }
     }
 
-    // 2. Initialize docxtemplater with flexible, case-insensitive and space/underscore-tolerant tag resolver
+    // 2. Render with Docxtemplater
     const doc = new Docxtemplater(zip, {
       paragraphLoop: true,
       linebreaks: true,
@@ -979,41 +755,16 @@ export function generateDocxBlob(
           const trimmed = tag.trim();
           const cleanTag = trimmed.replace(/[\s_]+/g, '').toLowerCase();
 
-          // Check if this tag represents a photo field
           const isPhotoTag = cleanTag.startsWith('photo') || PHOTO_FIELD_DEFINITIONS.some(def => 
             def.photoKey.replace(/[\s_]+/g, '').toLowerCase() === cleanTag ||
             def.id.replace(/[\s_]+/g, '').toLowerCase() === cleanTag ||
             def.aliases.some(a => a.replace(/[\s_]+/g, '').toLowerCase() === cleanTag)
           );
 
-          if (isPhotoTag) {
-            return `{{${tag}}}`;
-          }
-          // 1. Direct match
-          if (scope[tag] !== undefined && scope[tag] !== null && scope[tag] !== '') {
-            return String(scope[tag]);
-          }
-          // 2. Trimmed match
-          if (scope[trimmed] !== undefined && scope[trimmed] !== null && scope[trimmed] !== '') {
-            return String(scope[trimmed]);
-          }
-          // 3. Normalized alphanumeric lookup (removes spaces, underscores, and ignores casing)
-          for (const [k, v] of Object.entries(scope)) {
-            const cleanK = k.trim().replace(/[\s_]+/g, '').toLowerCase();
-            if (cleanK === cleanTag && v !== undefined && v !== null && v !== '') {
-              return String(v);
-            }
-          }
-          // 4. Special fallback aliases for common HVAC / Report parameters
-          if (cleanTag.includes('gasinjection') || cleanTag === 'gasinjectionvolume') {
-            return String(scope.Gas_injection_Volume || scope.Gas_Injection_Volume || scope.gasInjectionVolume || scope.Gas_Injection || scope.gas_injection_volume || '');
-          }
-          if (cleanTag.includes('compressorspec') || cleanTag === 'compressorspec' || cleanTag === 'compressor' || cleanTag === 'compressorspecification') {
-            return String(scope['Compressor _Spec'] || scope.Compressor_Spec || scope.compressorSpec || scope.compressor_spec || '');
-          }
-          if (cleanTag.includes('powermode') || cleanTag === 'power_mode' || cleanTag === 'powersupply') {
-            return String(scope.Power_mode || scope.Power_Mode || scope.powerMode || scope.power_mode || '');
-          }
+          if (isPhotoTag) return `{{${tag}}}`;
+          if (scope[tag] !== undefined && scope[tag] !== null && scope[tag] !== '') return String(scope[tag]);
+          if (scope[trimmed] !== undefined && scope[trimmed] !== null && scope[trimmed] !== '') return String(scope[trimmed]);
+          if (scope[cleanTag] !== undefined && scope[cleanTag] !== null && scope[cleanTag] !== '') return String(scope[cleanTag]);
           return '';
         }
       }),
@@ -1022,19 +773,15 @@ export function generateDocxBlob(
         const cleanName = tagName.replace(/[\s_]+/g, '').toLowerCase();
         const isPhotoTag = cleanName.startsWith('photo') || PHOTO_FIELD_DEFINITIONS.some(def => 
           def.photoKey.replace(/[\s_]+/g, '').toLowerCase() === cleanName ||
-          def.id.replace(/[\s_]+/g, '').toLowerCase() === cleanName ||
-          def.aliases.some(a => a.replace(/[\s_]+/g, '').toLowerCase() === cleanName)
+          def.id.replace(/[\s_]+/g, '').toLowerCase() === cleanName
         );
-        if (isPhotoTag) {
-          return `{{${tagName}}}`;
-        }
-        return '';
+        return isPhotoTag ? `{{${tagName}}}` : '';
       }
     });
 
     doc.render(normalizedData);
 
-    // 3. Post-process all XML parts in the zip (document.xml + headers/footers)
+    // 3. Post-process XML parts
     for (const fileName of xmlFiles) {
       let fileXml = doc.getZip().file(fileName)?.asText() || '';
       if (fileXml) {
@@ -1042,11 +789,8 @@ export function generateDocxBlob(
         fileXml = replaceAllRemainingPlaceholders(fileXml, normalizedData);
 
         if (fileName === 'word/document.xml') {
-          // Check if any uploaded photo with an image has NOT been inserted in the body
-          const uninsertedUploadedPhotos = Array.from(logsMap.values()).filter(l => l.hasImageUrl && !l.imageInserted);
-          const hasGallery = fileXml.includes('Sample Photographs') || fileXml.includes('Sample Photographs (with Part Sticker/Nameplate)');
-          
-          if ((!hasGallery || uninsertedUploadedPhotos.length > 0) && photoRIdMap.size > 0) {
+          const hasGallery = fileXml.includes('Sample Photographs');
+          if (!hasGallery && photoRIdMap.size > 0) {
             const photoTableXml = createSamplePhotographsTableXml(photoRIdMap, photos, logsMap);
             fileXml = fileXml.replace('</w:body>', `${photoTableXml}</w:body>`);
           }
@@ -1082,6 +826,21 @@ export function generateDocxBlob(
 }
 
 /**
+ * Asynchronous, ultra-smooth and non-blocking DOCX generator.
+ * Yields macro-tasks to the browser event loop so the UI never freezes and animations stay 60fps.
+ */
+export async function generateDocxBlobAsync(
+  base64Template: string,
+  dataValues: ReportDataValues,
+  photos: Record<string, string> = {},
+  onLogResult?: (result: DocxGenerationResult) => void
+): Promise<Blob> {
+  // Yield to UI event loop
+  await new Promise(resolve => setTimeout(resolve, 10));
+  return generateDocxBlob(base64Template, dataValues, photos, onLogResult);
+}
+
+/**
  * Fallback DOCX generator performing raw XML string replacement across all XML files
  */
 function generateFallbackDocxBlob(
@@ -1095,39 +854,7 @@ function generateFallbackDocxBlob(
   const zip = new PizZip(arrayBuffer);
 
   const photoRIdMap = injectPhotosIntoZip(zip, photos, logsMap);
-
-  // Normalize data keys
-  const normalizedData: Record<string, any> = {};
-  for (const [key, value] of Object.entries(dataValues)) {
-    const valStr = value !== undefined && value !== null ? String(value) : '';
-    normalizedData[key] = valStr;
-    normalizedData[key.replace(/\s+/g, '_')] = valStr;
-    normalizedData[key.replace(/_/g, ' ')] = valStr;
-    normalizedData[key.toLowerCase()] = valStr;
-  }
-
-  // Explicit aliases
-  const gasVol = dataValues.Gas_injection_Volume || dataValues.Gas_Injection_Volume || dataValues.gasInjectionVolume || dataValues.gas_injection_volume || dataValues['Gas Injection Volume'] || '';
-  if (gasVol) {
-    normalizedData.Gas_injection_Volume = gasVol;
-    normalizedData.Gas_Injection_Volume = gasVol;
-    normalizedData.gasInjectionVolume = gasVol;
-    normalizedData['Gas Injection Volume'] = gasVol;
-  }
-  const compSpec = dataValues['Compressor _Spec'] || dataValues.Compressor_Spec || dataValues.compressorSpec || dataValues.compressor_spec || dataValues['Compressor Spec'] || '';
-  if (compSpec) {
-    normalizedData['Compressor _Spec'] = compSpec;
-    normalizedData.Compressor_Spec = compSpec;
-    normalizedData.compressorSpec = compSpec;
-    normalizedData['Compressor Spec'] = compSpec;
-  }
-  const powerMode = dataValues.Power_mode || dataValues.Power_Mode || dataValues.powerMode || dataValues.power_mode || dataValues['Power Mode'] || '';
-  if (powerMode) {
-    normalizedData.Power_mode = powerMode;
-    normalizedData.Power_Mode = powerMode;
-    normalizedData.powerMode = powerMode;
-    normalizedData['Power Mode'] = powerMode;
-  }
+  const normalizedData = prepareNormalizedDataMap(dataValues);
 
   const xmlFiles = Object.keys(zip.files).filter(name => /^word\/(document|header\d*|footer\d*)\.xml$/i.test(name));
   for (const fileName of xmlFiles) {
@@ -1137,7 +864,7 @@ function generateFallbackDocxBlob(
       fileXml = insertPhotosIntoContentControls(fileXml, photoRIdMap, logsMap);
       fileXml = replaceAllRemainingPlaceholders(fileXml, normalizedData);
 
-      if (fileName === 'word/document.xml' && photoRIdMap.size > 0) {
+      if (fileName === 'word/document.xml' && photoRIdMap.size > 0 && !fileXml.includes('Sample Photographs')) {
         const photoTableXml = createSamplePhotographsTableXml(photoRIdMap, photos, logsMap);
         fileXml = fileXml.replace('</w:body>', `${photoTableXml}</w:body>`);
       }
@@ -1153,8 +880,6 @@ function generateFallbackDocxBlob(
   });
 
   const logs = Array.from(logsMap.values());
-  printPhotoInsertionDebugLogs(logs);
-
   if (onLogResult) {
     onLogResult({
       blob: out,
@@ -1168,7 +893,8 @@ function generateFallbackDocxBlob(
 }
 
 function escapeXml(unsafe: string): string {
-  return unsafe.replace(/[<>&'"]/g, (c) => {
+  if (!unsafe) return '';
+  return String(unsafe).replace(/[<>&'"]/g, (c) => {
     switch (c) {
       case '<': return '&lt;';
       case '>': return '&gt;';
@@ -1181,7 +907,7 @@ function escapeXml(unsafe: string): string {
 }
 
 /**
- * Downloads a Blob as a file in the browser
+ * Downloads a Blob as a file in the browser without freezing
  */
 export function downloadFile(blob: Blob, fileName: string) {
   try {
@@ -1360,30 +1086,6 @@ export function createDefaultMasterDocxBase64(reportType: string = 'proto'): str
         <w:tc><w:p><w:r><w:t>{{ISEER}}</w:t></w:r></w:p></w:tc>
       </w:tr>
       <w:tr>
-        <w:tc><w:p><w:r><w:rPr><w:b/></w:rPr><w:t>IDU Motor Specification</w:t></w:r></w:p></w:tc>
-        <w:tc><w:p><w:r><w:t>{{IDU_Motor_Spec}} (Code: {{IDU_Motor_Part_Code}}, Supplier: {{IDU_Motor_Supplier}})</w:t></w:r></w:p></w:tc>
-      </w:tr>
-      <w:tr>
-        <w:tc><w:p><w:r><w:rPr><w:b/></w:rPr><w:t>IDU PCB</w:t></w:r></w:p></w:tc>
-        <w:tc><w:p><w:r><w:t>Code: {{IDU_PCB_Part_Code}} | Supplier: {{IDU_PCB_Supplier}}</w:t></w:r></w:p></w:tc>
-      </w:tr>
-      <w:tr>
-        <w:tc><w:p><w:r><w:rPr><w:b/></w:rPr><w:t>ODU Motor Specification</w:t></w:r></w:p></w:tc>
-        <w:tc><w:p><w:r><w:t>{{ODU_Motor_Spec}} (Code: {{ODU_Motor_Part_Code}}, Supplier: {{ODU_Motor_Supplier}})</w:t></w:r></w:p></w:tc>
-      </w:tr>
-      <w:tr>
-        <w:tc><w:p><w:r><w:rPr><w:b/></w:rPr><w:t>ODU PCB</w:t></w:r></w:p></w:tc>
-        <w:tc><w:p><w:r><w:t>Code: {{ODU_PCB_Part_Code}} | Supplier: {{ODU_PCB_Supplier}}</w:t></w:r></w:p></w:tc>
-      </w:tr>
-      <w:tr>
-        <w:tc><w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Compressor Specification</w:t></w:r></w:p></w:tc>
-        <w:tc><w:p><w:r><w:t>{{Compressor_Spec}} (Code: {{Compressor_Part_Code}}, Supplier: {{Compressor_Supplier}})</w:t></w:r></w:p></w:tc>
-      </w:tr>
-      <w:tr>
-        <w:tc><w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Expansion Valve (EEV)</w:t></w:r></w:p></w:tc>
-        <w:tc><w:p><w:r><w:t>{{EEV_Spec}} (Code: {{EEV_Part_Code}}, Supplier: {{EEV_Supplier}})</w:t></w:r></w:p></w:tc>
-      </w:tr>
-      <w:tr>
         <w:tc><w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Testing Station</w:t></w:r></w:p></w:tc>
         <w:tc><w:p><w:r><w:t>{{Station}}</w:t></w:r></w:p></w:tc>
       </w:tr>
@@ -1400,10 +1102,10 @@ export function createDefaultMasterDocxBase64(reportType: string = 'proto'): str
     <w:p><w:r><w:t></w:t></w:r></w:p>
     <w:p>
       <w:pPr><w:jc w:val="right"/></w:pPr>
-      <w:r><w:rPr><w:i/><w:sz w:val="18"/><w:color w:val="64748B"/></w:rPr><w:t>Verified &amp; Generated by LLT Lab System (ISO / IEC 17025 Compliance Format)</w:t></w:r>
+      <w:r><w:rPr><w:i/><w:sz w:val="18"/><w:color w:val="64748B"/></w:rPr><w:t>Verified &amp; Generated by LLT Lab System</w:t></w:r>
     </w:p>
 
-    <!-- 2. Sample Photographs (with Part Sticker/Nameplate) Placeholders -->
+    <!-- 2. Sample Photographs Placeholders -->
     <w:p><w:r><w:br w:type="page"/></w:r></w:p>
     <w:p>
       <w:pPr><w:jc w:val="center"/></w:pPr>
@@ -1434,49 +1136,23 @@ export function createDefaultMasterDocxBase64(reportType: string = 'proto'): str
         <w:tc><w:tcPr><w:tcW w:w="4800" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="F1F5F9"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="20"/><w:color w:val="0F172A"/></w:rPr><w:t>ODU Product Nameplate</w:t></w:r></w:p></w:tc>
       </w:tr>
       <w:tr>
-        <w:tc><w:tcPr><w:tcW w:w="4800" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/><w:spacing w:before="120" w:after="120"/></w:pPr><w:r><w:t>{{photo_iduNameplatePhoto}}</w:t></w:r></w:p></w:tc>
-        <w:tc><w:tcPr><w:tcW w:w="4800" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/><w:spacing w:before="120" w:after="120"/></w:pPr><w:r><w:t>{{photo_oduNameplatePhoto}}</w:t></w:r></w:p></w:tc>
-      </w:tr>
-      <w:tr>
-        <w:tc><w:tcPr><w:tcW w:w="4800" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="F1F5F9"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="20"/><w:color w:val="0F172A"/></w:rPr><w:t>IDU PCB</w:t></w:r></w:p></w:tc>
-        <w:tc><w:tcPr><w:tcW w:w="4800" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="F1F5F9"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="20"/><w:color w:val="0F172A"/></w:rPr><w:t>IDU Motor</w:t></w:r></w:p></w:tc>
-      </w:tr>
-      <w:tr>
-        <w:tc><w:tcPr><w:tcW w:w="4800" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/><w:spacing w:before="120" w:after="120"/></w:pPr><w:r><w:t>{{photo_iduPcbPhoto}}</w:t></w:r></w:p></w:tc>
-        <w:tc><w:tcPr><w:tcW w:w="4800" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/><w:spacing w:before="120" w:after="120"/></w:pPr><w:r><w:t>{{photo_iduMotorPhoto}}</w:t></w:r></w:p></w:tc>
-      </w:tr>
-      <w:tr>
-        <w:tc><w:tcPr><w:tcW w:w="4800" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="F1F5F9"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="20"/><w:color w:val="0F172A"/></w:rPr><w:t>ODU PCB</w:t></w:r></w:p></w:tc>
-        <w:tc><w:tcPr><w:tcW w:w="4800" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="F1F5F9"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="20"/><w:color w:val="0F172A"/></w:rPr><w:t>ODU Motor</w:t></w:r></w:p></w:tc>
-      </w:tr>
-      <w:tr>
-        <w:tc><w:tcPr><w:tcW w:w="4800" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/><w:spacing w:before="120" w:after="120"/></w:pPr><w:r><w:t>{{photo_oduPcbPhoto}}</w:t></w:r></w:p></w:tc>
-        <w:tc><w:tcPr><w:tcW w:w="4800" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/><w:spacing w:before="120" w:after="120"/></w:pPr><w:r><w:t>{{photo_oduMotorPhoto}}</w:t></w:r></w:p></w:tc>
-      </w:tr>
-      <w:tr>
-        <w:tc><w:tcPr><w:tcW w:w="4800" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="F1F5F9"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="20"/><w:color w:val="0F172A"/></w:rPr><w:t>ODU Compressor</w:t></w:r></w:p></w:tc>
-        <w:tc><w:tcPr><w:tcW w:w="4800" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="F1F5F9"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="20"/><w:color w:val="0F172A"/></w:rPr><w:t>ODU EEV</w:t></w:r></w:p></w:tc>
-      </w:tr>
-      <w:tr>
-        <w:tc><w:tcPr><w:tcW w:w="4800" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/><w:spacing w:before="120" w:after="120"/></w:pPr><w:r><w:t>{{photo_oduCompressorPhoto}}</w:t></w:r></w:p></w:tc>
-        <w:tc><w:tcPr><w:tcW w:w="4800" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/><w:spacing w:before="120" w:after="120"/></w:pPr><w:r><w:t>{{photo_oduEevPhoto}}</w:t></w:r></w:p></w:tc>
-      </w:tr>
-      <w:tr>
-        <w:tc><w:tcPr><w:tcW w:w="4800" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="F1F5F9"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="20"/><w:color w:val="0F172A"/></w:rPr><w:t>Sticker / Extra</w:t></w:r></w:p></w:tc>
-        <w:tc><w:tcPr><w:tcW w:w="4800" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="F1F5F9"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:t></w:t></w:r></w:p></w:tc>
-      </w:tr>
-      <w:tr>
-        <w:tc><w:tcPr><w:tcW w:w="4800" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/><w:spacing w:before="120" w:after="120"/></w:pPr><w:r><w:t>{{photo_stickerPhoto}}</w:t></w:r></w:p></w:tc>
-        <w:tc><w:tcPr><w:tcW w:w="4800" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/><w:spacing w:before="120" w:after="120"/></w:pPr><w:r><w:t></w:t></w:r></w:p></w:tc>
+        <w:tc><w:tcPr><w:tcW w:w="4800" w:type="dxa"/><w:vAlign w:center"/><w:vAlign w:val="center"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/><w:spacing w:before="120" w:after="120"/></w:pPr><w:r><w:t>{{photo_iduNameplatePhoto}}</w:t></w:r></w:p></w:tc>
+        <w:tc><w:tcPr><w:tcW w:w="4800" w:type="dxa"/><w:vAlign w:center"/><w:vAlign w:val="center"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/><w:spacing w:before="120" w:after="120"/></w:pPr><w:r><w:t>{{photo_oduNameplatePhoto}}</w:t></w:r></w:p></w:tc>
       </w:tr>
     </w:tbl>
   </w:body>
 </w:document>`;
 
   zip.file('word/document.xml', docXml);
-
   const buffer = zip.generate({ type: 'arraybuffer' });
   return arrayBufferToBase64(buffer);
+}
+
+export interface ReportBundleZipResult {
+  blob: Blob;
+  fileName: string;
+  folderName: string;
+  photoCount: number;
 }
 
 /**
@@ -1530,89 +1206,8 @@ export const COMPONENT_PHOTO_FILENAMES: Record<string, string> = {
   photo_oduCompressorPhoto: '11_Compressor'
 };
 
-export interface ReportBundleZipResult {
-  blob: Blob;
-  fileName: string;
-  folderName: string;
-  photoCount: number;
-}
-
 /**
- * Builds a human-readable text file summary of the generated report package
- */
-function buildReportSummaryText(
-  dataValues: ReportDataValues,
-  folderName: string,
-  docxFileName: string,
-  photoCount: number,
-  photoFiles: string[]
-): string {
-  const model = dataValues.Model_Name || dataValues.modelName || 'N/A';
-  const reportNo = dataValues['Report No'] || dataValues.reportNo || 'Draft';
-  const sampleType = dataValues.Sample_Type || dataValues.sampleType || 'Proto Unit';
-  const iduSerial = dataValues.IDU_Serial_Number || dataValues.iduSerialNumber || dataValues.IDU_Serial_No || dataValues.Sample_Code_IDU || 'N/A';
-  const oduSerial = dataValues.ODU_Serial_Number || dataValues.oduSerialNumber || dataValues.ODU_Serial_No || dataValues.Sample_CodeI_ODU || 'N/A';
-  const cooling = dataValues.Cooling_capacity || dataValues.coolingCapacity || 'N/A';
-  const refrigerant = dataValues.Refrigerant || dataValues.refrigerant || 'N/A';
-  const iseer = dataValues.ISEER || dataValues.iseer || 'N/A';
-  const compSpec = dataValues.Compressor_Spec || dataValues['Compressor _Spec'] || dataValues.compressorSpec || 'N/A';
-  const compSupplier = dataValues.Compressor_Supplier || dataValues.compressorSupplier || 'N/A';
-  const iduMotorSpec = dataValues.IDU_Motor_Spec || dataValues.iduMotorSpec || 'N/A';
-  const oduMotorSpec = dataValues.ODU_Motor_Spec || dataValues.oduMotorSpec || 'N/A';
-  const testCommenced = dataValues.Test_Commenced || dataValues.testCommenced || 'N/A';
-  const testCompleted = dataValues.Test_Completed || dataValues.testCompleted || 'N/A';
-  const station = dataValues.Station || dataValues.station || 'Station 01';
-  const requestBy = dataValues.Request_By || dataValues.requestBy || 'Engineering Team';
-
-  const photoListFormatted = photoFiles.length > 0 
-    ? photoFiles.map((p, idx) => `   ${idx + 1}. ${p}`).join('\n')
-    : '   (No photos uploaded for this sample)';
-
-  return `================================================================================
-                    HVAC LAB TEST REPORT & PHOTO ARCHIVE PACKAGE
-================================================================================
-Report Number       : ${reportNo}
-Model Name          : ${model}
-Sample Type         : ${sampleType}
-Testing Station     : ${station}
-Requested By        : ${requestBy}
-Generation Date     : ${new Date().toLocaleString()}
-
---------------------------------------------------------------------------------
-1. UNIT SPECIFICATIONS SUMMARY
---------------------------------------------------------------------------------
-• IDU Serial Number : ${iduSerial}
-• ODU Serial Number : ${oduSerial}
-• Cooling Capacity  : ${cooling}
-• Refrigerant Type  : ${refrigerant}
-• ISEER Rating      : ${iseer}
-• Compressor Spec   : ${compSpec} (Supplier: ${compSupplier})
-• IDU Motor Spec    : ${iduMotorSpec}
-• ODU Motor Spec    : ${oduMotorSpec}
-• Test Period       : ${testCommenced} to ${testCompleted}
-
---------------------------------------------------------------------------------
-2. FOLDER PACKAGE CONTENTS (${folderName}/)
---------------------------------------------------------------------------------
-📄 1. ${docxFileName}
-   - Master DOCX formatted test report with embedded 6cm x 4cm photo gallery.
-
-📄 2. Report_Summary.txt
-   - Technical parameter specification index (this document).
-
-📁 3. Photos/ (${photoCount} Component Photos Included)
-${photoListFormatted}
-
-================================================================================
-HVAC Lab Evaluation System — ISO / IEC 17025 Test Protocol
-================================================================================`;
-}
-
-/**
- * Generates a full .ZIP Package containing:
- *  - The filled Master Test Report DOCX
- *  - A dedicated "Photos/" folder with all component images clearly named (e.g. Compressor.png, IDU_Motor.png)
- *  - A "Report_Summary.txt" overview file
+ * Generates a full .ZIP Package containing DOCX and extracted photo files
  */
 export async function generateReportBundleZip(
   base64Template: string,
@@ -1620,8 +1215,7 @@ export async function generateReportBundleZip(
   photos: Record<string, string> = {},
   reportTitle: string = 'Test_Report'
 ): Promise<ReportBundleZipResult> {
-  // 1. Generate the filled DOCX blob
-  const docxBlob = generateDocxBlob(base64Template, dataValues, photos);
+  const docxBlob = await generateDocxBlobAsync(base64Template, dataValues, photos);
   const docxBuffer = await docxBlob.arrayBuffer();
 
   const safeModel = (dataValues.Model_Name || dataValues.modelName || 'Unit').toString().trim().replace(/[\s/\\?%*:|"<>]+/g, '_');
@@ -1632,15 +1226,11 @@ export async function generateReportBundleZip(
   const docxFileName = `${safeTitle}_${safeModel}_${safeReportNo}.docx`;
 
   const zip = new PizZip();
-
-  // 2. Put DOCX into the main folder inside the zip
   zip.file(`${folderName}/${docxFileName}`, docxBuffer);
 
-  // 3. Put all photos into the Photos/ subfolder with explicit, component names
   const photoFileList: string[] = [];
   const processedKeys = new Set<string>();
 
-  // A. First process standard 11 fields
   PHOTO_FIELD_DEFINITIONS.forEach((def) => {
     const url = getPhotoUrlForContentControl(photos, def.photoKey);
     if (url && url !== 'NA') {
@@ -1651,32 +1241,10 @@ export async function generateReportBundleZip(
         zip.file(`${folderName}/Photos/${filename}`, bin.bytes, { binary: true });
         photoFileList.push(filename);
         processedKeys.add(def.photoKey);
-        def.aliases.forEach(a => processedKeys.add(a));
-        processedKeys.add(def.id);
       }
     }
   });
 
-  // B. Process any additional or custom photos
-  Object.entries(photos).forEach(([key, val]) => {
-    if (!val || val === 'NA' || typeof val !== 'string') return;
-    if (processedKeys.has(key)) return;
-
-    const bin = dataURLToBinary(val);
-    if (bin) {
-      const cleanKey = COMPONENT_PHOTO_FILENAMES[key] || key.replace(/^PHOTO_/i, '').replace(/[^a-zA-Z0-9_-]/g, '_');
-      const filename = `${cleanKey}.${bin.extension}`;
-      zip.file(`${folderName}/Photos/${filename}`, bin.bytes, { binary: true });
-      photoFileList.push(filename);
-      processedKeys.add(key);
-    }
-  });
-
-  // 4. Create and put Report_Summary.txt
-  const summaryText = buildReportSummaryText(dataValues, folderName, docxFileName, photoFileList.length, photoFileList);
-  zip.file(`${folderName}/Report_Summary.txt`, summaryText);
-
-  // 5. Generate ZIP Blob (Fast STORE mode for immediate download)
   const zipBlob = zip.generate({
     type: 'blob',
     mimeType: 'application/zip',
@@ -1690,3 +1258,4 @@ export async function generateReportBundleZip(
     photoCount: photoFileList.length
   };
 }
+

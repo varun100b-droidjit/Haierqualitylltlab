@@ -51,6 +51,7 @@ import {
   downloadFile, 
   downloadElementAsPdf, 
   generateDocxBlob, 
+  generateDocxBlobAsync,
   generateReportBundleZip,
   extractPlaceholdersFromDocx, 
   DocxGenerationResult 
@@ -607,7 +608,7 @@ export const ProtoReportGenerator: React.FC<ProtoReportGeneratorProps> = ({
     return saved;
   };
 
-  const handleGenerateDocxDownload = () => {
+  const handleGenerateDocxDownload = async () => {
     const tpl = masterTemplate || getMasterTemplate(reportType);
     if (!tpl?.base64Data) {
       alert("Master Report Template is not available. Please upload a template or reload.");
@@ -617,7 +618,7 @@ export const ProtoReportGenerator: React.FC<ProtoReportGeneratorProps> = ({
     // Auto-save to Report Room under respective tag
     saveCurrentReportToRoom();
 
-    const docxBlob = generateDocxBlob(tpl.base64Data, dataValuesMap, photos);
+    const docxBlob = await generateDocxBlobAsync(tpl.base64Data, dataValuesMap, photos);
     const safeName = (formData.modelName || 'Unit').replace(/[\s/\\?%*:|"<>]+/g, '_');
     const safeTitle = reportTitle.replace(/[\s/\\?%*:|"<>]+/g, '_');
     const safeReportNo = (formData.reportNo || 'Draft').replace(/[\s/\\?%*:|"<>]+/g, '_');
@@ -638,26 +639,30 @@ export const ProtoReportGenerator: React.FC<ProtoReportGeneratorProps> = ({
     }
 
     setIsGenerating(true);
-    setGenerationProgress({ percent: 25, stage: 'Reading unit parameters & photos...', isComplete: false });
+    setGenerationProgress({ percent: 20, stage: 'Reading unit parameters & photos...', isComplete: false });
+    await new Promise(r => setTimeout(r, 60));
 
     try {
       // Step 1: Mapping & Preparing Data
-      setGenerationProgress({ percent: 50, stage: 'Mapping placeholders to Master Template...', isComplete: false });
+      setGenerationProgress({ percent: 45, stage: 'Mapping placeholders to Master Template...', isComplete: false });
+      await new Promise(r => setTimeout(r, 60));
       
       // Step 2: Auto-save or update in Report Room
       saveCurrentReportToRoom();
-      setGenerationProgress({ percent: 75, stage: 'Archiving report to Report Room...', isComplete: false });
+      setGenerationProgress({ percent: 70, stage: 'Archiving report to Report Room...', isComplete: false });
+      await new Promise(r => setTimeout(r, 60));
 
-      // Step 3: Fast generation of DOCX
+      // Step 3: Fast non-blocking generation of DOCX
       setGenerationProgress({ percent: 90, stage: 'Embedding photos & compiling DOCX report...', isComplete: false });
+      await new Promise(r => setTimeout(r, 40));
       
       const safeName = (formData.modelName || 'Unit').replace(/[\s/\\?%*:|"<>]+/g, '_');
       const safeTitle = reportTitle.replace(/[\s/\\?%*:|"<>]+/g, '_');
       const safeReportNo = (formData.reportNo || 'Draft').replace(/[\s/\\?%*:|"<>]+/g, '_');
       const docxFileName = `${safeTitle}_${safeName}_${safeReportNo}.docx`;
 
-      // Generate DOCX blob instantly
-      const docxBlob = generateDocxBlob(tpl.base64Data, dataValuesMap, photos);
+      // Generate DOCX blob asynchronously without blocking main thread
+      const docxBlob = await generateDocxBlobAsync(tpl.base64Data, dataValuesMap, photos);
 
       // Step 4: Finalize & Trigger Downloads
       setGenerationProgress({ percent: 100, stage: 'Report Generated Successfully! Downloading DOCX...', isComplete: true });
@@ -674,7 +679,7 @@ export const ProtoReportGenerator: React.FC<ProtoReportGeneratorProps> = ({
       console.error("Failed to generate Report:", err);
       // Fallback: direct docx download
       setGenerationProgress({ percent: 90, stage: 'Compiling direct DOCX export...', isComplete: false });
-      handleGenerateDocxDownload();
+      await handleGenerateDocxDownload();
       setGenerationProgress({ percent: 100, stage: 'DOCX Downloaded Successfully!', isComplete: true });
     } finally {
       setIsGenerating(false);
