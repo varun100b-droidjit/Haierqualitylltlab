@@ -76,6 +76,7 @@ export const ProtoUnitDetailsDialog: React.FC<ProtoUnitDetailsDialogProps> = ({
   };
 
   const photoList: { label: string; url?: string }[] = [
+    { label: 'Indoor Unit', url: currentUnit.photos?.PHOTO_Indoor_Unit || currentUnit.photos?.indoorUnitPhoto },
     { label: '1. Product Packing', url: currentUnit.photos?.PHOTO_Product_Packing || currentUnit.photos?.productPhoto },
     { label: '2. Packing Box', url: currentUnit.photos?.PHOTO_Packing_Box || currentUnit.photos?.packingBoxPhoto },
     { label: '3. IDU Motor', url: currentUnit.photos?.PHOTO_IDU_Motor || currentUnit.photos?.iduMotorPhoto },

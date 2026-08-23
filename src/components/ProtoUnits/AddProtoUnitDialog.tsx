@@ -91,6 +91,7 @@ export const AddProtoUnitDialog: React.FC<AddProtoUnitDialogProps> = ({
 
   // Parts Picture Upload
   const [photos, setPhotos] = useState<ProtoUnitPhotos>({
+    indoorUnitPhoto: '',
     productPhoto: '',
     packingBoxPhoto: '',
     iduNameplatePhoto: '',
@@ -366,6 +367,7 @@ export const AddProtoUnitDialog: React.FC<AddProtoUnitDialogProps> = ({
     setEevSupplier('');
 
     setPhotos({
+      indoorUnitPhoto: '',
       productPhoto: '',
       packingBoxPhoto: '',
       iduNameplatePhoto: '',
@@ -390,6 +392,7 @@ export const AddProtoUnitDialog: React.FC<AddProtoUnitDialogProps> = ({
   };
 
   const photoUploadFields: { key: keyof ProtoUnitPhotos; label: string }[] = [
+    { key: 'indoorUnitPhoto', label: 'Indoor Unit' },
     { key: 'productPhoto', label: 'Product Photo' },
     { key: 'packingBoxPhoto', label: 'Packing Box' },
     { key: 'iduNameplatePhoto', label: 'IDU Nameplate' },

@@ -148,6 +148,7 @@ export interface ProtoPhotoRecord {
 }
 
 export interface ProtoUnitPhotos {
+  indoorUnitPhoto?: string;
   productPhoto?: string;
   packingBoxPhoto?: string;
   iduNameplatePhoto?: string;
@@ -161,7 +162,8 @@ export interface ProtoUnitPhotos {
   stickerPhoto?: string;
   remotePhoto?: string;
   
-  // Exact 11 Word Report Content Control Keys
+  // Word Report Content Control Keys
+  PHOTO_Indoor_Unit?: string;
   PHOTO_Product_Packing?: string;
   PHOTO_Packing_Box?: string;
   PHOTO_IDU_Motor?: string;

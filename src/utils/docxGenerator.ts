@@ -22,17 +22,44 @@ export interface DocxGenerationResult {
 }
 
 /**
+ * Helper to safely decode base64 string with padding and URL-safe character fix
+ */
+export function safeAtob(base64: string): string {
+  let clean = base64.replace(/[\s\r\n]+/g, '').replace(/-/g, '+').replace(/_/g, '/');
+  // Strip URI encoding if present
+  if (clean.includes('%')) {
+    try {
+      clean = decodeURIComponent(clean);
+    } catch (e) {}
+  }
+  // Remove non-base64 characters
+  clean = clean.replace(/[^A-Za-z0-9+/=]/g, '');
+  // Add missing padding
+  const mod = clean.length % 4;
+  if (mod === 2) clean += '==';
+  else if (mod === 3) clean += '=';
+  else if (mod === 1) clean = clean.substring(0, clean.length - 1); // Invalid single char
+
+  return window.atob(clean);
+}
+
+/**
  * Converts a Base64 string back to ArrayBuffer
  */
 export function base64ToArrayBuffer(base64: string): ArrayBuffer {
-  const cleanBase64 = base64.split(',').pop() || base64;
-  const binaryString = window.atob(cleanBase64.replace(/[\s\r\n]+/g, ''));
-  const len = binaryString.length;
-  const bytes = new Uint8Array(len);
-  for (let i = 0; i < len; i++) {
-    bytes[i] = binaryString.charCodeAt(i);
+  try {
+    const cleanBase64 = base64.split(',').pop() || base64;
+    const binaryString = safeAtob(cleanBase64);
+    const len = binaryString.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    return bytes.buffer;
+  } catch (e) {
+    console.error('Error converting base64 to ArrayBuffer:', e);
+    return new ArrayBuffer(0);
   }
-  return bytes.buffer;
 }
 
 /**
@@ -80,8 +107,7 @@ export function dataURLToBinary(dataUrl: string): { bytes: Uint8Array; extension
       }
     }
 
-    const cleanBase64 = base64Str.replace(/[\s\r\n]+/g, '');
-    const binaryString = window.atob(cleanBase64);
+    const binaryString = safeAtob(base64Str);
     const len = binaryString.length;
     const bytes = new Uint8Array(len);
     for (let i = 0; i < len; i++) {
@@ -95,7 +121,10 @@ export function dataURLToBinary(dataUrl: string): { bytes: Uint8Array; extension
     binaryDecodeCache.set(cacheKey, result);
     return result;
   } catch (e) {
-    console.error('Error converting dataURL to binary:', e);
+    // Only log if it's not a standard empty/null/non-base64 url
+    if (!trimmed.startsWith('http') && !trimmed.startsWith('blob:')) {
+      console.warn('Could not decode dataURL as base64 binary:', e);
+    }
     return null;
   }
 }
@@ -1049,30 +1078,97 @@ function escapeXml(unsafe: string): string {
 }
 
 /**
- * Downloads a Blob as a file in the browser without freezing
+ * Downloads a Blob as a file in the browser with full cross-device and mobile support (Opera, Chrome, Safari, Android)
  */
 export function downloadFile(blob: Blob, fileName: string) {
   try {
-    const url = window.URL.createObjectURL(blob);
+    const mimeType = fileName.endsWith('.docx')
+      ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      : fileName.endsWith('.pdf')
+      ? 'application/pdf'
+      : fileName.endsWith('.zip')
+      ? 'application/zip'
+      : (blob.type || 'application/octet-stream');
+
+    const fileBlob = blob.type === mimeType ? blob : new Blob([blob], { type: mimeType });
+    const url = window.URL.createObjectURL(fileBlob);
+    
+    // For iOS / Android compatibility
     const a = document.createElement('a');
-    a.style.position = 'fixed';
-    a.style.top = '-9999px';
-    a.style.left = '-9999px';
-    a.style.opacity = '0';
     a.href = url;
     a.download = fileName;
     a.setAttribute('download', fileName);
+    a.target = '_self';
+    a.rel = 'noopener noreferrer';
+    
+    // Add to body cleanly
     document.body.appendChild(a);
-    a.click();
+    
+    // Trigger download
+    if (typeof a.click === 'function') {
+      a.click();
+    } else {
+      a.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+    }
+    
+    // Cleanup anchor element
     setTimeout(() => {
       try {
-        document.body.removeChild(a);
+        if (a.parentNode) {
+          a.parentNode.removeChild(a);
+        }
+      } catch {}
+    }, 1500);
+
+    // Keep object URL alive for mobile download managers
+    setTimeout(() => {
+      try {
         window.URL.revokeObjectURL(url);
       } catch {}
-    }, 60000);
+    }, 180000);
   } catch (err) {
     console.error('Download error:', err);
+    // Fallback: try opening URL in new window if direct download blocked
+    try {
+      const url = window.URL.createObjectURL(blob);
+      window.open(url, '_blank');
+    } catch (fallbackErr) {
+      console.error('Fallback download failed:', fallbackErr);
+    }
   }
+}
+
+/**
+ * Mobile-friendly share or download: Uses native OS sharing (Save to Files / Share to WhatsApp / Drive) on Android/iOS if available, or falls back to direct download.
+ */
+export async function shareOrDownloadFile(blob: Blob, fileName: string, title?: string): Promise<boolean> {
+  try {
+    const mimeType = fileName.endsWith('.docx')
+      ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      : fileName.endsWith('.pdf')
+      ? 'application/pdf'
+      : (blob.type || 'application/octet-stream');
+
+    const file = new File([blob], fileName, { type: mimeType });
+    if (typeof navigator !== 'undefined' && navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({
+        files: [file],
+        title: title || fileName,
+        text: `Report: ${fileName}`
+      });
+      return true;
+    }
+  } catch (e: any) {
+    // User cancelled share or abort error
+    if (e?.name !== 'AbortError') {
+      console.warn('Web Share note:', e);
+    } else {
+      return true;
+    }
+  }
+  
+  downloadFile(blob, fileName);
+  return false;
 }
 
 /**
@@ -1080,14 +1176,55 @@ export function downloadFile(blob: Blob, fileName: string) {
  */
 export async function downloadElementAsPdf(element: HTMLElement, fileName: string) {
   try {
+    // Wait for all images in the element to finish loading
+    const images = Array.from(element.querySelectorAll('img'));
+    await Promise.all(
+      images.map(img => {
+        if (img.complete) return Promise.resolve();
+        return new Promise(resolve => {
+          img.onload = resolve;
+          img.onerror = resolve;
+        });
+      })
+    );
+
+    // Save previous styles if offscreen
+    const parent = element.parentElement;
+    const originalPosition = parent?.style.position;
+    const originalLeft = parent?.style.left;
+    const originalOpacity = parent?.style.opacity;
+    const originalZIndex = parent?.style.zIndex;
+
+    const isHiddenParent = parent && (
+      parent.classList.contains('opacity-0') ||
+      parent.style.opacity === '0'
+    );
+
+    if (isHiddenParent && parent) {
+      parent.style.opacity = '1';
+      parent.style.position = 'fixed';
+      parent.style.left = '0';
+      parent.style.top = '0';
+      parent.style.zIndex = '-999';
+    }
+
     const canvas = await html2canvas(element, {
       scale: 2,
       useCORS: true,
+      allowTaint: true,
       logging: false,
       backgroundColor: '#ffffff'
     });
 
-    const imgData = canvas.toDataURL('image/png');
+    // Restore parent styles if altered
+    if (isHiddenParent && parent) {
+      parent.style.opacity = originalOpacity || '0';
+      parent.style.position = originalPosition || 'fixed';
+      parent.style.left = originalLeft || '-9999px';
+      parent.style.zIndex = originalZIndex || '';
+    }
+
+    const imgData = canvas.toDataURL('image/jpeg', 0.95);
     const pdf = new jsPDF('p', 'mm', 'a4');
     const pdfWidth = pdf.internal.pageSize.getWidth();
     const pdfHeight = pdf.internal.pageSize.getHeight();
@@ -1097,13 +1234,13 @@ export async function downloadElementAsPdf(element: HTMLElement, fileName: strin
     let heightLeft = imgHeight;
     let position = 0;
 
-    pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
+    pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);
     heightLeft -= pdfHeight;
 
-    while (heightLeft >= 0) {
-      position = heightLeft - imgHeight;
+    while (heightLeft > 5) {
+      position -= pdfHeight;
       pdf.addPage();
-      pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
+      pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);
       heightLeft -= pdfHeight;
     }
 
@@ -1301,6 +1438,10 @@ export interface ReportBundleZipResult {
  * Standard component clean naming dictionary for photos in the report package
  */
 export const COMPONENT_PHOTO_FILENAMES: Record<string, string> = {
+  PHOTO_Indoor_Unit: '00_Indoor_Unit',
+  indoorUnitPhoto: '00_Indoor_Unit',
+  indoorUnit: '00_Indoor_Unit',
+  photo_indoorUnitPhoto: '00_Indoor_Unit',
   PHOTO_Product_Packing: '01_Product_Packing',
   productPhoto: '01_Product_Packing',
   productPacking: '01_Product_Packing',

@@ -130,17 +130,18 @@ export const PpUnitDetailsDialog: React.FC<PpUnitDetailsDialogProps> = ({
   const photoList: { label: string; url: string }[] = [];
   if (currentUnit.photos) {
     const p = currentUnit.photos;
-    if (p.PHOTO_Product_Packing || p.productPhoto) photoList.push({ label: '1. Product Packing', url: (p.PHOTO_Product_Packing || p.productPhoto)! });
-    if (p.PHOTO_Packing_Box || p.packingBoxPhoto) photoList.push({ label: '2. Packing Box', url: (p.PHOTO_Packing_Box || p.packingBoxPhoto)! });
-    if (p.PHOTO_IDU_Motor || p.iduMotorPhoto) photoList.push({ label: '3. IDU Motor', url: (p.PHOTO_IDU_Motor || p.iduMotorPhoto)! });
-    if (p.PHOTO_IDU_PCB || p.iduPcbPhoto) photoList.push({ label: '4. IDU PCB', url: (p.PHOTO_IDU_PCB || p.iduPcbPhoto)! });
-    if (p.PHOTO_IDU_Product_Name_Plate || p.PHOTO_IDU_Name_Plate || p.iduNameplatePhoto) photoList.push({ label: '5. IDU Product Name Plate', url: (p.PHOTO_IDU_Product_Name_Plate || p.PHOTO_IDU_Name_Plate || p.iduNameplatePhoto)! });
-    if (p.PHOTO_Remote || p.remotePhoto || p.stickerPhoto) photoList.push({ label: '6. Remote', url: (p.PHOTO_Remote || p.remotePhoto || p.stickerPhoto)! });
-    if (p.PHOTO_ODU_Name_Plate || p.oduNameplatePhoto) photoList.push({ label: '7. ODU Name Plate', url: (p.PHOTO_ODU_Name_Plate || p.oduNameplatePhoto)! });
-    if (p.PHOTO_ODU_Motor || p.oduMotorPhoto) photoList.push({ label: '8. ODU Motor', url: (p.PHOTO_ODU_Motor || p.oduMotorPhoto)! });
-    if (p.PHOTO_ODU_PCB || p.oduPcbPhoto) photoList.push({ label: '9. ODU PCB', url: (p.PHOTO_ODU_PCB || p.oduPcbPhoto)! });
-    if (p.PHOTO_Electronic_Expansion_Valve || p.PHOTO_EEV || p.oduEevPhoto || p.eevPhoto) photoList.push({ label: '10. Electronic Expansion Valve', url: (p.PHOTO_Electronic_Expansion_Valve || p.PHOTO_EEV || p.oduEevPhoto || p.eevPhoto)! });
-    if (p.PHOTO_ODU_Compressor || p.PHOTO_Compressor || p.oduCompressorPhoto || p.compressorPhoto) photoList.push({ label: '11. ODU Compressor', url: (p.PHOTO_ODU_Compressor || p.PHOTO_Compressor || p.oduCompressorPhoto || p.compressorPhoto)! });
+    if (p.PHOTO_Indoor_Unit || p.indoorUnitPhoto) photoList.push({ label: '1. Indoor Unit', url: (p.PHOTO_Indoor_Unit || p.indoorUnitPhoto)! });
+    if (p.PHOTO_Product_Packing || p.productPhoto) photoList.push({ label: '2. Product Packing', url: (p.PHOTO_Product_Packing || p.productPhoto)! });
+    if (p.PHOTO_Packing_Box || p.packingBoxPhoto) photoList.push({ label: '3. Packing Box', url: (p.PHOTO_Packing_Box || p.packingBoxPhoto)! });
+    if (p.PHOTO_IDU_Motor || p.iduMotorPhoto) photoList.push({ label: '4. IDU Motor', url: (p.PHOTO_IDU_Motor || p.iduMotorPhoto)! });
+    if (p.PHOTO_IDU_PCB || p.iduPcbPhoto) photoList.push({ label: '5. IDU PCB', url: (p.PHOTO_IDU_PCB || p.iduPcbPhoto)! });
+    if (p.PHOTO_IDU_Product_Name_Plate || p.PHOTO_IDU_Name_Plate || p.iduNameplatePhoto) photoList.push({ label: '6. IDU Product Name Plate', url: (p.PHOTO_IDU_Product_Name_Plate || p.PHOTO_IDU_Name_Plate || p.iduNameplatePhoto)! });
+    if (p.PHOTO_Remote || p.remotePhoto || p.stickerPhoto) photoList.push({ label: '7. Remote', url: (p.PHOTO_Remote || p.remotePhoto || p.stickerPhoto)! });
+    if (p.PHOTO_ODU_Name_Plate || p.oduNameplatePhoto) photoList.push({ label: '8. ODU Name Plate', url: (p.PHOTO_ODU_Name_Plate || p.oduNameplatePhoto)! });
+    if (p.PHOTO_ODU_Motor || p.oduMotorPhoto) photoList.push({ label: '9. ODU Motor', url: (p.PHOTO_ODU_Motor || p.oduMotorPhoto)! });
+    if (p.PHOTO_ODU_PCB || p.oduPcbPhoto) photoList.push({ label: '10. ODU PCB', url: (p.PHOTO_ODU_PCB || p.oduPcbPhoto)! });
+    if (p.PHOTO_Electronic_Expansion_Valve || p.PHOTO_EEV || p.oduEevPhoto || p.eevPhoto) photoList.push({ label: '11. Electronic Expansion Valve', url: (p.PHOTO_Electronic_Expansion_Valve || p.PHOTO_EEV || p.oduEevPhoto || p.eevPhoto)! });
+    if (p.PHOTO_ODU_Compressor || p.PHOTO_Compressor || p.oduCompressorPhoto || p.compressorPhoto) photoList.push({ label: '12. ODU Compressor', url: (p.PHOTO_ODU_Compressor || p.PHOTO_Compressor || p.oduCompressorPhoto || p.compressorPhoto)! });
   }
 
   const observationsList = currentUnit.observations || [];

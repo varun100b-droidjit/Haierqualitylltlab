@@ -47,6 +47,7 @@ export interface PhotoFieldConfig {
  */
 export const getStandardizedFilename = (key: string, label: string): string => {
   const map: { [key: string]: string } = {
+    PHOTO_Indoor_Unit: 'indoor_unit.jpg',
     PHOTO_Product_Packing: 'product_packing.jpg',
     PHOTO_Packing_Box: 'packing_box.jpg',
     PHOTO_IDU_Motor: 'idu_motor.jpg',
@@ -93,15 +94,16 @@ export const PhotoUploadSection: React.FC<PhotoUploadSectionProps> = ({
   title = 'Inspection Photos',
   subtitle,
   readOnly = false,
-  collapsible = true,
+  collapsible = false,
   defaultOpen = true,
   isOpen: controlledIsOpen,
   onToggleOpen,
 }) => {
   const [internalIsOpen, setInternalIsOpen] = useState<boolean>(defaultOpen);
-  const isExpanded = controlledIsOpen !== undefined ? controlledIsOpen : internalIsOpen;
+  const isExpanded = collapsible ? (controlledIsOpen !== undefined ? controlledIsOpen : internalIsOpen) : true;
   
   const handleToggle = () => {
+    if (!collapsible) return;
     if (onToggleOpen) {
       onToggleOpen();
     } else {

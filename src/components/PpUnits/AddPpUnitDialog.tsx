@@ -99,6 +99,7 @@ export const AddPpUnitDialog: React.FC<AddPpUnitDialogProps> = ({
 
   // Parts Picture Upload
   const [photos, setPhotos] = useState<ProtoUnitPhotos>({
+    indoorUnitPhoto: '',
     productPhoto: '',
     packingBoxPhoto: '',
     iduNameplatePhoto: '',
@@ -343,17 +344,18 @@ export const AddPpUnitDialog: React.FC<AddPpUnitDialogProps> = ({
   };
 
   const photoUploadFields: { key: keyof ProtoUnitPhotos; label: string }[] = [
-    { key: 'productPhoto', label: '1. Product Photo' },
-    { key: 'packingBoxPhoto', label: '2. Packing Box' },
-    { key: 'iduNameplatePhoto', label: '3. IDU Nameplate' },
-    { key: 'oduNameplatePhoto', label: '4. ODU Nameplate' },
-    { key: 'iduPcbPhoto', label: '5. IDU PCB' },
-    { key: 'iduMotorPhoto', label: '6. IDU Motor' },
-    { key: 'oduPcbPhoto', label: '7. ODU PCB' },
-    { key: 'oduMotorPhoto', label: '8. ODU Motor' },
-    { key: 'oduCompressorPhoto', label: '9. ODU Compressor' },
-    { key: 'oduEevPhoto', label: '10. ODU EEV' },
-    { key: 'stickerPhoto', label: '11. Extra Sticker' },
+    { key: 'indoorUnitPhoto', label: '1. Indoor Unit' },
+    { key: 'productPhoto', label: '2. Product Photo' },
+    { key: 'packingBoxPhoto', label: '3. Packing Box' },
+    { key: 'iduNameplatePhoto', label: '4. IDU Nameplate' },
+    { key: 'oduNameplatePhoto', label: '5. ODU Nameplate' },
+    { key: 'iduPcbPhoto', label: '6. IDU PCB' },
+    { key: 'iduMotorPhoto', label: '7. IDU Motor' },
+    { key: 'oduPcbPhoto', label: '8. ODU PCB' },
+    { key: 'oduMotorPhoto', label: '9. ODU Motor' },
+    { key: 'oduCompressorPhoto', label: '10. ODU Compressor' },
+    { key: 'oduEevPhoto', label: '11. ODU EEV' },
+    { key: 'stickerPhoto', label: '12. Extra Sticker' },
   ];
 
   return (

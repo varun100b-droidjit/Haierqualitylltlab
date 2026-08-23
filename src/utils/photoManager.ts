@@ -50,6 +50,28 @@ export interface PhotoDefinition {
 
 export const PHOTO_FIELD_DEFINITIONS: PhotoDefinition[] = [
   {
+    id: 'indoorUnitPhoto',
+    photoKey: 'PHOTO_Indoor_Unit',
+    label: 'Indoor Unit',
+    section: 'packaging',
+    documentPage: 'Page 4',
+    aliases: [
+      'PHOTO_Indoor_Unit',
+      'PHOTO_INDOOR_UNIT',
+      'indoorUnitPhoto',
+      'photo_indoorUnitPhoto',
+      'Indoor Unit',
+      'Indoor Unit Photo',
+      'Indoor_Unit',
+      'indoor_unit',
+      'photo_indoor_unit',
+      'iduUnitPhoto',
+      'indoorPhoto',
+      'PHOTO_IDU_Unit',
+      'IDU Unit'
+    ]
+  },
+  {
     id: 'productPhoto',
     photoKey: 'PHOTO_Product_Packing',
     label: 'Product Packing',
@@ -423,23 +445,34 @@ export async function fetchImageBinary(imageUrl: string): Promise<{ bytes: Uint8
   // Case 1: Base64 data URL
   if (trimmed.startsWith('data:image/')) {
     try {
-      const match = trimmed.match(/^data:image\/([a-zA-Z0-9\+\-]+);base64,(.+)$/);
-      if (!match) return null;
-      let extension = match[1].toLowerCase();
-      if (extension === 'jpeg') extension = 'jpeg';
-      else if (extension === 'png') extension = 'png';
-      else if (extension === 'webp') extension = 'png'; // treat webp as png for Word compatibility
-      else extension = 'jpeg';
+      const commaIdx = trimmed.indexOf(',');
+      if (commaIdx === -1) return null;
 
-      const base64Data = match[2];
-      const binaryString = atob(base64Data);
+      const header = trimmed.slice(0, commaIdx).toLowerCase();
+      let extension = 'jpeg';
+      if (header.includes('png')) extension = 'png';
+      else if (header.includes('webp')) extension = 'png';
+      else if (header.includes('jpeg') || header.includes('jpg')) extension = 'jpeg';
+
+      const base64Data = trimmed.slice(commaIdx + 1);
+      let clean = base64Data.replace(/[\s\r\n]+/g, '').replace(/-/g, '+').replace(/_/g, '/');
+      if (clean.includes('%')) {
+        try { clean = decodeURIComponent(clean); } catch (e) {}
+      }
+      clean = clean.replace(/[^A-Za-z0-9+/=]/g, '');
+      const mod = clean.length % 4;
+      if (mod === 2) clean += '==';
+      else if (mod === 3) clean += '=';
+      else if (mod === 1) clean = clean.substring(0, clean.length - 1);
+
+      const binaryString = atob(clean);
       const bytes = new Uint8Array(binaryString.length);
       for (let i = 0; i < binaryString.length; i++) {
         bytes[i] = binaryString.charCodeAt(i);
       }
       return { bytes, extension };
     } catch (e) {
-      console.error('Failed to parse base64 data URL:', e);
+      console.warn('Failed to parse base64 data URL:', e);
       return null;
     }
   }
@@ -504,6 +537,7 @@ export function findBestMatchingPhotoKey(filenameOrLabel: string): PhotoDefiniti
 
   // 2. Keyword heuristic scoring
   const keywordsMap: { [key: string]: string[] } = {
+    PHOTO_Indoor_Unit: ['indoor unit', 'indoor unit photo', 'idu unit', 'indoor ac', 'split idu', 'indoor unit appearance'],
     PHOTO_Product_Packing: ['product', 'box', 'outer', 'carton', 'packing box', 'packaging'],
     PHOTO_Packing_Box: ['bare', 'inner', 'inner box', 'bare packing', 'packing'],
     PHOTO_IDU_Motor: ['idu motor', 'blower motor', 'indoor motor', 'fan motor idu'],
