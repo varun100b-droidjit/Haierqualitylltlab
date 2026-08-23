@@ -15,160 +15,7 @@ export function generatePp5DigitSerial(): string {
   return Math.floor(10000 + Math.random() * 90000).toString();
 }
 
-const INITIAL_PP_UNITS: PpUnit[] = [
-  {
-    id: 'pp-idu-19',
-    modelName: 'HSI19GHD-MAI5NB-I',
-    unitType: 'IDU',
-    materialCode: 'MAT-1950',
-    version: 'V1.0',
-    quantity: 10,
-    station: 'Station 01',
-    iduSerialNumber: 'IDU-19501',
-    oduSerialNumber: '',
-    requestBy: 'Lab Specialist',
-    testPurpose: 'IDU Model Registration',
-    requiredHour: 100,
-    partsInfo: {},
-    photos: {},
-    status: 'live',
-    createdAt: '2026-08-10 10:00',
-    updatedAt: '2026-08-10 10:00',
-  },
-  {
-    id: 'pp-odu-19',
-    modelName: 'HSO19-5NB-I',
-    unitType: 'ODU',
-    materialCode: 'MAT-1951',
-    version: 'V1.0',
-    quantity: 8,
-    station: 'Station 01',
-    iduSerialNumber: '',
-    oduSerialNumber: 'ODU-19502',
-    requestBy: 'Lab Specialist',
-    testPurpose: 'ODU Model Registration',
-    requiredHour: 100,
-    partsInfo: {},
-    photos: {},
-    status: 'live',
-    createdAt: '2026-08-10 10:05',
-    updatedAt: '2026-08-10 10:05',
-  },
-  {
-    id: 'pp-idu-18',
-    modelName: 'HSI18GHD-MAI5NB-I',
-    unitType: 'IDU',
-    materialCode: 'MAT-1850',
-    version: 'V1.0',
-    quantity: 5,
-    station: 'Station 02',
-    iduSerialNumber: 'IDU-18501',
-    oduSerialNumber: '',
-    requestBy: 'Lab Specialist',
-    testPurpose: 'IDU Model Registration',
-    requiredHour: 100,
-    partsInfo: {},
-    photos: {},
-    status: 'live',
-    createdAt: '2026-08-10 10:10',
-    updatedAt: '2026-08-10 10:10',
-  },
-  {
-    id: 'pp-odu-18',
-    modelName: 'HSO18-5NB-I',
-    unitType: 'ODU',
-    materialCode: 'MAT-1851',
-    version: 'V1.0',
-    quantity: 5,
-    station: 'Station 02',
-    iduSerialNumber: '',
-    oduSerialNumber: 'ODU-18502',
-    requestBy: 'Lab Specialist',
-    testPurpose: 'ODU Model Registration',
-    requiredHour: 100,
-    partsInfo: {},
-    photos: {},
-    status: 'live',
-    createdAt: '2026-08-10 10:15',
-    updatedAt: '2026-08-10 10:15',
-  },
-  {
-    id: 'pp-idu-24',
-    modelName: 'HSI24GHD-MAI5NB-I',
-    unitType: 'IDU',
-    materialCode: 'MAT-2450',
-    version: 'V1.0',
-    quantity: 6,
-    station: 'Station 03',
-    iduSerialNumber: 'IDU-24501',
-    oduSerialNumber: '',
-    requestBy: 'Lab Specialist',
-    testPurpose: 'IDU Model Registration',
-    requiredHour: 100,
-    partsInfo: {},
-    photos: {},
-    status: 'live',
-    createdAt: '2026-08-10 10:20',
-    updatedAt: '2026-08-10 10:20',
-  },
-  {
-    id: 'pp-odu-24',
-    modelName: 'HSO24-5NB-I',
-    unitType: 'ODU',
-    materialCode: 'MAT-2451',
-    version: 'V1.0',
-    quantity: 6,
-    station: 'Station 03',
-    iduSerialNumber: '',
-    oduSerialNumber: 'ODU-24502',
-    requestBy: 'Lab Specialist',
-    testPurpose: 'ODU Model Registration',
-    requiredHour: 100,
-    partsInfo: {},
-    photos: {},
-    status: 'live',
-    createdAt: '2026-08-10 10:25',
-    updatedAt: '2026-08-10 10:25',
-  },
-  {
-    id: 'pp-idu-30',
-    modelName: 'HSI30GHD-MAI5NB-I',
-    unitType: 'IDU',
-    materialCode: 'MAT-3050',
-    version: 'V1.0',
-    quantity: 4,
-    station: 'Station 04',
-    iduSerialNumber: 'IDU-30501',
-    oduSerialNumber: '',
-    requestBy: 'Lab Specialist',
-    testPurpose: 'IDU Model Registration',
-    requiredHour: 100,
-    partsInfo: {},
-    photos: {},
-    status: 'live',
-    createdAt: '2026-08-10 10:30',
-    updatedAt: '2026-08-10 10:30',
-  },
-  {
-    id: 'pp-odu-36',
-    modelName: 'HSO36-5NB-I',
-    unitType: 'ODU',
-    materialCode: 'MAT-3651',
-    version: 'V1.0',
-    quantity: 7,
-    station: 'Station 05',
-    iduSerialNumber: '',
-    oduSerialNumber: 'ODU-36502',
-    requestBy: 'Lab Specialist',
-    testPurpose: 'ODU Model Registration',
-    requiredHour: 100,
-    partsInfo: {},
-    photos: {},
-    status: 'live',
-    createdAt: '2026-08-10 10:35',
-    updatedAt: '2026-08-10 10:35',
-  }
-];
+const INITIAL_PP_UNITS: PpUnit[] = [];
 
 let ppUnitsCache: PpUnit[] = loadLocalPpUnits();
 const listeners: Set<() => void> = new Set();
@@ -178,7 +25,7 @@ const listeners: Set<() => void> = new Set();
    ========================================== */
 
 export async function syncPpUnitToFirestore(unit: PpUnit) {
-  if (!db) return;
+  if (!db || !unit || unit.id.startsWith('pp-idu-') || unit.id.startsWith('pp-odu-')) return;
   try {
     const docRef = doc(db, 'pp_units', unit.id);
     await setDoc(docRef, { ...unit }, { merge: true });
@@ -205,7 +52,12 @@ export async function fetchPpUnitsFromFirestore(): Promise<PpUnit[] | null> {
     const snap = await getDocs(colRef);
     if (snap.empty) return null;
     const list: PpUnit[] = [];
-    snap.forEach(d => list.push(d.data() as PpUnit));
+    snap.forEach(d => {
+      const data = d.data() as PpUnit;
+      if (data && !data.id.startsWith('pp-idu-') && !data.id.startsWith('pp-odu-')) {
+        list.push(data);
+      }
+    });
     return list;
   } catch (e) {
     console.warn('Firestore PP Unit fetch note:', e);
@@ -217,28 +69,28 @@ export async function fetchPpUnitsFromFirestore(): Promise<PpUnit[] | null> {
 initDataSync();
 
 async function initDataSync() {
-  // Try fetching from Firestore first
-  const firestoreData = await fetchPpUnitsFromFirestore();
-  if (firestoreData && firestoreData.length > 0) {
-    ppUnitsCache = firestoreData;
-    localStorage.setItem(STORAGE_KEY_PP_UNITS, JSON.stringify(firestoreData));
-    notifyListeners();
-    return;
-  }
+  try {
+    // Try fetching from Firestore first
+    const firestoreData = await fetchPpUnitsFromFirestore();
+    if (firestoreData && firestoreData.length > 0) {
+      const clean = firestoreData.filter(u => u && !u.id.startsWith('pp-idu-') && !u.id.startsWith('pp-odu-'));
+      ppUnitsCache = clean;
+      localStorage.setItem(STORAGE_KEY_PP_UNITS, JSON.stringify(clean));
+      notifyListeners();
+      return;
+    }
 
-  // Fallback to Supabase
-  const remoteData = await fetchPpUnitsFromSupabase();
-  if (remoteData && remoteData.length > 0) {
-    ppUnitsCache = remoteData;
-    localStorage.setItem(STORAGE_KEY_PP_UNITS, JSON.stringify(remoteData));
-    notifyListeners();
-    remoteData.forEach(u => syncPpUnitToFirestore(u));
-  } else {
-    // Sync initial local units to both
-    INITIAL_PP_UNITS.forEach(unit => {
-      syncPpUnitToSupabase(unit);
-      syncPpUnitToFirestore(unit);
-    });
+    // Fallback to Supabase
+    const remoteData = await fetchPpUnitsFromSupabase();
+    if (remoteData && remoteData.length > 0) {
+      const clean = remoteData.filter(u => u && !u.id.startsWith('pp-idu-') && !u.id.startsWith('pp-odu-'));
+      ppUnitsCache = clean;
+      localStorage.setItem(STORAGE_KEY_PP_UNITS, JSON.stringify(clean));
+      notifyListeners();
+      clean.forEach(u => syncPpUnitToFirestore(u));
+    }
+  } catch (e) {
+    console.warn('Data sync note in PP Store:', e);
   }
 }
 
@@ -254,33 +106,37 @@ export function subscribePpUnitStore(callback: () => void) {
 }
 
 function saveLocalPpUnits(data: PpUnit[]) {
-  ppUnitsCache = data;
-  safeLocalStorageSet(STORAGE_KEY_PP_UNITS, data);
-  idbSaveAll('pp_units', data);
+  const clean = (data || []).filter(u => u && !u.id.startsWith('pp-idu-') && !u.id.startsWith('pp-odu-'));
+  ppUnitsCache = clean;
+  safeLocalStorageSet(STORAGE_KEY_PP_UNITS, clean);
+  idbSaveAll('pp_units', clean);
   notifyListeners();
 }
 
 function loadLocalPpUnits(): PpUnit[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY_PP_UNITS);
-    if (!raw) {
-      safeLocalStorageSet(STORAGE_KEY_PP_UNITS, INITIAL_PP_UNITS);
-      return INITIAL_PP_UNITS;
+    if (raw !== null) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed.filter((u: any) => u && !u.id.startsWith('pp-idu-') && !u.id.startsWith('pp-odu-'));
+      }
     }
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) return parsed;
-    return INITIAL_PP_UNITS;
+    return [];
   } catch (e) {
-    return INITIAL_PP_UNITS;
+    return [];
   }
 }
 
 // Background sync from IndexedDB
 idbGetAll<PpUnit>('pp_units').then((idbUnits) => {
+  const currentRaw = localStorage.getItem(STORAGE_KEY_PP_UNITS);
+  if (currentRaw === '[]') return; // Purged state, do not restore
   if (idbUnits && idbUnits.length > 0) {
+    const cleanIdb = idbUnits.filter(u => u && !u.id.startsWith('pp-idu-') && !u.id.startsWith('pp-odu-'));
     const mergedMap = new Map<string, PpUnit>();
-    ppUnitsCache.forEach(u => mergedMap.set(u.id, u));
-    idbUnits.forEach(u => mergedMap.set(u.id, u));
+    ppUnitsCache.forEach(u => { if (u && !u.id.startsWith('pp-idu-') && !u.id.startsWith('pp-odu-')) mergedMap.set(u.id, u); });
+    cleanIdb.forEach(u => { if (u && !u.id.startsWith('pp-idu-') && !u.id.startsWith('pp-odu-')) mergedMap.set(u.id, u); });
     ppUnitsCache = Array.from(mergedMap.values());
     notifyListeners();
   }

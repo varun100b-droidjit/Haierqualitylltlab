@@ -10,193 +10,29 @@ const STORAGE_KEY_UNITS = 'llt_lab_units_v2';
 const STORAGE_KEY_LOGS = 'llt_lab_activity_logs_v2';
 const STORAGE_KEY_NOTIFS = 'llt_lab_notifications_v2';
 
-const INITIAL_UNITS: Unit[] = [
-  {
-    id: 'unit-101',
-    modelName: 'LLT-V8 Micro-Sensor Array',
-    serialNumber: 'SN-2026-9810',
-    requiredBy: getFutureDateStr(6), // 6 days remaining -> Green
-    dayDuration: 7,
-    transferDate: '2026-07-20 09:30',
-    bsrPerson: 'Alex Rivera (BSR)',
-    eltPerson: 'Sarah Chen (ELT)',
-    rdPerson: 'Indrajit (R&D)',
-    oqcPerson: 'Marcus Thorne (OQC)',
-    currentHolder: 'Sarah Chen (ELT)',
-    currentStageIndex: 1, // ELT Person
-    status: 'transferred',
-    createdAt: '2026-07-20T09:30:00Z',
-    updatedAt: '2026-07-20T09:30:00Z',
-    priority: 'High',
-    notes: 'Thermal stress tolerance verification required prior to high-altitude deployment.',
-    timeline: createInitialTimeline('Alex Rivera (BSR)', 'Sarah Chen (ELT)', 'Indrajit (R&D)', 1)
-  },
-  {
-    id: 'unit-102',
-    modelName: 'LLT-900 Thermal Processor',
-    serialNumber: 'SN-2026-4401',
-    requiredBy: getFutureDateStr(3), // 3 days remaining -> Yellow
-    dayDuration: 5,
-    transferDate: '2026-07-21 14:15',
-    bsrPerson: 'Vikram Patel (BSR)',
-    eltPerson: 'Elena Rostova (ELT)',
-    rdPerson: 'Dr. Alan Grant (R&D)',
-    currentHolder: 'Dr. Alan Grant (R&D)',
-    currentStageIndex: 3, // Area (R&D)
-    status: 'transferred',
-    createdAt: '2026-07-21T14:15:00Z',
-    updatedAt: '2026-07-22T10:00:00Z',
-    priority: 'High',
-    notes: 'Chamber 4 calibration test pending approval.',
-    timeline: createInitialTimeline('Vikram Patel (BSR)', 'Elena Rostova (ELT)', 'Dr. Alan Grant (R&D)', 3)
-  },
-  {
-    id: 'unit-103',
-    modelName: 'LLT-Optic 50X Radar Module',
-    serialNumber: 'SN-2026-1192',
-    requiredBy: getFutureDateStr(0), // 0 days -> Red / Urgent
-    dayDuration: 4,
-    transferDate: '2026-07-19 11:00',
-    bsrPerson: 'Alex Rivera (BSR)',
-    eltPerson: 'Kenji Sato (ELT)',
-    rdPerson: 'Dr. Maya Lin (R&D)',
-    currentHolder: 'Kenji Sato (ELT)',
-    currentStageIndex: 6, // ELT Person (Return loop)
-    status: 'pending_verification',
-    createdAt: '2026-07-19T11:00:00Z',
-    updatedAt: '2026-07-23T08:00:00Z',
-    priority: 'High',
-    notes: 'Secondary optical alignment complete, pending ELT sign-off.',
-    timeline: createInitialTimeline('Alex Rivera (BSR)', 'Kenji Sato (ELT)', 'Dr. Maya Lin (R&D)', 6)
-  },
-  {
-    id: 'unit-104',
-    modelName: 'LLT-200 Power Mod Gen-3',
-    serialNumber: 'SN-2026-7023',
-    requiredBy: getFutureDateStr(10), // 10 days -> Green
-    dayDuration: 12,
-    transferDate: '2026-07-18 08:45',
-    bsrPerson: 'Maria Garcia (BSR)',
-    eltPerson: 'Sarah Chen (ELT)',
-    rdPerson: 'Indrajit (R&D)',
-    oqcPerson: 'Marcus Thorne (OQC)',
-    currentHolder: 'Maria Garcia (BSR)',
-    currentStageIndex: 13, // Unit Received (Completed)
-    status: 'received',
-    createdAt: '2026-07-18T08:45:00Z',
-    updatedAt: '2026-07-23T09:00:00Z',
-    priority: 'Normal',
-    notes: 'Full cycle validation passed with zero defects.',
-    timeline: createInitialTimeline('Maria Garcia (BSR)', 'Sarah Chen (ELT)', 'Indrajit (R&D)', 13)
-  },
-  {
-    id: 'unit-105',
-    modelName: 'LLT-Cryo Subsystem Delta',
-    serialNumber: 'SN-2026-3011',
-    requiredBy: getFutureDateStr(2), // 2 days -> Yellow
-    dayDuration: 6,
-    transferDate: '2026-07-22 16:20',
-    bsrPerson: 'Alex Rivera (BSR)',
-    eltPerson: 'Elena Rostova (ELT)',
-    rdPerson: 'Dr. Alan Grant (R&D)',
-    currentHolder: 'Elena Rostova (ELT)',
-    currentStageIndex: 1, // ELT Person
-    status: 'rework',
-    createdAt: '2026-07-22T16:20:00Z',
-    updatedAt: '2026-07-23T07:15:00Z',
-    priority: 'High',
-    notes: 'Seal leakage detected during pressure ramp. Returned for rework.',
-    timeline: createInitialTimeline('Alex Rivera (BSR)', 'Elena Rostova (ELT)', 'Dr. Alan Grant (R&D)', 1)
-  }
-];
+export const MOCK_UNIT_IDS = new Set([
+  'unit-101', 'unit-102', 'unit-103', 'unit-104', 'unit-105',
+  'proto-101', 'proto-102',
+  'pp-idu-19', 'pp-odu-19', 'pp-idu-18', 'pp-odu-18', 'pp-idu-24', 'pp-odu-24', 'pp-idu-30', 'pp-odu-36',
+  'field-101', 'field-102', 'field-103',
+  'rep-cs-101', 'rep-ce-102'
+]);
 
-const INITIAL_LOGS: ActivityLog[] = [
-  {
-    id: 'log-shift-start-1',
-    unitId: 'SHIFT-GEN',
-    modelName: 'Lab Shift Management',
-    serialNumber: 'General Shift',
-    action: 'Lab Shift Started - General Shift Operational (09:00 AM)',
-    performedBy: 'Shift Supervisor',
-    timestamp: '2026-08-05 09:00',
-    stageName: 'Shift Schedule',
-    type: 'shift_start'
-  },
-  {
-    id: 'log-shift-off-1',
-    unitId: 'SHIFT-PREV',
-    modelName: 'Lab Shift Management',
-    serialNumber: 'General Shift',
-    action: 'Lab Shift Ended / Turned Off (05:30 PM)',
-    performedBy: 'Shift Supervisor',
-    timestamp: '2026-08-04 17:30',
-    stageName: 'Shift Schedule',
-    type: 'shift_off'
-  },
-  {
-    id: 'log-1',
-    unitId: 'unit-101',
-    modelName: 'LLT-V8 Micro-Sensor Array',
-    serialNumber: 'SN-2026-9810',
-    action: 'Unit Transferred to R&D Workflow',
-    performedBy: 'Alex Rivera (BSR)',
-    timestamp: '2026-07-20 09:30',
-    stageName: 'BSR Person',
-    type: 'transfer'
-  },
-  {
-    id: 'log-2',
-    unitId: 'unit-104',
-    modelName: 'LLT-200 Power Mod Gen-3',
-    serialNumber: 'SN-2026-7023',
-    action: 'Final Inspection Passed - Moved to Received Tab',
-    performedBy: 'Maria Garcia (BSR)',
-    timestamp: '2026-07-23 09:00',
-    stageName: 'Unit Received',
-    type: 'received'
-  },
-  {
-    id: 'log-3',
-    unitId: 'unit-105',
-    modelName: 'LLT-Cryo Subsystem Delta',
-    serialNumber: 'SN-2026-3011',
-    action: 'Flagged for Rework - Pressure Ramp Leakage',
-    performedBy: 'Elena Rostova (ELT)',
-    timestamp: '2026-07-23 07:15',
-    stageName: 'ELT Person',
-    type: 'rework'
-  }
-];
+export function isMockUnitId(id?: string): boolean {
+  if (!id) return false;
+  return (
+    MOCK_UNIT_IDS.has(id) ||
+    id === 'unit-101' || id === 'unit-102' || id === 'unit-103' || id === 'unit-104' || id === 'unit-105' ||
+    id === 'proto-101' || id === 'proto-102' ||
+    id.startsWith('pp-idu-') || id.startsWith('pp-odu-') ||
+    id === 'field-101' || id === 'field-102' || id === 'field-103' ||
+    id === 'rep-cs-101' || id === 'rep-ce-102'
+  );
+}
 
-const INITIAL_NOTIFS: LabNotification[] = [
-  {
-    id: 'notif-1',
-    title: 'New Unit Transferred',
-    message: 'Unit SN-2026-9810 (LLT-V8 Micro-Sensor) transferred by Alex Rivera.',
-    timestamp: '10 mins ago',
-    read: false,
-    type: 'info',
-    unitId: 'unit-101'
-  },
-  {
-    id: 'notif-2',
-    title: 'Urgent Target Date',
-    message: 'Unit SN-2026-1192 is due today (0 days remaining).',
-    timestamp: '1 hour ago',
-    read: false,
-    type: 'alert',
-    unitId: 'unit-103'
-  },
-  {
-    id: 'notif-3',
-    title: 'Rework Requested',
-    message: 'LLT-Cryo Subsystem Delta returned for seal rework.',
-    timestamp: '2 hours ago',
-    read: true,
-    type: 'warning',
-    unitId: 'unit-105'
-  }
-];
+const INITIAL_UNITS: Unit[] = [];
+const INITIAL_LOGS: ActivityLog[] = [];
+const INITIAL_NOTIFS: LabNotification[] = [];
 
 // Memory store state
 let unitsCache: Unit[] = loadLocalUnits();
@@ -209,14 +45,15 @@ const listeners: Set<() => void> = new Set();
 initSupabaseSync();
 
 async function initSupabaseSync() {
-  const remoteData = await fetchRDUnitsFromSupabase();
-  if (remoteData && remoteData.length > 0) {
-    unitsCache = normalizeUnitTimelines(remoteData);
-    localStorage.setItem(STORAGE_KEY_UNITS, JSON.stringify(unitsCache));
-    notifyListeners();
-  } else {
-    // Sync initial demo units to Supabase if remote is empty
-    INITIAL_UNITS.forEach(u => syncRDUnitToSupabase(u));
+  try {
+    const remoteData = await fetchRDUnitsFromSupabase();
+    if (remoteData && remoteData.length > 0) {
+      unitsCache = normalizeUnitTimelines(remoteData);
+      localStorage.setItem(STORAGE_KEY_UNITS, JSON.stringify(unitsCache));
+      notifyListeners();
+    }
+  } catch (e) {
+    console.warn('RD Units Supabase sync note:', e);
   }
 }
 
@@ -332,34 +169,44 @@ function normalizeUnitTimelines(units: Unit[]): Unit[] {
 function loadLocalUnits(): Unit[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY_UNITS);
-    if (!raw) {
-      localStorage.setItem(STORAGE_KEY_UNITS, JSON.stringify(INITIAL_UNITS));
-      return INITIAL_UNITS;
+    if (raw !== null) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        const clean = parsed.filter((u: any) => u && !isMockUnitId(u.id));
+        return normalizeUnitTimelines(clean);
+      }
     }
-    const parsed = JSON.parse(raw);
-    return normalizeUnitTimelines(parsed);
+    return [];
   } catch (e) {
-    return INITIAL_UNITS;
+    return [];
   }
 }
 
 function loadLocalLogs(): ActivityLog[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY_LOGS);
-    if (!raw) return INITIAL_LOGS;
-    return JSON.parse(raw);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed.filter((l: any) => l && !isMockUnitId(l.unitId));
+    }
+    return [];
   } catch (e) {
-    return INITIAL_LOGS;
+    return [];
   }
 }
 
 function loadLocalNotifs(): LabNotification[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY_NOTIFS);
-    if (!raw) return INITIAL_NOTIFS;
-    return JSON.parse(raw);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed.filter((n: any) => n && !isMockUnitId(n.unitId));
+    }
+    return [];
   } catch (e) {
-    return INITIAL_NOTIFS;
+    return [];
   }
 }
 

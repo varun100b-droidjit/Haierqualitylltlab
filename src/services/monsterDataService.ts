@@ -38,6 +38,10 @@ import {
   LabShift 
 } from './shiftStore';
 import { 
+  clearAllSavedReports 
+} from './reportRoomStore';
+import { idbSaveAll } from '../lib/indexedDbStorage';
+import { 
   db, 
   collection, 
   getDocs, 
@@ -210,8 +214,11 @@ export async function purgeAllSupabaseAndFirebaseData(): Promise<{
       'fieldUnits',
       'field_units',
       'smog_leak_units',
+      'report_room_reports',
+      'saved_reports',
       'graphReadings',
       'ppUnitMeasurements',
+      'pp_unit_measurements',
       'activityLogs',
       'labNotifications',
       'megha_chat_records'
@@ -247,7 +254,9 @@ export async function purgeAllSupabaseAndFirebaseData(): Promise<{
       'pp_units',
       'proto_units',
       'field_units',
-      'smog_leak_units'
+      'smog_leak_units',
+      'report_room_reports',
+      'pp_unit_measurements'
     ];
 
     for (const tbl of supabaseTables) {
@@ -266,24 +275,44 @@ export async function purgeAllSupabaseAndFirebaseData(): Promise<{
     supabaseSuccess = false;
   }
 
-  // C. Clear LocalStorage and In-Memory Stores
+  // C. Clear IndexedDB High-Capacity Stores
+  try {
+    await Promise.all([
+      idbSaveAll('proto_units', []),
+      idbSaveAll('pp_units', []),
+      idbSaveAll('field_units', []),
+      idbSaveAll('saved_reports', [])
+    ]);
+  } catch (idbErr) {
+    console.warn('IndexedDB clear note:', idbErr);
+  }
+
+  // D. Clear In-Memory Stores and State
   clearAllRDUnits();
   clearAllPpUnits();
   clearAllProtoUnits();
   clearAllFieldUnits();
   clearAllActivityLogs();
   clearAllNotifications();
+  clearAllSavedReports();
   saveSmogUnits([]);
 
+  // E. Set explicit empty arrays and initialization sentinel in LocalStorage
   if (typeof window !== 'undefined' && window.localStorage) {
-    const keysToRemove: string[] = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key && (key.startsWith('llt_') || key.includes('smog') || key.includes('graph') || key.includes('unit'))) {
-        keysToRemove.push(key);
-      }
+    try {
+      localStorage.setItem('llt_initialized_v2', 'true');
+      localStorage.setItem('llt_proto_units_v1', '[]');
+      localStorage.setItem('llt_pp_units_v1', '[]');
+      localStorage.setItem('llt_field_units_v2', '[]');
+      localStorage.setItem('llt_lab_units_v2', '[]');
+      localStorage.setItem('llt_report_room_saved_reports_v1', '[]');
+      localStorage.setItem('llt_lab_activity_logs_v2', '[]');
+      localStorage.setItem('llt_lab_notifications_v2', '[]');
+      localStorage.setItem('llt_smog_leak_units_v1', '[]');
+      localStorage.setItem('llt_graph_measurements_v1', '[]');
+    } catch (lsErr) {
+      console.warn('LocalStorage reset note:', lsErr);
     }
-    keysToRemove.forEach((k) => localStorage.removeItem(k));
   }
 
   return {

@@ -168,6 +168,19 @@ export async function deleteProtoUnitFromSupabase(id: string) {
   }
 }
 
+const KNOWN_MOCK_IDS = new Set([
+  'unit-101', 'unit-102', 'unit-103', 'unit-104', 'unit-105',
+  'proto-101', 'proto-102',
+  'pp-idu-19', 'pp-odu-19', 'pp-idu-18', 'pp-odu-18', 'pp-idu-24', 'pp-odu-24', 'pp-idu-30', 'pp-odu-36',
+  'field-101', 'field-102', 'field-103',
+  'rep-cs-101', 'rep-ce-102'
+]);
+
+function isMockId(id: string): boolean {
+  if (!id) return false;
+  return KNOWN_MOCK_IDS.has(id) || id.startsWith('pp-idu-') || id.startsWith('pp-odu-');
+}
+
 export async function fetchProtoUnitsFromSupabase(): Promise<ProtoUnit[] | null> {
   try {
     const { data, error } = await supabase
@@ -177,7 +190,10 @@ export async function fetchProtoUnitsFromSupabase(): Promise<ProtoUnit[] | null>
 
     if (error || !data || data.length === 0) return null;
 
-    return data.map((item: any) => ({
+    const filtered = data.filter((item: any) => !isMockId(item.id));
+    if (filtered.length === 0) return null;
+
+    return filtered.map((item: any) => ({
       id: item.id,
       modelName: item.model_name || item.modelName || '',
       station: item.station || 'Station 01',
@@ -255,7 +271,10 @@ export async function fetchFieldUnitsFromSupabase(): Promise<FieldUnit[] | null>
 
     if (error || !data || data.length === 0) return null;
 
-    return data.map((item: any) => ({
+    const filtered = data.filter((item: any) => !isMockId(item.id));
+    if (filtered.length === 0) return null;
+
+    return filtered.map((item: any) => ({
       id: item.id,
       modelName: item.model_name || item.modelName || '',
       productType: item.product_type || item.productType || 'BOTH',
@@ -335,7 +354,10 @@ export async function fetchRDUnitsFromSupabase(): Promise<Unit[] | null> {
 
     if (error || !data || data.length === 0) return null;
 
-    return data.map((item: any) => ({
+    const filtered = data.filter((item: any) => !isMockId(item.id));
+    if (filtered.length === 0) return null;
+
+    return filtered.map((item: any) => ({
       id: item.id,
       modelName: item.model_name || item.modelName || '',
       serialNumber: item.serial_number || item.serialNumber || '',
@@ -416,7 +438,10 @@ export async function fetchPpUnitsFromSupabase(): Promise<PpUnit[] | null> {
 
     if (error || !data || data.length === 0) return null;
 
-    return data.map((item: any) => ({
+    const filtered = data.filter((item: any) => !isMockId(item.id));
+    if (filtered.length === 0) return null;
+
+    return filtered.map((item: any) => ({
       id: item.id,
       modelName: item.model_name || item.modelName || '',
       station: item.station || 'Station 01',
@@ -459,7 +484,7 @@ export async function syncReportRoomToSupabase(report: any) {
       station: report.station || '',
       request_by: report.requestBy || '',
       specs: report.specs || {},
-      data_values_map: report.dataValuesMap || {},
+      dataValuesMap: report.dataValuesMap || {},
       photos: report.photos || {},
       template_name: report.templateName || '',
       status: report.status || 'Generated',
@@ -496,7 +521,10 @@ export async function fetchReportRoomFromSupabase(): Promise<any[] | null> {
 
     if (error || !data || data.length === 0) return null;
 
-    return data.map((item: any) => ({
+    const filtered = data.filter((item: any) => !isMockId(item.id));
+    if (filtered.length === 0) return null;
+
+    return filtered.map((item: any) => ({
       id: item.id,
       reportType: item.report_type || 'cs-simulation',
       tag: item.tag || 'C Simulation',

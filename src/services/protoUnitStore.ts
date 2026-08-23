@@ -14,66 +14,7 @@ export function generate5DigitSerial(): string {
   return Math.floor(10000 + Math.random() * 90000).toString();
 }
 
-const INITIAL_PROTO_UNITS: ProtoUnit[] = [
-  {
-    id: 'proto-101',
-    modelName: 'HSI19T-S2NB-F',
-    station: 'Station 01',
-    iduSerialNumber: '58192',
-    oduSerialNumber: '93104',
-    requestBy: 'Mohit Sharma',
-    testPurpose: 'Performance & Thermal Stress Testing under 45°C Ambient',
-    requiredHour: 120,
-    partsInfo: {
-      iduPcbSupplier: 'Sanken Electric',
-      iduMotorSupplier: 'Nidec Japan',
-      iduPcbPartCode: 'PCB-IDU-8841',
-      iduMotorPartCode: 'MTR-IDU-2201',
-      oduPcbSupplier: 'Delta Electronics',
-      oduCompressorSupplier: 'Highly Panasonic',
-      oduMotorSupplier: 'Nidec Japan',
-      oduEevSupplier: 'Sanjia EEV',
-      oduPcbPartCode: 'PCB-ODU-9902',
-      oduCompressorPartCode: 'CMP-ODU-7721',
-      oduMotorPartCode: 'MTR-ODU-3310',
-      oduEevPartCode: 'EEV-ODU-1022',
-    },
-    photos: {},
-    remarks: 'Sample batch 1 for verification. All sensors pre-calibrated.',
-    status: 'live',
-    createdAt: '2026-07-29 10:15',
-    updatedAt: '2026-07-29 10:15',
-  },
-  {
-    id: 'proto-102',
-    modelName: 'YU63 Dual Inverter',
-    station: 'Station 02',
-    iduSerialNumber: '14209',
-    oduSerialNumber: '88310',
-    requestBy: 'Indrajit',
-    testPurpose: 'Low Voltage Operational Limit & Acoustic Noise Test',
-    requiredHour: 72,
-    partsInfo: {
-      iduPcbSupplier: 'Renesas',
-      iduMotorSupplier: 'Welling Motor',
-      iduPcbPartCode: 'PCB-IDU-4021',
-      iduMotorPartCode: 'MTR-IDU-1109',
-      oduPcbSupplier: 'Texas Instruments',
-      oduCompressorSupplier: 'GMCC Toshiba',
-      oduMotorSupplier: 'Welling Motor',
-      oduEevSupplier: 'DunAn Sensing',
-      oduPcbPartCode: 'PCB-ODU-3320',
-      oduCompressorPartCode: 'CMP-ODU-8822',
-      oduMotorPartCode: 'MTR-ODU-4401',
-      oduEevPartCode: 'EEV-ODU-5510',
-    },
-    photos: {},
-    remarks: 'Finished initial 72 hour continuous test cycle without defects.',
-    status: 'finished',
-    createdAt: '2026-07-25 14:00',
-    updatedAt: '2026-07-28 14:00',
-  }
-];
+const INITIAL_PROTO_UNITS: ProtoUnit[] = [];
 
 let protoUnitsCache: ProtoUnit[] = loadLocalProtoUnits();
 const listeners: Set<() => void> = new Set();
@@ -82,14 +23,16 @@ const listeners: Set<() => void> = new Set();
 initSupabaseSync();
 
 async function initSupabaseSync() {
-  const remoteData = await fetchProtoUnitsFromSupabase();
-  if (remoteData && remoteData.length > 0) {
-    protoUnitsCache = remoteData;
-    localStorage.setItem(STORAGE_KEY_PROTO_UNITS, JSON.stringify(remoteData));
-    notifyListeners();
-  } else {
-    // Sync initial local units to Supabase if empty
-    INITIAL_PROTO_UNITS.forEach(unit => syncProtoUnitToSupabase(unit));
+  try {
+    const remoteData = await fetchProtoUnitsFromSupabase();
+    if (remoteData && remoteData.length > 0) {
+      const cleanRemote = remoteData.filter(u => u && u.id !== 'proto-101' && u.id !== 'proto-102');
+      protoUnitsCache = cleanRemote;
+      localStorage.setItem(STORAGE_KEY_PROTO_UNITS, JSON.stringify(cleanRemote));
+      notifyListeners();
+    }
+  } catch (e) {
+    console.warn('Supabase Proto Unit sync note:', e);
   }
 }
 
@@ -105,33 +48,37 @@ export function subscribeProtoUnitStore(callback: () => void) {
 }
 
 function saveLocalProtoUnits(data: ProtoUnit[]) {
-  protoUnitsCache = data;
-  safeLocalStorageSet(STORAGE_KEY_PROTO_UNITS, data);
-  idbSaveAll('proto_units', data);
+  const clean = (data || []).filter(u => u && u.id !== 'proto-101' && u.id !== 'proto-102');
+  protoUnitsCache = clean;
+  safeLocalStorageSet(STORAGE_KEY_PROTO_UNITS, clean);
+  idbSaveAll('proto_units', clean);
   notifyListeners();
 }
 
 function loadLocalProtoUnits(): ProtoUnit[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY_PROTO_UNITS);
-    if (!raw) {
-      safeLocalStorageSet(STORAGE_KEY_PROTO_UNITS, INITIAL_PROTO_UNITS);
-      return INITIAL_PROTO_UNITS;
+    if (raw !== null) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed.filter((u: any) => u && u.id !== 'proto-101' && u.id !== 'proto-102');
+      }
     }
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) return parsed;
-    return INITIAL_PROTO_UNITS;
+    return [];
   } catch (e) {
-    return INITIAL_PROTO_UNITS;
+    return [];
   }
 }
 
 // Background sync from IndexedDB
 idbGetAll<ProtoUnit>('proto_units').then((idbUnits) => {
+  const currentRaw = localStorage.getItem(STORAGE_KEY_PROTO_UNITS);
+  if (currentRaw === '[]') return; // Purged state, do not restore
   if (idbUnits && idbUnits.length > 0) {
+    const cleanIdb = idbUnits.filter(u => u && u.id !== 'proto-101' && u.id !== 'proto-102');
     const mergedMap = new Map<string, ProtoUnit>();
-    protoUnitsCache.forEach(u => mergedMap.set(u.id, u));
-    idbUnits.forEach(u => mergedMap.set(u.id, u));
+    protoUnitsCache.forEach(u => { if (u && u.id !== 'proto-101' && u.id !== 'proto-102') mergedMap.set(u.id, u); });
+    cleanIdb.forEach(u => { if (u && u.id !== 'proto-101' && u.id !== 'proto-102') mergedMap.set(u.id, u); });
     protoUnitsCache = Array.from(mergedMap.values());
     notifyListeners();
   }

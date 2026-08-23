@@ -231,6 +231,7 @@ export const ProtoReportGenerator: React.FC<ProtoReportGeneratorProps> = ({
   // Preview Modal state
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [allowRegenerate, setAllowRegenerate] = useState(false);
 
   // Circular Percentage Progress state
   const [generationProgress, setGenerationProgress] = useState<{
@@ -268,6 +269,7 @@ export const ProtoReportGenerator: React.FC<ProtoReportGeneratorProps> = ({
 
   // Handler when switching between Proto Unit and PP Unit source
   const handleSwitchUnitSource = (source: 'proto' | 'pp') => {
+    setAllowRegenerate(false);
     setUnitSource(source);
     const list = source === 'pp' ? getPpUnits() : getProtoUnits();
     setUnitsList(list);
@@ -283,6 +285,7 @@ export const ProtoReportGenerator: React.FC<ProtoReportGeneratorProps> = ({
 
   // Handler when Sr.No is selected / entered
   const handleSelectSerial = (serial: string) => {
+    setAllowRegenerate(false);
     setSelectedSerialNo(serial);
     const found = unitsList.find(u => 
       u.iduSerialNumber === serial || 
@@ -632,6 +635,12 @@ export const ProtoReportGenerator: React.FC<ProtoReportGeneratorProps> = ({
   };
 
   const handleGenerateReportAndNavigate = async () => {
+    // Check if report already exists in Report Room and user has not unlocked overwrite
+    if (existingReportInRoom && !allowRegenerate) {
+      alert(`⚠️ This machine's report is already generated and available in the Report Room (Report #${existingReportInRoom.reportNo} under ${existingReportInRoom.tag}).\n\nTo view or download the report, please click "Open Report Room" or "Preview Report". If you specifically want to update/overwrite the report, please check "Unlock Re-generation".`);
+      return;
+    }
+
     const tpl = masterTemplate || getMasterTemplate(reportType);
     if (!tpl?.base64Data) {
       alert("Master Report Template is not available. Please upload a template or reload.");
@@ -752,9 +761,19 @@ export const ProtoReportGenerator: React.FC<ProtoReportGeneratorProps> = ({
               unitsList.map((unit) => {
                 const serial = unit.iduSerialNumber || unit.oduSerialNumber || unit.id;
                 const unitTypeTag = (unit as any).unitType ? ` [${(unit as any).unitType}]` : '';
+                const repInRoom = findSavedReportForUnit({
+                  id: unit.id,
+                  serialNo: serial,
+                  iduSerialNumber: unit.iduSerialNumber,
+                  oduSerialNumber: unit.oduSerialNumber,
+                  modelName: unit.modelName
+                }, targetTag);
+
+                const statusLabel = repInRoom ? ` [✅ REPORT IN ROOM: #${repInRoom.reportNo}]` : '';
+
                 return (
                   <option key={unit.id} value={serial}>
-                    {unitSource === 'pp' ? 'PP Unit' : 'Proto'} Sr.No: {serial} — {unit.modelName}{unitTypeTag} ({unit.station || 'Station 01'})
+                    {unitSource === 'pp' ? 'PP Unit' : 'Proto'} Sr.No: {serial} — {unit.modelName}{unitTypeTag} ({unit.station || 'Station 01'}){statusLabel}
                   </option>
                 );
               })
@@ -770,6 +789,87 @@ export const ProtoReportGenerator: React.FC<ProtoReportGeneratorProps> = ({
           />
         </div>
       </div>
+
+      {/* Existing Report Room Banner (Duplicate Report Prevention & Quick Actions) */}
+      {existingReportInRoom && (
+        <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-cyan-950/80 via-slate-900 to-slate-950 border-2 border-cyan-500/60 shadow-xl space-y-3 animate-in fade-in slide-in-from-top-2">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-cyan-800/40 pb-3">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-xl bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shrink-0">
+                <FolderArchive className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h4 className="text-sm font-black text-white">
+                    Report Already Generated & Available in Report Room
+                  </h4>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-cyan-950 text-cyan-300 border border-cyan-800">
+                    Report #{existingReportInRoom.reportNo}
+                  </span>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-950 text-purple-300 border border-purple-800">
+                    Tag: {existingReportInRoom.tag}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-300 mt-0.5">
+                  Is machine ka report pehle se <strong>Report Room</strong> me saved hai. Duplicate report dubara generate karne ki zaroorat nahi hai.
+                </p>
+              </div>
+            </div>
+
+            {/* Quick Action Buttons */}
+            <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto flex-wrap">
+              {onNavigateToReportRoom && (
+                <button
+                  type="button"
+                  onClick={onNavigateToReportRoom}
+                  className="px-3.5 py-1.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold transition-all shadow-md flex items-center gap-1.5 cursor-pointer active:scale-95"
+                >
+                  <FolderArchive className="w-3.5 h-3.5" />
+                  <span>Open in Report Room</span>
+                  <ArrowUpRight className="w-3.5 h-3.5" />
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => setIsPreviewOpen(true)}
+                className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
+              >
+                <Eye className="w-3.5 h-3.5 text-cyan-400" />
+                <span>View Report</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Detailed Info & Re-generation Unlock Controls */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-slate-300 bg-slate-950/60 p-3 rounded-xl border border-slate-800">
+            <div className="space-y-1">
+              <div className="flex items-center gap-3 flex-wrap font-mono text-[11px]">
+                <span>Archived Model: <strong className="text-white">{existingReportInRoom.modelName}</strong></span>
+                <span>•</span>
+                <span>Sr.No: <strong className="text-cyan-300">{existingReportInRoom.serialNo}</strong></span>
+                <span>•</span>
+                <span>Generated Date: <strong className="text-slate-300">{existingReportInRoom.generatedDate}</strong></span>
+              </div>
+              <p className="text-[11px] text-slate-400">
+                Aap upar diye gaye button se seedha Report Room me jakar report dekh sakte hain ya PDF/DOCX download kar sakte hain.
+              </p>
+            </div>
+
+            <label className="flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 cursor-pointer select-none shrink-0 hover:bg-slate-800 transition-colors">
+              <input
+                type="checkbox"
+                checked={allowRegenerate}
+                onChange={(e) => setAllowRegenerate(e.target.checked)}
+                className="rounded border-slate-700 text-cyan-600 focus:ring-cyan-500 w-4 h-4 cursor-pointer"
+              />
+              <span className="text-xs font-semibold text-slate-200">
+                {allowRegenerate ? '🔓 Re-generation Unlocked' : '🔒 Unlock Re-generation (Overwrite)'}
+              </span>
+            </label>
+          </div>
+        </div>
+      )}
 
       {/* 2. Validation & Live Mapping Status (Requirement 10) */}
       <MissingDataAlert
@@ -1525,7 +1625,7 @@ export const ProtoReportGenerator: React.FC<ProtoReportGeneratorProps> = ({
           )}
         </div>
 
-        <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
+        <div className="flex items-center gap-3 w-full sm:w-auto justify-end flex-wrap">
           <button
             type="button"
             onClick={() => setIsPreviewOpen(true)}
@@ -1535,29 +1635,54 @@ export const ProtoReportGenerator: React.FC<ProtoReportGeneratorProps> = ({
             <span>Preview</span>
           </button>
 
-          {/* Primary Generate Report Button (Auto-Saves to Room, Downloads DOCX, and Opens Report Room) */}
-          <button
-            type="button"
-            disabled={!isFormValid || isGenerating}
-            onClick={handleGenerateReportAndNavigate}
-            className={`flex-1 sm:flex-none px-6 py-3 rounded-xl font-black text-xs sm:text-sm transition-all flex items-center justify-center gap-2.5 cursor-pointer shadow-lg active:scale-95 ${
-              isFormValid && !isGenerating
-                ? 'bg-gradient-to-r from-cyan-500 via-blue-600 to-indigo-600 hover:from-cyan-400 hover:to-indigo-500 text-white shadow-cyan-950/80 ring-2 ring-cyan-400/40'
-                : 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed opacity-60'
-            }`}
-          >
-            {isGenerating ? (
-              <>
-                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                <span>Generating DOCX Report...</span>
-              </>
-            ) : (
-              <>
-                <Sparkles className="w-4 h-4 text-cyan-200" />
-                <span>Generate Report (DOCX)</span>
-              </>
-            )}
-          </button>
+          {/* Primary Generate Report Button or Locked State when already in Report Room */}
+          {existingReportInRoom && !allowRegenerate ? (
+            <button
+              type="button"
+              onClick={() => {
+                if (onNavigateToReportRoom) {
+                  onNavigateToReportRoom();
+                } else {
+                  setIsPreviewOpen(true);
+                }
+              }}
+              className="flex-1 sm:flex-none px-6 py-3 rounded-xl font-bold text-xs sm:text-sm transition-all flex items-center justify-center gap-2.5 cursor-pointer shadow-lg active:scale-95 bg-slate-800 hover:bg-slate-750 text-cyan-300 border-2 border-cyan-500/50 shadow-cyan-950/40"
+              title="Report is already generated and available in Report Room. Click to open Report Room."
+            >
+              <Lock className="w-4 h-4 text-amber-400" />
+              <span>Report in Room (#{existingReportInRoom.reportNo})</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              disabled={!isFormValid || isGenerating}
+              onClick={handleGenerateReportAndNavigate}
+              className={`flex-1 sm:flex-none px-6 py-3 rounded-xl font-black text-xs sm:text-sm transition-all flex items-center justify-center gap-2.5 cursor-pointer shadow-lg active:scale-95 ${
+                isFormValid && !isGenerating
+                  ? existingReportInRoom
+                    ? 'bg-gradient-to-r from-amber-600 via-orange-600 to-amber-700 hover:from-amber-500 hover:to-orange-500 text-white shadow-amber-950/80 ring-2 ring-amber-400/40'
+                    : 'bg-gradient-to-r from-cyan-500 via-blue-600 to-indigo-600 hover:from-cyan-400 hover:to-indigo-500 text-white shadow-cyan-950/80 ring-2 ring-cyan-400/40'
+                  : 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed opacity-60'
+              }`}
+            >
+              {isGenerating ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  <span>Generating DOCX Report...</span>
+                </>
+              ) : existingReportInRoom ? (
+                <>
+                  <Sparkles className="w-4 h-4 text-amber-200" />
+                  <span>Overwrite Report in Room</span>
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-4 h-4 text-cyan-200" />
+                  <span>Generate Report (DOCX)</span>
+                </>
+              )}
+            </button>
+          )}
         </div>
       </div>
 

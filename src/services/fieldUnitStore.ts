@@ -18,76 +18,7 @@ function getFormattedNow(): string {
   return `${year}-${month}-${day} ${hours}:${minutes}`;
 }
 
-const INITIAL_FIELD_UNITS: FieldUnit[] = [
-  {
-    id: 'field-101',
-    modelName: 'HSI19T-S2NB-F',
-    productType: 'BOTH',
-    iduSerialNumber: 'IDU-88219-A',
-    oduSerialNumber: 'ODU-88219-B',
-    serialNumber: 'IDU: IDU-88219-A | ODU: ODU-88219-B',
-    requestBy: 'Suresh Verma',
-    station: 'Station 01',
-    startDateTime: '2026-07-30 08:30',
-    requiredHour: 48,
-    status: 'live',
-    remarks: 'Field site performance testing under active thermal load.',
-    observations: [
-      {
-        id: 'obs-f1',
-        text: 'Compressor sound level checked at 48dB. Within acceptable limits.',
-        timestamp: '2026-07-30 09:30'
-      }
-    ],
-    createdAt: '2026-07-30 08:30',
-    updatedAt: '2026-07-30 09:30'
-  },
-  {
-    id: 'field-102',
-    modelName: 'YU63 Dual Inverter 1.5T',
-    productType: 'IDU',
-    iduSerialNumber: 'IDU-99412-X',
-    serialNumber: 'IDU: IDU-99412-X',
-    requestBy: 'Rohan Mehta',
-    station: 'Station 03',
-    startDateTime: '2026-07-29 14:00',
-    requiredHour: 72,
-    status: 'live',
-    remarks: 'Airflow and blower vibration field monitoring.',
-    observations: [
-      {
-        id: 'obs-f2',
-        text: 'Blower fan speed stable across 5 speed steps.',
-        timestamp: '2026-07-29 16:45'
-      }
-    ],
-    createdAt: '2026-07-29 14:00',
-    updatedAt: '2026-07-29 16:45'
-  },
-  {
-    id: 'field-103',
-    modelName: 'AURA-5Star-HeavyDuty',
-    productType: 'ODU',
-    oduSerialNumber: 'ODU-12093-Z',
-    serialNumber: 'ODU: ODU-12093-Z',
-    requestBy: 'Amit Kumar',
-    station: 'Station 05',
-    startDateTime: '2026-07-28 10:00',
-    requiredHour: 24,
-    status: 'finished',
-    endDateTime: '2026-07-29 10:00',
-    remarks: '24-hour continuous high ambient heat test completed successfully.',
-    observations: [
-      {
-        id: 'obs-f3',
-        text: 'Test cycle completed without thermal trip.',
-        timestamp: '2026-07-29 10:00'
-      }
-    ],
-    createdAt: '2026-07-28 10:00',
-    updatedAt: '2026-07-29 10:00'
-  }
-];
+const INITIAL_FIELD_UNITS: FieldUnit[] = [];
 
 let fieldUnitsCache: FieldUnit[] = loadLocalFieldUnits();
 const subscribers: Set<() => void> = new Set();
@@ -96,14 +27,16 @@ const subscribers: Set<() => void> = new Set();
 initSupabaseSync();
 
 async function initSupabaseSync() {
-  const remoteData = await fetchFieldUnitsFromSupabase();
-  if (remoteData && remoteData.length > 0) {
-    fieldUnitsCache = remoteData;
-    localStorage.setItem(STORAGE_KEY_FIELD_UNITS, JSON.stringify(remoteData));
-    notifySubscribers();
-  } else {
-    // Sync initial units to Supabase if empty
-    INITIAL_FIELD_UNITS.forEach(u => syncFieldUnitToSupabase(u));
+  try {
+    const remoteData = await fetchFieldUnitsFromSupabase();
+    if (remoteData && remoteData.length > 0) {
+      const clean = remoteData.filter(u => u && u.id !== 'field-101' && u.id !== 'field-102' && u.id !== 'field-103');
+      fieldUnitsCache = clean;
+      localStorage.setItem(STORAGE_KEY_FIELD_UNITS, JSON.stringify(clean));
+      notifySubscribers();
+    }
+  } catch (e) {
+    console.warn('Field units Supabase sync note:', e);
   }
 }
 
@@ -114,18 +47,23 @@ function notifySubscribers() {
 function loadLocalFieldUnits(): FieldUnit[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY_FIELD_UNITS);
-    if (!raw) return INITIAL_FIELD_UNITS;
-    return JSON.parse(raw);
+    if (raw !== null) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed.filter((u: any) => u && u.id !== 'field-101' && u.id !== 'field-102' && u.id !== 'field-103');
+      }
+    }
+    return [];
   } catch (err) {
-    console.error('Error loading field units from localStorage:', err);
-    return INITIAL_FIELD_UNITS;
+    return [];
   }
 }
 
 function saveLocalFieldUnits(units: FieldUnit[]) {
-  fieldUnitsCache = units;
+  const clean = (units || []).filter(u => u && u.id !== 'field-101' && u.id !== 'field-102' && u.id !== 'field-103');
+  fieldUnitsCache = clean;
   try {
-    localStorage.setItem(STORAGE_KEY_FIELD_UNITS, JSON.stringify(units));
+    localStorage.setItem(STORAGE_KEY_FIELD_UNITS, JSON.stringify(clean));
   } catch (err) {
     console.error('Error saving field units to localStorage:', err);
   }

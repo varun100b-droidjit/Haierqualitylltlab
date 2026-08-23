@@ -17,7 +17,9 @@ import {
   Grid3X3,
   SlidersHorizontal,
   Download,
-  Tag
+  Tag,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 import { ProtoUnitPhotos } from '../../types';
 import { 
@@ -79,6 +81,10 @@ export interface PhotoUploadSectionProps {
   title?: string;
   subtitle?: string;
   readOnly?: boolean;
+  collapsible?: boolean;
+  defaultOpen?: boolean;
+  isOpen?: boolean;
+  onToggleOpen?: () => void;
 }
 
 export const PhotoUploadSection: React.FC<PhotoUploadSectionProps> = ({
@@ -87,7 +93,22 @@ export const PhotoUploadSection: React.FC<PhotoUploadSectionProps> = ({
   title = 'Inspection Photos',
   subtitle,
   readOnly = false,
+  collapsible = true,
+  defaultOpen = true,
+  isOpen: controlledIsOpen,
+  onToggleOpen,
 }) => {
+  const [internalIsOpen, setInternalIsOpen] = useState<boolean>(defaultOpen);
+  const isExpanded = controlledIsOpen !== undefined ? controlledIsOpen : internalIsOpen;
+  
+  const handleToggle = () => {
+    if (onToggleOpen) {
+      onToggleOpen();
+    } else {
+      setInternalIsOpen(prev => !prev);
+    }
+  };
+
   const [activeTab, setActiveTab] = useState<'all' | ReportSectionCategory>('all');
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
   const [previewModal, setPreviewModal] = useState<{ url: string; label: string; key: string; section?: string; page?: string } | null>(null);
@@ -356,34 +377,50 @@ export const PhotoUploadSection: React.FC<PhotoUploadSectionProps> = ({
     : PHOTO_UPLOAD_CONFIGS.filter(cfg => cfg.section === activeTab);
 
   return (
-    <div className="bg-slate-950/70 rounded-2xl border border-slate-800 shadow-lg p-4 sm:p-6 space-y-5">
-      {/* Header Banner */}
-      <div className="flex items-center justify-between gap-3 border-b border-slate-800/80 pb-4">
+    <div className="bg-slate-950/80 rounded-2xl border border-slate-800 shadow-xl overflow-hidden transition-all duration-300">
+      {/* Header Banner with Dropdown / Undrop Accordion Toggle */}
+      <div 
+        onClick={collapsible ? handleToggle : undefined}
+        className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 sm:p-5 transition-colors ${
+          collapsible ? 'cursor-pointer select-none bg-slate-900/40 hover:bg-slate-900/80' : 'bg-slate-900/40'
+        } ${isExpanded ? 'border-b border-slate-800/80' : ''}`}
+      >
         <div className="flex items-center gap-3">
           <div className="p-2.5 rounded-xl bg-purple-500/10 border border-purple-500/30 text-purple-400 shrink-0">
             <ImageIcon className="w-5 h-5" />
           </div>
           <div>
-            <h3 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
-              {title}
-              <span className={`text-[11px] font-mono px-2 py-0.5 rounded-full border ${
+            <div className="flex items-center gap-2 flex-wrap">
+              <h3 className="text-sm sm:text-base font-black text-white flex items-center gap-2">
+                {title}
+              </h3>
+              <span className={`text-[11px] font-mono font-bold px-2 py-0.5 rounded-full border ${
                 coverage.uploaded > 0
-                  ? 'bg-purple-950/70 text-purple-300 border-purple-800/60'
+                  ? 'bg-purple-950/80 text-purple-300 border-purple-800/60'
                   : 'bg-slate-900 text-slate-400 border-slate-800'
               }`}>
-                {coverage.uploaded} / 11
+                {coverage.uploaded} / 11 Uploaded
               </span>
-            </h3>
-            {subtitle && (
-              <p className="text-xs text-slate-400 mt-0.5">
-                {subtitle}
-              </p>
-            )}
+              {collapsible && (
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                  isExpanded ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-800/50' : 'bg-slate-800 text-slate-400'
+                }`}>
+                  {isExpanded ? 'Expanded (Opened)' : 'Collapsed (Click to Open)'}
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-slate-400 mt-0.5">
+              {subtitle || (
+                isExpanded
+                  ? '11 Standard Photographic Evidence fields for Report verification. Upload or drag-and-drop photos.'
+                  : `${coverage.uploaded}/11 Photos Attached (${coverage.percentage}% Coverage) - Click Dropdown to Open & Upload Photos`
+              )}
+            </p>
           </div>
         </div>
 
-        {/* Action Buttons */}
-        <div className="flex items-center gap-2 shrink-0">
+        {/* Action Buttons & Dropdown / Undrop Toggle */}
+        <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto" onClick={(e) => e.stopPropagation()}>
           {!readOnly && coverage.uploaded > 0 && (
             <button
               type="button"
@@ -395,15 +432,42 @@ export const PhotoUploadSection: React.FC<PhotoUploadSectionProps> = ({
               <span className="hidden sm:inline">Save Renamed</span> ({coverage.uploaded})
             </button>
           )}
+
+          {collapsible && (
+            <button
+              type="button"
+              onClick={handleToggle}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                isExpanded
+                  ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700'
+                  : 'bg-purple-600 hover:bg-purple-500 text-white shadow-md shadow-purple-900/30'
+              }`}
+            >
+              {isExpanded ? (
+                <>
+                  <ChevronUp className="w-4 h-4 text-purple-400" />
+                  <span>Undrop (Close)</span>
+                </>
+              ) : (
+                <>
+                  <ChevronDown className="w-4 h-4" />
+                  <span>Dropdown (Open Photos)</span>
+                </>
+              )}
+            </button>
+          )}
         </div>
       </div>
 
-      {batchFeedback && (
-        <div className="p-3 rounded-xl bg-purple-950/70 border border-purple-500/60 text-purple-200 text-xs flex items-center gap-2 animate-in fade-in">
-          <Sparkles className="w-4 h-4 text-purple-400 shrink-0" />
-          <span>{batchFeedback}</span>
-        </div>
-      )}
+      {/* Accordion Body: Only rendered when Expanded */}
+      {isExpanded && (
+        <div className="p-4 sm:p-6 space-y-5 animate-in fade-in-50 duration-200">
+          {batchFeedback && (
+            <div className="p-3 rounded-xl bg-purple-950/70 border border-purple-500/60 text-purple-200 text-xs flex items-center gap-2 animate-in fade-in">
+              <Sparkles className="w-4 h-4 text-purple-400 shrink-0" />
+              <span>{batchFeedback}</span>
+            </div>
+          )}
 
       {/* Dynamic Document Section Tabs */}
       <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs border-b border-slate-800/80 scrollbar-thin">
@@ -689,6 +753,8 @@ export const PhotoUploadSection: React.FC<PhotoUploadSectionProps> = ({
           );
         })}
       </div>
+    </div>
+  )}
 
       {/* Full Image Preview Modal */}
       {previewModal && (

@@ -440,36 +440,36 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
               
               {/* SECTION 1: General & Identification Information */}
               {(activeTab === 'all' || activeTab === 'general') && (
-                <div className="p-4 sm:p-5 rounded-2xl bg-slate-900/60 border border-slate-800/80 space-y-4">
-                  <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+                <div className="p-4 sm:p-5 rounded-2xl bg-slate-900/70 border border-slate-800 shadow-sm space-y-4">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-3">
                     <span className="text-xs sm:text-sm font-black text-cyan-400 uppercase tracking-wider flex items-center gap-2">
                       <FileCheck className="w-4 h-4 text-cyan-400" />
                       1. General &amp; Identification Information
                     </span>
-                    <span className="text-[11px] text-slate-500 font-mono font-bold">12 Parameters</span>
+                    <span className="text-[11px] text-slate-400 font-mono font-bold bg-slate-800/80 px-2.5 py-0.5 rounded-md border border-slate-700">12 Parameters</span>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
                     {formGeneral.filter(item => matchFilter(item.label, item.value)).map((item, idx) => (
-                      <div key={idx} className="space-y-1.5 bg-slate-950/80 p-2.5 rounded-xl border border-slate-800/90 group hover:border-slate-700 transition-all">
+                      <div key={idx} className="space-y-1.5 bg-slate-950/90 p-3 rounded-xl border border-slate-800/90 group hover:border-cyan-500/40 transition-all flex flex-col justify-between">
                         <div className="flex items-center justify-between">
-                          <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">
+                          <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block truncate">
                             {item.label}
                           </span>
                           <button
                             type="button"
                             onClick={() => handleCopyValue(item.value, `gen-${idx}`)}
-                            className="text-slate-500 hover:text-cyan-300 transition-colors p-0.5 cursor-pointer opacity-0 group-hover:opacity-100"
+                            className="text-slate-500 hover:text-cyan-300 transition-colors p-0.5 cursor-pointer opacity-0 group-hover:opacity-100 shrink-0 ml-1"
                             title="Copy Value"
                           >
                             {copiedKey === `gen-${idx}` ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
                           </button>
                         </div>
-                        <div className="bg-slate-900/90 border border-slate-800 rounded-lg p-2 flex items-center justify-between min-h-[34px]">
-                          <span className={`${item.color} text-xs truncate max-w-full font-medium`}>
+                        <div className="bg-slate-900/90 border border-slate-800 rounded-lg px-2.5 py-1.5 flex items-center justify-between min-h-[38px] gap-1">
+                          <span className={`${item.color} text-xs truncate max-w-full font-medium tracking-wide`}>
                             {item.value}
                           </span>
-                          <span className="text-[8px] font-mono text-slate-600 ml-1 shrink-0">{item.keyTag}</span>
+                          <span className="text-[8px] font-mono text-slate-500 bg-slate-950 px-1.5 py-0.5 rounded border border-slate-800/80 shrink-0">{item.keyTag}</span>
                         </div>
                       </div>
                     ))}
@@ -479,36 +479,36 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
 
               {/* SECTION 2: Dates & Schedule */}
               {(activeTab === 'all' || activeTab === 'dates') && (
-                <div className="p-4 sm:p-5 rounded-2xl bg-slate-900/60 border border-slate-800/80 space-y-4">
-                  <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+                <div className="p-4 sm:p-5 rounded-2xl bg-slate-900/70 border border-slate-800 shadow-sm space-y-4">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-3">
                     <span className="text-xs sm:text-sm font-black text-indigo-400 uppercase tracking-wider flex items-center gap-2">
                       <Clock className="w-4 h-4 text-indigo-400" />
                       2. Testing Dates &amp; Timeline
                     </span>
-                    <span className="text-[11px] text-slate-500 font-mono font-bold">3 Parameters</span>
+                    <span className="text-[11px] text-slate-400 font-mono font-bold bg-slate-800/80 px-2.5 py-0.5 rounded-md border border-slate-700">3 Parameters</span>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
                     {formDates.filter(item => matchFilter(item.label, item.value)).map((item, idx) => (
-                      <div key={idx} className="space-y-1.5 bg-slate-950/80 p-2.5 rounded-xl border border-slate-800/90 group hover:border-slate-700 transition-all">
+                      <div key={idx} className="space-y-1.5 bg-slate-950/90 p-3 rounded-xl border border-slate-800/90 group hover:border-indigo-500/40 transition-all flex flex-col justify-between">
                         <div className="flex items-center justify-between">
-                          <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">
+                          <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block truncate">
                             {item.label}
                           </span>
                           <button
                             type="button"
                             onClick={() => handleCopyValue(item.value, `date-${idx}`)}
-                            className="text-slate-500 hover:text-cyan-300 transition-colors p-0.5 cursor-pointer opacity-0 group-hover:opacity-100"
+                            className="text-slate-500 hover:text-cyan-300 transition-colors p-0.5 cursor-pointer opacity-0 group-hover:opacity-100 shrink-0 ml-1"
                             title="Copy Value"
                           >
                             {copiedKey === `date-${idx}` ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
                           </button>
                         </div>
-                        <div className="bg-slate-900/90 border border-slate-800 rounded-lg p-2 flex items-center justify-between min-h-[34px]">
-                          <span className={`${item.color} text-xs truncate max-w-full font-medium`}>
+                        <div className="bg-slate-900/90 border border-slate-800 rounded-lg px-2.5 py-1.5 flex items-center justify-between min-h-[38px] gap-1">
+                          <span className={`${item.color} text-xs truncate max-w-full font-medium tracking-wide`}>
                             {item.value}
                           </span>
-                          <span className="text-[8px] font-mono text-slate-600 ml-1 shrink-0">{item.keyTag}</span>
+                          <span className="text-[8px] font-mono text-slate-500 bg-slate-950 px-1.5 py-0.5 rounded border border-slate-800/80 shrink-0">{item.keyTag}</span>
                         </div>
                       </div>
                     ))}
@@ -518,36 +518,36 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
 
               {/* SECTION 3: Nameplate Specifications & Electrical Parameters */}
               {(activeTab === 'all' || activeTab === 'nameplate') && (
-                <div className="p-4 sm:p-5 rounded-2xl bg-slate-900/60 border border-slate-800/80 space-y-4">
-                  <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+                <div className="p-4 sm:p-5 rounded-2xl bg-slate-900/70 border border-slate-800 shadow-sm space-y-4">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-3">
                     <span className="text-xs sm:text-sm font-black text-amber-400 uppercase tracking-wider flex items-center gap-2">
                       <Layers className="w-4 h-4 text-amber-400" />
                       3. Nameplate Specifications &amp; Ratings
                     </span>
-                    <span className="text-[11px] text-slate-500 font-mono font-bold">13 Parameters</span>
+                    <span className="text-[11px] text-slate-400 font-mono font-bold bg-slate-800/80 px-2.5 py-0.5 rounded-md border border-slate-700">13 Parameters</span>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
                     {formNameplate.filter(item => matchFilter(item.label, item.value)).map((item, idx) => (
-                      <div key={idx} className="space-y-1.5 bg-slate-950/80 p-2.5 rounded-xl border border-slate-800/90 group hover:border-slate-700 transition-all">
+                      <div key={idx} className="space-y-1.5 bg-slate-950/90 p-3 rounded-xl border border-slate-800/90 group hover:border-amber-500/40 transition-all flex flex-col justify-between">
                         <div className="flex items-center justify-between">
-                          <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">
+                          <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block truncate">
                             {item.label}
                           </span>
                           <button
                             type="button"
                             onClick={() => handleCopyValue(item.value, `np-${idx}`)}
-                            className="text-slate-500 hover:text-cyan-300 transition-colors p-0.5 cursor-pointer opacity-0 group-hover:opacity-100"
+                            className="text-slate-500 hover:text-cyan-300 transition-colors p-0.5 cursor-pointer opacity-0 group-hover:opacity-100 shrink-0 ml-1"
                             title="Copy Value"
                           >
                             {copiedKey === `np-${idx}` ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
                           </button>
                         </div>
-                        <div className="bg-slate-900/90 border border-slate-800 rounded-lg p-2 flex items-center justify-between min-h-[34px]">
-                          <span className={`${item.color} text-xs truncate max-w-full font-medium`}>
+                        <div className="bg-slate-900/90 border border-slate-800 rounded-lg px-2.5 py-1.5 flex items-center justify-between min-h-[38px] gap-1">
+                          <span className={`${item.color} text-xs truncate max-w-full font-medium tracking-wide`}>
                             {item.value}
                           </span>
-                          <span className="text-[8px] font-mono text-slate-600 ml-1 shrink-0">{item.keyTag}</span>
+                          <span className="text-[8px] font-mono text-slate-500 bg-slate-950 px-1.5 py-0.5 rounded border border-slate-800/80 shrink-0">{item.keyTag}</span>
                         </div>
                       </div>
                     ))}
@@ -557,36 +557,39 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
 
               {/* SECTION 4: Critical Parts & Components */}
               {(activeTab === 'all' || activeTab === 'parts') && (
-                <div className="p-4 sm:p-5 rounded-2xl bg-slate-900/60 border border-slate-800/80 space-y-4">
-                  <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+                <div className="p-4 sm:p-5 rounded-2xl bg-slate-900/70 border border-slate-800 shadow-sm space-y-4">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-3">
                     <span className="text-xs sm:text-sm font-black text-emerald-400 uppercase tracking-wider flex items-center gap-2">
                       <Cpu className="w-4 h-4 text-emerald-400" />
                       4. Critical Parts &amp; Components (Spec, Part Code, Supplier)
                     </span>
-                    <span className="text-[11px] text-slate-500 font-mono font-bold">6 Sub-Assemblies</span>
+                    <span className="text-[11px] text-slate-400 font-mono font-bold bg-slate-800/80 px-2.5 py-0.5 rounded-md border border-slate-700">6 Sub-Assemblies</span>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 text-xs">
                     {formParts.map((part, idx) => (
-                      <div key={idx} className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-2.5 hover:border-slate-700 transition-all">
-                        <span className={`text-xs font-black ${part.accentColor} uppercase tracking-wider block border-b border-slate-800/80 pb-1.5`}>
-                          {part.title}
-                        </span>
+                      <div key={idx} className="p-4 rounded-xl bg-slate-950/90 border border-slate-800 space-y-3 hover:border-emerald-500/40 transition-all flex flex-col justify-between">
+                        <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+                          <span className={`text-xs font-black ${part.accentColor} uppercase tracking-wider block`}>
+                            {part.title}
+                          </span>
+                          <span className="text-[9px] font-mono text-slate-500 uppercase">Sub-Assy {idx + 1}</span>
+                        </div>
                         
                         <div className="space-y-2">
-                          <div className="bg-slate-900/80 p-2 rounded-lg border border-slate-800/80">
-                            <span className="text-[9px] text-slate-400 uppercase font-bold block mb-0.5">Specification:</span>
-                            <span className="text-white text-xs font-medium block truncate">{part.spec}</span>
+                          <div className="bg-slate-900/90 px-3 py-2 rounded-lg border border-slate-800/80 flex items-center justify-between gap-2">
+                            <span className="text-[10px] text-slate-400 uppercase font-bold shrink-0 w-24">Specification:</span>
+                            <span className="text-white text-xs font-semibold truncate text-right">{part.spec}</span>
                           </div>
 
-                          <div className="bg-slate-900/80 p-2 rounded-lg border border-slate-800/80">
-                            <span className="text-[9px] text-slate-400 uppercase font-bold block mb-0.5">Part Code:</span>
-                            <span className="text-cyan-300 font-mono text-xs font-bold block truncate">{part.partCode}</span>
+                          <div className="bg-slate-900/90 px-3 py-2 rounded-lg border border-slate-800/80 flex items-center justify-between gap-2">
+                            <span className="text-[10px] text-slate-400 uppercase font-bold shrink-0 w-24">Part Code:</span>
+                            <span className="text-cyan-300 font-mono text-xs font-bold truncate text-right">{part.partCode}</span>
                           </div>
 
-                          <div className="bg-slate-900/80 p-2 rounded-lg border border-slate-800/80">
-                            <span className="text-[9px] text-slate-400 uppercase font-bold block mb-0.5">Supplier:</span>
-                            <span className="text-slate-200 text-xs font-medium block truncate">{part.supplier}</span>
+                          <div className="bg-slate-900/90 px-3 py-2 rounded-lg border border-slate-800/80 flex items-center justify-between gap-2">
+                            <span className="text-[10px] text-slate-400 uppercase font-bold shrink-0 w-24">Supplier:</span>
+                            <span className="text-slate-200 text-xs font-medium truncate text-right">{part.supplier}</span>
                           </div>
                         </div>
                       </div>
@@ -755,75 +758,73 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
                 </div>
               </div>
 
-              {/* General Unit Information Grid */}
+              {/* General Unit Information Table */}
               <div>
-                <h3 className="text-xs font-black uppercase tracking-wider text-cyan-900 bg-cyan-50 p-2 rounded border-l-4 border-cyan-700 mb-3">
+                <h3 className="text-xs font-black uppercase tracking-wider text-cyan-900 bg-cyan-50 px-3 py-2 rounded-t-lg border border-cyan-200 border-l-4 border-l-cyan-700">
                   1. General Sample Details
                 </h3>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs bg-slate-50 p-4 rounded-xl border border-slate-200">
-                  <div>
-                    <span className="text-slate-500 block font-bold">Model Name:</span>
-                    <strong className="text-slate-900 text-sm">{modelName}</strong>
-                  </div>
-                  <div>
-                    <span className="text-slate-500 block font-bold">Sample Type:</span>
-                    <strong className="text-cyan-900 font-bold">{getVal(['Sample_Type', 'sampleType'], 'Proto')}</strong>
-                  </div>
-                  <div>
-                    <span className="text-slate-500 block font-bold">Report Number:</span>
-                    <strong className="text-slate-900 font-mono">{reportNo}</strong>
-                  </div>
-                  <div>
-                    <span className="text-slate-500 block font-bold">Requested By:</span>
-                    <strong className="text-slate-900">{getVal(['Request_By', 'requestBy'], 'Indrajit')}</strong>
-                  </div>
-                  <div>
-                    <span className="text-slate-500 block font-bold">Sample Received:</span>
-                    <strong className="text-slate-900 font-mono">{getVal(['Sample_Received_Date', 'Sample_Received', 'sampleReceivedDate'], '—')}</strong>
-                  </div>
-                  <div>
-                    <span className="text-slate-500 block font-bold">Test Commenced:</span>
-                    <strong className="text-slate-900 font-mono">{getVal(['Test_Commenced_Date', 'Test_Commenced', 'testCommencedDate'], '—')}</strong>
-                  </div>
-                  <div>
-                    <span className="text-slate-500 block font-bold">Test Completed:</span>
-                    <strong className="text-slate-900 font-mono">{getVal(['Test_Completed_Date', 'Test_Completed', 'testCompletedDate'], '—')}</strong>
-                  </div>
-                </div>
+                <table className="w-full text-left text-xs border-collapse border border-slate-300">
+                  <tbody className="divide-y divide-slate-300">
+                    <tr>
+                      <td className="w-1/4 p-2.5 bg-slate-50 font-bold text-slate-700 border-r border-slate-300">Model Name:</td>
+                      <td className="w-1/4 p-2.5 font-bold text-slate-900 border-r border-slate-300">{modelName}</td>
+                      <td className="w-1/4 p-2.5 bg-slate-50 font-bold text-slate-700 border-r border-slate-300">Sample Type:</td>
+                      <td className="w-1/4 p-2.5 font-bold text-cyan-900">{getVal(['Sample_Type', 'sampleType'], 'Proto')}</td>
+                    </tr>
+                    <tr>
+                      <td className="w-1/4 p-2.5 bg-slate-50 font-bold text-slate-700 border-r border-slate-300">Report Number:</td>
+                      <td className="w-1/4 p-2.5 font-mono font-bold text-slate-900 border-r border-slate-300">{reportNo}</td>
+                      <td className="w-1/4 p-2.5 bg-slate-50 font-bold text-slate-700 border-r border-slate-300">Requested By:</td>
+                      <td className="w-1/4 p-2.5 font-semibold text-slate-900">{getVal(['Request_By', 'requestBy'], 'Indrajit')}</td>
+                    </tr>
+                    <tr>
+                      <td className="w-1/4 p-2.5 bg-slate-50 font-bold text-slate-700 border-r border-slate-300">Sample Received:</td>
+                      <td className="w-1/4 p-2.5 font-mono text-slate-800 border-r border-slate-300">{getVal(['Sample_Received_Date', 'Sample_Received', 'sampleReceivedDate'], '—')}</td>
+                      <td className="w-1/4 p-2.5 bg-slate-50 font-bold text-slate-700 border-r border-slate-300">Test Commenced:</td>
+                      <td className="w-1/4 p-2.5 font-mono text-slate-800">{getVal(['Test_Commenced_Date', 'Test_Commenced', 'testCommencedDate'], '—')}</td>
+                    </tr>
+                    <tr>
+                      <td className="w-1/4 p-2.5 bg-slate-50 font-bold text-slate-700 border-r border-slate-300">Test Completed:</td>
+                      <td className="w-1/4 p-2.5 font-mono text-slate-800 border-r border-slate-300">{getVal(['Test_Completed_Date', 'Test_Completed', 'testCompletedDate'], '—')}</td>
+                      <td className="w-1/4 p-2.5 bg-slate-50 font-bold text-slate-700 border-r border-slate-300">Testing Lead:</td>
+                      <td className="w-1/4 p-2.5 font-semibold text-slate-900">{getVal(['Tested_By', 'testedBy'], 'Indrajit Sharma')}</td>
+                    </tr>
+                  </tbody>
+                </table>
               </div>
 
               {/* Performance Specifications */}
               <div>
-                <h3 className="text-xs font-black uppercase tracking-wider text-cyan-900 bg-cyan-50 p-2 rounded border-l-4 border-cyan-700 mb-3">
+                <h3 className="text-xs font-black uppercase tracking-wider text-cyan-900 bg-cyan-50 px-3 py-2 rounded-t-lg border border-cyan-200 border-l-4 border-l-cyan-700">
                   2. Rating &amp; Performance Metrics
                 </h3>
-                <table className="w-full text-left text-xs border-collapse border border-slate-200">
+                <table className="w-full text-left text-xs border-collapse border border-slate-300">
                   <thead>
-                    <tr className="bg-slate-100 text-slate-700 font-bold uppercase text-[11px]">
-                      <th className="p-2.5 border border-slate-200">Parameter</th>
-                      <th className="p-2.5 border border-slate-200">Value</th>
-                      <th className="p-2.5 border border-slate-200">Parameter</th>
-                      <th className="p-2.5 border border-slate-200">Value</th>
+                    <tr className="bg-slate-100 text-slate-800 font-bold uppercase text-[11px]">
+                      <th className="w-1/4 p-2.5 border-r border-b border-slate-300">Parameter</th>
+                      <th className="w-1/4 p-2.5 border-r border-b border-slate-300">Value</th>
+                      <th className="w-1/4 p-2.5 border-r border-b border-slate-300">Parameter</th>
+                      <th className="w-1/4 p-2.5 border-b border-slate-300">Value</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-200">
+                  <tbody className="divide-y divide-slate-300">
                     <tr>
-                      <td className="p-2.5 font-bold border border-slate-200">Cooling Capacity:</td>
-                      <td className="p-2.5 font-mono text-cyan-900 font-extrabold border border-slate-200">{getVal(['Cooling_Capacity', 'Cooling_capacity', 'coolingCapacity'])}</td>
-                      <td className="p-2.5 font-bold border border-slate-200">Power Mode:</td>
-                      <td className="p-2.5 border border-slate-200">{getVal(['Power_mode', 'Power_Mode', 'powerMode'])}</td>
+                      <td className="p-2.5 font-bold text-slate-700 bg-slate-50 border-r border-slate-300">Cooling Capacity:</td>
+                      <td className="p-2.5 font-mono text-cyan-950 font-extrabold border-r border-slate-300">{getVal(['Cooling_Capacity', 'Cooling_capacity', 'coolingCapacity'])}</td>
+                      <td className="p-2.5 font-bold text-slate-700 bg-slate-50 border-r border-slate-300">Power Mode:</td>
+                      <td className="p-2.5 text-slate-900 font-medium">{getVal(['Power_mode', 'Power_Mode', 'powerMode'])}</td>
                     </tr>
                     <tr>
-                      <td className="p-2.5 font-bold border border-slate-200">Refrigerant:</td>
-                      <td className="p-2.5 font-mono border border-slate-200">{getVal(['Refrigerant', 'refrigerant'])}</td>
-                      <td className="p-2.5 font-bold border border-slate-200">Gas Injection Volume:</td>
-                      <td className="p-2.5 font-mono border border-slate-200">{getVal(['Gas_injection_Volume', 'Gas_Injection_Volume', 'gasInjectionVolume'])}</td>
+                      <td className="p-2.5 font-bold text-slate-700 bg-slate-50 border-r border-slate-300">Refrigerant:</td>
+                      <td className="p-2.5 font-mono text-slate-900 font-bold border-r border-slate-300">{getVal(['Refrigerant', 'refrigerant'])}</td>
+                      <td className="p-2.5 font-bold text-slate-700 bg-slate-50 border-r border-slate-300">Gas Injection Volume:</td>
+                      <td className="p-2.5 font-mono text-slate-900 font-medium">{getVal(['Gas_injection_Volume', 'Gas_Injection_Volume', 'gasInjectionVolume'])}</td>
                     </tr>
                     <tr>
-                      <td className="p-2.5 font-bold border border-slate-200">ISEER Rating:</td>
-                      <td className="p-2.5 font-mono text-emerald-800 font-bold border border-slate-200">{getVal(['ISEER', 'iseer'])}</td>
-                      <td className="p-2.5 font-bold border border-slate-200">Compressor Spec:</td>
-                      <td className="p-2.5 border border-slate-200">{getVal(['Compressor_Spec', 'Compressor _Spec', 'compressorSpec'])}</td>
+                      <td className="p-2.5 font-bold text-slate-700 bg-slate-50 border-r border-slate-300">ISEER Rating:</td>
+                      <td className="p-2.5 font-mono text-emerald-800 font-bold border-r border-slate-300">{getVal(['ISEER', 'iseer'])}</td>
+                      <td className="p-2.5 font-bold text-slate-700 bg-slate-50 border-r border-slate-300">Compressor Spec:</td>
+                      <td className="p-2.5 text-slate-900 font-medium">{getVal(['Compressor_Spec', 'Compressor _Spec', 'compressorSpec'])}</td>
                     </tr>
                   </tbody>
                 </table>
@@ -831,25 +832,25 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
 
               {/* Parts & Components Specification Table */}
               <div>
-                <h3 className="text-xs font-black uppercase tracking-wider text-cyan-900 bg-cyan-50 p-2 rounded border-l-4 border-cyan-700 mb-3">
+                <h3 className="text-xs font-black uppercase tracking-wider text-cyan-900 bg-cyan-50 px-3 py-2 rounded-t-lg border border-cyan-200 border-l-4 border-l-cyan-700">
                   3. Sub-Assembly &amp; Parts Bill of Materials (BOM)
                 </h3>
-                <table className="w-full text-left text-xs border-collapse border border-slate-200">
+                <table className="w-full text-left text-xs border-collapse border border-slate-300">
                   <thead>
                     <tr className="bg-slate-100 text-slate-800 font-bold uppercase text-[11px]">
-                      <th className="p-2 border border-slate-200">Sub-Assembly</th>
-                      <th className="p-2 border border-slate-200">Specification</th>
-                      <th className="p-2 border border-slate-200">Part Code</th>
-                      <th className="p-2 border border-slate-200">Supplier</th>
+                      <th className="w-[24%] p-2.5 border-r border-b border-slate-300">Sub-Assembly</th>
+                      <th className="w-[36%] p-2.5 border-r border-b border-slate-300">Specification</th>
+                      <th className="w-[20%] p-2.5 border-r border-b border-slate-300">Part Code</th>
+                      <th className="w-[20%] p-2.5 border-b border-slate-300">Supplier</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-200 font-medium">
+                  <tbody className="divide-y divide-slate-300 font-medium">
                     {formParts.map((p, idx) => (
-                      <tr key={idx}>
-                        <td className="p-2 font-bold border border-slate-200">{p.title}</td>
-                        <td className="p-2 border border-slate-200">{p.spec}</td>
-                        <td className="p-2 font-mono text-cyan-900 border border-slate-200 font-bold">{p.partCode}</td>
-                        <td className="p-2 border border-slate-200">{p.supplier}</td>
+                      <tr key={idx} className={idx % 2 === 1 ? 'bg-slate-50/60' : 'bg-white'}>
+                        <td className="p-2.5 font-bold text-slate-900 border-r border-slate-300">{p.title}</td>
+                        <td className="p-2.5 text-slate-700 border-r border-slate-300">{p.spec}</td>
+                        <td className="p-2.5 font-mono text-cyan-900 font-bold border-r border-slate-300">{p.partCode}</td>
+                        <td className="p-2.5 text-slate-800">{p.supplier}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -857,25 +858,25 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
               </div>
 
               {/* Photos Grid */}
-              <div className="space-y-4">
-                <div className="flex items-center justify-between bg-cyan-50 p-2.5 rounded-lg border-l-4 border-cyan-700">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between bg-cyan-50 px-3 py-2 rounded-t-lg border border-cyan-200 border-l-4 border-l-cyan-700">
                   <h3 className="text-xs font-black uppercase tracking-wider text-cyan-950">
                     4. Sample Photographs Gallery
                   </h3>
-                  <span className="text-[10px] font-bold text-cyan-800 bg-cyan-100 px-2 py-0.5 rounded border border-cyan-300">
+                  <span className="text-[10px] font-bold text-cyan-800 bg-cyan-100 px-2.5 py-0.5 rounded border border-cyan-300">
                     {totalPhotosAttached} Photos Attached
                   </span>
                 </div>
 
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 p-3 bg-slate-50 rounded-b-lg border border-slate-200">
                   {photoCategories.flatMap(c => c.photos).map((item, idx) => (
-                    <div key={idx} className="bg-slate-50 border border-slate-200 p-2 rounded-xl flex flex-col items-center space-y-1">
+                    <div key={idx} className="bg-white border border-slate-200 p-2.5 rounded-xl flex flex-col items-center space-y-1.5 shadow-sm">
                       <span className="text-[10px] font-bold text-slate-800 truncate w-full text-center">{item.label}</span>
-                      <div className="w-full h-[120px] bg-white border border-slate-300 rounded overflow-hidden flex items-center justify-center">
+                      <div className="w-full h-[130px] bg-slate-50 border border-slate-200 rounded-lg overflow-hidden flex items-center justify-center">
                         {item.url ? (
                           <img src={item.url} alt={item.label} className="w-full h-full object-contain p-1" />
                         ) : (
-                          <span className="text-[9px] text-slate-400">No Photo</span>
+                          <span className="text-[9px] font-medium text-slate-400">No Photo</span>
                         )}
                       </div>
                     </div>
@@ -884,7 +885,7 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
               </div>
 
               {/* Test Conclusion */}
-              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2">
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-300 space-y-2">
                 <h3 className="text-xs font-black uppercase tracking-wider text-slate-800">
                   5. Final Test Conclusion
                 </h3>
@@ -895,14 +896,14 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
 
               {/* Signatures Footer */}
               <div className="pt-8 border-t border-slate-300 flex items-end justify-between text-xs text-slate-600">
-                <div>
+                <div className="space-y-1">
                   <p><strong>Tested By:</strong> Indrajit Sharma (Testing Lead)</p>
                   <p><strong>LLT Quality Lab:</strong> Certified Pass</p>
                 </div>
 
                 <div className="text-right">
-                  <p className="font-mono text-[10px]">Date Generated: {new Date().toLocaleDateString()}</p>
-                  <div className="mt-6 border-t border-slate-400 pt-1 font-bold text-slate-800 inline-block px-4">
+                  <p className="font-mono text-[10px] text-slate-500">Date Generated: {new Date().toLocaleDateString()}</p>
+                  <div className="mt-6 border-t border-slate-400 pt-1 font-bold text-slate-800 inline-block px-6">
                     Authorized Signatory Signature
                   </div>
                 </div>

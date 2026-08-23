@@ -23,8 +23,7 @@ import {
   Square,
   Power,
   MicOff,
-  Zap,
-  Database
+  Zap
 } from 'lucide-react';
 import { LabNotification, UserProfile } from '../../types';
 import { markNotificationAsRead, clearNotifications } from '../../services/unitStore';
@@ -255,21 +254,6 @@ export const TopAppBar: React.FC<TopAppBarProps> = ({
             </span>
           </button>
         </div>
-
-        {/* Supabase Cloud Database Quick Trigger */}
-        {onOpenSupabaseModal && (
-          <button
-            type="button"
-            onClick={onOpenSupabaseModal}
-            className="p-2.5 text-slate-300 hover:text-emerald-400 hover:bg-emerald-950/40 rounded-xl border border-transparent hover:border-emerald-800/60 transition-all duration-200 cursor-pointer group flex items-center gap-1.5"
-            title="Supabase Cloud Database & Tables"
-          >
-            <Database className="w-5 h-5 text-emerald-400 group-hover:scale-110 transition-transform" />
-            <span className="hidden xl:inline text-xs font-bold text-slate-300 group-hover:text-emerald-300">
-              Supabase DB
-            </span>
-          </button>
-        )}
 
         {/* Notifications Button & Dropdown */}
         <div className="relative">

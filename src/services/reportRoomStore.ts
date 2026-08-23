@@ -57,160 +57,7 @@ export interface SavedReport {
 
 const STORAGE_KEY_REPORT_ROOM = 'llt_report_room_saved_reports_v1';
 
-const INITIAL_SAVED_REPORTS: SavedReport[] = [
-  {
-    id: 'rep-cs-101',
-    reportType: 'cs-simulation',
-    tag: 'C Simulation',
-    title: 'Customer Simulation Report - HSI19T-S2NB-F',
-    reportNo: 'REP-CS-2026-0881',
-    modelName: 'HSI19T-S2NB-F',
-    unitSource: 'proto',
-    serialNo: '58192',
-    station: 'Station 01',
-    requestBy: 'Mohit Sharma',
-    createdAt: '2026-08-15 14:30',
-    generatedDate: '2026-08-15',
-    specs: {
-      coolingCapacity: '5200 W (1.5 Ton Inverter)',
-      powerMode: '230V / 50Hz / Single Phase',
-      refrigerant: 'R-32 (950g)',
-      iseer: '5.20 (5 Star)',
-      iduMotorSpec: 'DC Inverter Motor 30W',
-      iduMotorPartCode: 'MTR-IDU-2201',
-      iduMotorSupplier: 'Nidec Japan',
-      iduPcbPartCode: 'PCB-IDU-8841',
-      iduPcbSupplier: 'Sanken Electric',
-      oduMotorSpec: 'DC Brushless 45W',
-      oduMotorPartCode: 'MTR-ODU-3310',
-      oduMotorSupplier: 'Nidec Japan',
-      oduPcbPartCode: 'PCB-ODU-9902',
-      oduPcbSupplier: 'Delta Electronics',
-      compressorSpec: 'Twin Rotary Inverter',
-      compressorPartCode: 'CMP-ODU-7721',
-      compressorSupplier: 'Highly Panasonic',
-      eevSpec: 'Electronic Expansion Valve 500 Pulse',
-      eevPartCode: 'EEV-ODU-1022',
-      eevSupplier: 'Sanjia EEV',
-      sampleReceivedDate: '2026-08-10',
-      testCommencedDate: '2026-08-10',
-      testCompletedDate: '2026-08-15',
-      testConclusion: 'All customer simulation tests passed. Performance and thermal parameters conform to design specs.'
-    },
-    dataValuesMap: {
-      Model_Name: 'HSI19T-S2NB-F',
-      Report_No: 'REP-CS-2026-0881',
-      Sample_Received_Date: '2026-08-10',
-      Test_Commenced_Date: '2026-08-10',
-      Test_Completed_Date: '2026-08-15',
-      Cooling_Capacity: '5200 W (1.5 Ton Inverter)',
-      Power_Mode: '230V / 50Hz / Single Phase',
-      Power_mode: '230V / 50Hz / Single Phase',
-      Refrigerant: 'R-32 (950g)',
-      Gas_injection_Volume: '950 g',
-      Gas_Injection_Volume: '950 g',
-      ISEER: '5.20 (5 Star)',
-      IDU_Motor_Spec: 'DC Inverter Motor 30W',
-      IDU_Motor_Part_Code: 'MTR-IDU-2201',
-      IDU_Motor_Supplier: 'Nidec Japan',
-      IDU_PCB_Part_Code: 'PCB-IDU-8841',
-      IDU_PCB_Supplier: 'Sanken Electric',
-      ODU_Motor_Spec: 'DC Brushless 45W',
-      ODU_Motor_Part_Code: 'MTR-ODU-3310',
-      ODU_Motor_Supplier: 'Nidec Japan',
-      ODU_PCB_Part_Code: 'PCB-ODU-9902',
-      ODU_PCB_Supplier: 'Delta Electronics',
-      "Compressor _Spec": 'Twin Rotary Inverter',
-      Compressor_Spec: 'Twin Rotary Inverter',
-      Compressor_Part_Code: 'CMP-ODU-7721',
-      Compressor_Supplier: 'Highly Panasonic',
-      EEV_Spec: 'Electronic Expansion Valve 500 Pulse',
-      EEV_Part_Code: 'EEV-ODU-1022',
-      EEV_Supplier: 'Sanjia EEV',
-      Request_By: 'Mohit Sharma',
-      Station: 'Station 01',
-      Test_Conclusion: 'All customer simulation tests passed. Performance and thermal parameters conform to design specs.'
-    },
-    photos: {},
-    templateName: 'Standard Customer Simulation Template v2',
-    status: 'Verified',
-    remarks: 'Approved by Lab Incharge. Ready for release.'
-  },
-  {
-    id: 'rep-ce-102',
-    reportType: 'cs-experience',
-    tag: 'C Experience',
-    title: 'Customer Experience Report - YU63 Dual Inverter',
-    reportNo: 'REP-CE-2026-0412',
-    modelName: 'YU63 Dual Inverter',
-    unitSource: 'proto',
-    serialNo: '14209',
-    station: 'Station 02',
-    requestBy: 'Indrajit',
-    createdAt: '2026-08-16 11:20',
-    generatedDate: '2026-08-16',
-    specs: {
-      coolingCapacity: '3500 W (1.0 Ton Dual Inverter)',
-      powerMode: '230V / 50Hz / Single Phase',
-      refrigerant: 'R-32 (780g)',
-      iseer: '4.85 (4 Star)',
-      iduMotorSpec: 'DC Motor 25W High Efficiency',
-      iduMotorPartCode: 'MTR-IDU-1109',
-      iduMotorSupplier: 'Welling Motor',
-      iduPcbPartCode: 'PCB-IDU-4021',
-      iduPcbSupplier: 'Renesas',
-      oduMotorSpec: 'BLDC Fan Motor 40W',
-      oduMotorPartCode: 'MTR-ODU-2290',
-      oduMotorSupplier: 'Welling Motor',
-      oduPcbPartCode: 'PCB-ODU-5510',
-      oduPcbSupplier: 'Texas Instruments',
-      compressorSpec: 'Dual Inverter GMCC',
-      compressorPartCode: 'CMP-ODU-3388',
-      compressorSupplier: 'GMCC Toshiba',
-      eevSpec: 'Sanjia 480 Pulse EEV',
-      eevPartCode: 'EEV-ODU-2091',
-      eevSupplier: 'Sanjia EEV',
-      sampleReceivedDate: '2026-08-12',
-      testCommencedDate: '2026-08-12',
-      testCompletedDate: '2026-08-16',
-      testConclusion: 'Acoustic levels below 32dB(A). Low voltage operational limit validated smoothly at 145V.'
-    },
-    dataValuesMap: {
-      Model_Name: 'YU63 Dual Inverter',
-      Report_No: 'REP-CE-2026-0412',
-      Sample_Received_Date: '2026-08-12',
-      Test_Commenced_Date: '2026-08-12',
-      Test_Completed_Date: '2026-08-16',
-      Cooling_Capacity: '3500 W (1.0 Ton Dual Inverter)',
-      Power_Mode: '230V / 50Hz / Single Phase',
-      Refrigerant: 'R-32 (780g)',
-      ISEER: '4.85 (4 Star)',
-      IDU_Motor_Spec: 'DC Motor 25W High Efficiency',
-      IDU_Motor_Part_Code: 'MTR-IDU-1109',
-      IDU_Motor_Supplier: 'Welling Motor',
-      IDU_PCB_Part_Code: 'PCB-IDU-4021',
-      IDU_PCB_Supplier: 'Renesas',
-      ODU_Motor_Spec: 'BLDC Fan Motor 40W',
-      ODU_Motor_Part_Code: 'MTR-ODU-2290',
-      ODU_Motor_Supplier: 'Welling Motor',
-      ODU_PCB_Part_Code: 'PCB-ODU-5510',
-      ODU_PCB_Supplier: 'Texas Instruments',
-      Compressor_Spec: 'Dual Inverter GMCC',
-      Compressor_Part_Code: 'CMP-ODU-3388',
-      Compressor_Supplier: 'GMCC Toshiba',
-      EEV_Spec: 'Sanjia 480 Pulse EEV',
-      EEV_Part_Code: 'EEV-ODU-2091',
-      EEV_Supplier: 'Sanjia EEV',
-      Request_By: 'Indrajit',
-      Station: 'Station 02',
-      Test_Conclusion: 'Acoustic levels below 32dB(A). Low voltage operational limit validated smoothly at 145V.'
-    },
-    photos: {},
-    templateName: 'Standard Customer Experience Template v1',
-    status: 'Generated',
-    remarks: 'Customer experience validation passed with excellent user ergonomics score.'
-  }
-];
+const INITIAL_SAVED_REPORTS: SavedReport[] = [];
 
 let savedReportsCache: SavedReport[] = loadLocalReports();
 let listeners: ((reports: SavedReport[]) => void)[] = [];
@@ -222,9 +69,10 @@ async function initIndexedDbReports() {
   try {
     const remoteReports = await fetchReportRoomFromSupabase();
     if (remoteReports && remoteReports.length > 0) {
+      const cleanRemote = remoteReports.filter(r => r && r.id !== 'rep-cs-101' && r.id !== 'rep-ce-102');
       const mergedMap = new Map<string, SavedReport>();
-      savedReportsCache.forEach(r => mergedMap.set(r.id, r));
-      remoteReports.forEach((r: SavedReport) => mergedMap.set(r.id, r));
+      savedReportsCache.forEach(r => { if (r && r.id !== 'rep-cs-101' && r.id !== 'rep-ce-102') mergedMap.set(r.id, r); });
+      cleanRemote.forEach((r: SavedReport) => { if (r && r.id !== 'rep-cs-101' && r.id !== 'rep-ce-102') mergedMap.set(r.id, r); });
       savedReportsCache = Array.from(mergedMap.values());
       persistReports(savedReportsCache);
       notifyListeners(savedReportsCache);
@@ -232,15 +80,13 @@ async function initIndexedDbReports() {
 
     const idbReports = await idbGetAll<SavedReport>('saved_reports');
     if (idbReports && idbReports.length > 0) {
+      const cleanIdb = idbReports.filter(r => r && r.id !== 'rep-cs-101' && r.id !== 'rep-ce-102');
       // Merge with in-memory / local storage cache (prefer IDB since it holds full high-res photos)
       const mergedMap = new Map<string, SavedReport>();
-      savedReportsCache.forEach(r => mergedMap.set(r.id, r));
-      idbReports.forEach(r => mergedMap.set(r.id, r));
+      savedReportsCache.forEach(r => { if (r && r.id !== 'rep-cs-101' && r.id !== 'rep-ce-102') mergedMap.set(r.id, r); });
+      cleanIdb.forEach(r => { if (r && r.id !== 'rep-cs-101' && r.id !== 'rep-ce-102') mergedMap.set(r.id, r); });
       savedReportsCache = Array.from(mergedMap.values());
       notifyListeners(savedReportsCache);
-    } else if (savedReportsCache.length > 0) {
-      // Seed IndexedDB with initial cache
-      idbSaveAll('saved_reports', savedReportsCache);
     }
   } catch (err) {
     console.warn('[ReportRoom] Failed to load from IndexedDB:', err);
@@ -250,18 +96,15 @@ async function initIndexedDbReports() {
 function loadLocalReports(): SavedReport[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY_REPORT_ROOM);
-    if (raw === null) {
-      safeLocalStorageSet(STORAGE_KEY_REPORT_ROOM, INITIAL_SAVED_REPORTS);
-      return INITIAL_SAVED_REPORTS;
+    if (raw !== null) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed.filter((r: any) => r && r.id !== 'rep-cs-101' && r.id !== 'rep-ce-102');
+      }
     }
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) {
-      return INITIAL_SAVED_REPORTS;
-    }
-    return parsed;
+    return [];
   } catch (err) {
-    console.warn('Error reading saved reports from localStorage:', err);
-    return INITIAL_SAVED_REPORTS;
+    return [];
   }
 }
 
@@ -285,6 +128,16 @@ function persistReports(reports: SavedReport[]) {
 
 export function getSavedReports(): SavedReport[] {
   return [...savedReportsCache];
+}
+
+export function clearAllSavedReports(): void {
+  persistReports([]);
+  notifyListeners([]);
+}
+
+export function setSavedReportsDirectly(reports: SavedReport[]): void {
+  persistReports(reports);
+  notifyListeners(reports);
 }
 
 export function saveReportToRoom(reportData: Omit<SavedReport, 'id' | 'createdAt'> & { id?: string }): SavedReport {
