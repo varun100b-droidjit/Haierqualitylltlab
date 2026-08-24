@@ -203,7 +203,7 @@ export const ProtoUnitDetailsDialog: React.FC<ProtoUnitDetailsDialogProps> = ({
           )}
 
           {/* Name Plate Details */}
-          {unit.namePlate && (unit.namePlate.coolingCapacity || unit.namePlate.mainProgramChecksumIdu || unit.namePlate.mainProgramChecksumOdu || unit.namePlate.gasInjectionVolume || unit.namePlate.powerMode || unit.namePlate.eeChecksumIdu || unit.namePlate.eeChecksumOdu || unit.namePlate.refrigerant || unit.namePlate.iseer) && (
+          {unit.namePlate && (unit.namePlate.coolingCapacity || unit.namePlate.ratedCoolingPower || unit.namePlate.ratedPower || unit.namePlate.mainProgramChecksumIdu || unit.namePlate.mainProgramChecksumOdu || unit.namePlate.gasInjectionVolume || unit.namePlate.powerMode || unit.namePlate.eeChecksumIdu || unit.namePlate.eeChecksumOdu || unit.namePlate.refrigerant || unit.namePlate.iseer) && (
             <div className="bg-slate-950/60 p-4 rounded-xl border border-slate-800 space-y-3">
               <div className="flex items-center gap-2 border-b border-slate-800 pb-2">
                 <Settings className="w-4 h-4 text-emerald-400" />
@@ -213,6 +213,10 @@ export const ProtoUnitDetailsDialog: React.FC<ProtoUnitDetailsDialogProps> = ({
                 <div>
                   <span className="text-slate-400 block text-[10px]">Cooling Capacity</span>
                   <span className="text-white font-medium">{unit.namePlate.coolingCapacity || 'N/A'}</span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[10px]">Rated Cooling Power</span>
+                  <span className="text-amber-300 font-bold">{unit.namePlate.ratedCoolingPower || unit.namePlate.ratedPower || 'N/A'}</span>
                 </div>
                 <div>
                   <span className="text-slate-400 block text-[10px]">Main Program Checksum IDU</span>

@@ -85,25 +85,28 @@ export function exportUnitToPDF(data: PDFExportData) {
           .grid {
             display: grid;
             grid-template-columns: repeat(2, 1fr);
-            gap: 12px;
-            margin-bottom: 15px;
+            gap: 10px;
+            margin-bottom: 14px;
+            page-break-inside: avoid;
           }
           .card {
             background: #f8fafc;
             border: 1px solid #e2e8f0;
             border-radius: 8px;
-            padding: 10px 14px;
+            padding: 8px 12px;
+            page-break-inside: avoid;
+            break-inside: avoid;
           }
           .card .label {
-            font-size: 10px;
+            font-size: 9px;
             text-transform: uppercase;
             color: #64748b;
             font-weight: 700;
             display: block;
-            margin-bottom: 3px;
+            margin-bottom: 2px;
           }
           .card .value {
-            font-size: 13px;
+            font-size: 12px;
             font-weight: 700;
             color: #0f172a;
           }
@@ -111,20 +114,24 @@ export function exportUnitToPDF(data: PDFExportData) {
             background: #f8fafc;
             border: 1px solid #e2e8f0;
             border-radius: 8px;
-            padding: 12px 14px;
-            margin-bottom: 12px;
-            font-size: 12px;
+            padding: 10px 12px;
+            margin-bottom: 10px;
+            font-size: 11px;
             color: #334155;
-            line-height: 1.6;
+            line-height: 1.5;
+            page-break-inside: avoid;
+            break-inside: avoid;
           }
           .obs-item {
             border-left: 3px solid #06b6d4;
             background: #f8fafc;
             border: 1px solid #e2e8f0;
             border-left-width: 4px;
-            padding: 10px 14px;
-            margin-bottom: 8px;
+            padding: 8px 12px;
+            margin-bottom: 6px;
             border-radius: 0 8px 8px 0;
+            page-break-inside: avoid;
+            break-inside: avoid;
           }
           .obs-text {
             font-weight: 600;

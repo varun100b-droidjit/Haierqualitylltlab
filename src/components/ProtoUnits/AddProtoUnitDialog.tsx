@@ -56,6 +56,7 @@ export const AddProtoUnitDialog: React.FC<AddProtoUnitDialogProps> = ({
 
   // Name Plate Details
   const [coolingCapacity, setCoolingCapacity] = useState('');
+  const [ratedCoolingPower, setRatedCoolingPower] = useState('');
   const [mainProgramChecksumIdu, setMainProgramChecksumIdu] = useState('');
   const [mainProgramChecksumOdu, setMainProgramChecksumOdu] = useState('');
   const [gasInjectionVolume, setGasInjectionVolume] = useState('');
@@ -268,6 +269,7 @@ export const AddProtoUnitDialog: React.FC<AddProtoUnitDialogProps> = ({
 
     const namePlate: NamePlateDetails = {
       coolingCapacity: val(coolingCapacity),
+      ratedCoolingPower: val(ratedCoolingPower),
       mainProgramChecksumIdu: val(mainProgramChecksumIdu),
       mainProgramChecksumOdu: val(mainProgramChecksumOdu),
       gasInjectionVolume: val(gasInjectionVolume),
@@ -755,6 +757,20 @@ export const AddProtoUnitDialog: React.FC<AddProtoUnitDialogProps> = ({
               </div>
 
               <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-semibold text-slate-300">Rated Cooling Power</label>
+                  <span className="text-[9px] font-mono text-cyan-400">{"{{Rated_Cooling_Power}}"}</span>
+                </div>
+                <input
+                  type="text"
+                  placeholder="e.g. 1450 W"
+                  value={ratedCoolingPower}
+                  onChange={(e) => setRatedCoolingPower(e.target.value)}
+                  className="w-full px-3.5 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition-colors"
+                />
+              </div>
+
+              <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">Main Program Checksum IDU</label>
                 <input
                   type="text"
@@ -783,17 +799,6 @@ export const AddProtoUnitDialog: React.FC<AddProtoUnitDialogProps> = ({
                   placeholder="e.g. 850g"
                   value={gasInjectionVolume}
                   onChange={(e) => setGasInjectionVolume(e.target.value)}
-                  className="w-full px-3.5 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition-colors"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Power Mode</label>
-                <input
-                  type="text"
-                  placeholder="e.g. Inverter Eco / Boost"
-                  value={powerMode}
-                  onChange={(e) => setPowerMode(e.target.value)}
                   className="w-full px-3.5 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition-colors"
                 />
               </div>

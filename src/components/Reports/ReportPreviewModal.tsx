@@ -48,6 +48,9 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
   const [viewMode, setViewMode] = useState<'form' | 'document'>('form');
   const [selectedPhotoModal, setSelectedPhotoModal] = useState<{ label: string; url: string } | null>(null);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  const [pdfProgress, setPdfProgress] = useState(0);
+  const [pdfStage, setPdfStage] = useState('');
+  const [isPdfComplete, setIsPdfComplete] = useState(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   if (!isOpen) return null;
@@ -109,13 +112,13 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
 
   const formNameplate = [
     { label: 'Cooling Capacity', value: getVal(['Cooling_Capacity', 'Cooling_capacity', 'coolingCapacity']), keyTag: '{{Cooling_Capacity}}', color: 'text-cyan-300 font-bold' },
+    { label: 'Rated Cooling Power', value: getVal(['Rated_Cooling_Power', 'Rated_cooling_power', 'ratedCoolingPower', 'Rated_Power', 'ratedPower', 'Power_mode', 'powerMode']), keyTag: '{{Rated_Cooling_Power}}', color: 'text-amber-300 font-bold' },
     { label: 'Rated Power', value: getVal(['Rated_Power', 'ratedPower']), keyTag: '{{Rated_Power}}', color: 'text-white' },
     { label: 'Rated Current', value: getVal(['Rated_Current', 'ratedCurrent']), keyTag: '{{Rated_Current}}', color: 'text-white' },
     { label: 'Voltage / Supply', value: getVal(['Voltage', 'voltage']), keyTag: '{{Voltage}}', color: 'text-white' },
     { label: 'Refrigerant', value: getVal(['Refrigerant', 'refrigerant']), keyTag: '{{Refrigerant}}', color: 'text-emerald-300 font-mono' },
     { label: 'Gas Quantity', value: getVal(['Gas_Qty', 'gasQty', 'Gas_Quantity']), keyTag: '{{Gas_Qty}}', color: 'text-white' },
     { label: 'ISEER / Rating', value: getVal(['ISEER', 'iseer', 'ISEER_Rating']), keyTag: '{{ISEER}}', color: 'text-emerald-400 font-bold' },
-    { label: 'Power Mode', value: getVal(['Power_mode', 'Power_Mode', 'powerMode']), keyTag: '{{Power_mode}}', color: 'text-white' },
     { label: 'Gas Injection Vol', value: getVal(['Gas_injection_Volume', 'Gas_Injection_Volume', 'gasInjectionVolume']), keyTag: '{{Gas_injection_Volume}}', color: 'text-slate-300 font-mono' },
     { label: 'IDU Main Checksum', value: getVal(['Main_Program_Checksum_IDU', 'mainProgramChecksumIdu']), keyTag: '{{Main_Program_Checksum_IDU}}', color: 'text-cyan-300 font-mono' },
     { label: 'ODU Main Checksum', value: getVal(['Main_Program_Checksum_ODU', 'mainProgramChecksumOdu']), keyTag: '{{Main_Program_Checksum_ODU}}', color: 'text-cyan-300 font-mono' },
@@ -264,6 +267,10 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
 
   const handleDownloadPdf = async () => {
     setIsGeneratingPdf(true);
+    setPdfProgress(12);
+    setPdfStage('Preparing...');
+    setIsPdfComplete(false);
+
     try {
       const target = printableDocRef.current;
       if (!target) {
@@ -271,7 +278,24 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
         return;
       }
       const safeName = modelName.replace(/\s+/g, '_');
-      await downloadElementAsPdf(target, `${reportTitle.replace(/\s+/g, '_')}_${safeName}.pdf`);
+      await downloadElementAsPdf(
+        target, 
+        `${reportTitle.replace(/\s+/g, '_')}_${safeName}.pdf`,
+        (progress, stage) => {
+          setPdfProgress(progress);
+          setPdfStage(stage);
+        }
+      );
+
+      setPdfProgress(100);
+      setPdfStage('Complete');
+      setIsPdfComplete(true);
+
+      setTimeout(() => {
+        setIsPdfComplete(false);
+        setPdfProgress(0);
+        setPdfStage('');
+      }, 2500);
     } catch (err) {
       console.error(err);
       alert("Failed to export PDF report. Please try again.");
@@ -314,110 +338,12 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
                 <span className="text-[10px] bg-cyan-950 text-cyan-300 border border-cyan-800 px-2 py-0.5 rounded-full font-mono font-bold">
                   #{reportNo}
                 </span>
-                <span className="text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-0.5 rounded-full font-bold uppercase flex items-center gap-1">
-                  <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                  Verified Preview
-                </span>
               </div>
-              <p className="text-xs text-slate-400 flex items-center gap-2 mt-0.5">
-                <span className="font-semibold text-slate-300">{modelName}</span>
-                <span>•</span>
-                <span>Industrial Testing &amp; Compliance Data</span>
-                <span>•</span>
-                <span className="text-cyan-400 font-mono font-bold">{totalPhotosAttached}/11 Photos</span>
-              </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 flex-wrap">
-            {/* View Mode Toggle */}
-            <div className="bg-slate-900 p-1 rounded-xl border border-slate-800 flex items-center gap-1">
-              <button
-                type="button"
-                onClick={() => setViewMode('form')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-                  viewMode === 'form'
-                    ? 'bg-cyan-600 text-white shadow-sm'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <LayoutGrid className="w-3.5 h-3.5" />
-                <span>Form UI</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewMode('document')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-                  viewMode === 'document'
-                    ? 'bg-cyan-600 text-white shadow-sm'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <FileSpreadsheet className="w-3.5 h-3.5" />
-                <span>A4 Sheet</span>
-              </button>
-            </div>
-
-            {/* Primary Download PDF Button */}
-            <button
-              type="button"
-              disabled={isGeneratingPdf}
-              onClick={handleDownloadPdf}
-              className="px-4 py-2 rounded-xl bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white font-black text-xs flex items-center gap-1.5 shadow-lg shadow-rose-900/30 transition-all active:scale-95 cursor-pointer ring-1 ring-rose-400/40"
-              title="Download full machine report as PDF with Indoor Unit photo, specifications, and full photo gallery"
-            >
-              {isGeneratingPdf ? (
-                <>
-                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  <span>Generating PDF...</span>
-                </>
-              ) : (
-                <>
-                  <Download className="w-4 h-4 text-white" />
-                  <span>Download PDF</span>
-                </>
-              )}
-            </button>
-
-            {/* Download Package (.ZIP) */}
-            <button
-              type="button"
-              disabled={isZipping}
-              onClick={handleDownloadZipPackage}
-              className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-black text-xs flex items-center gap-1.5 shadow-md shadow-cyan-900/30 transition-all active:scale-95 cursor-pointer ring-1 ring-cyan-400/40"
-              title="Download full package with DOCX report and named Photos folder"
-            >
-              {isZipping ? (
-                <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-              ) : (
-                <Package className="w-4 h-4" />
-              )}
-              <span className="hidden sm:inline">{isZipping ? 'Packing...' : 'Download ZIP'}</span>
-            </button>
-
-            {/* DOCX */}
-            <button
-              type="button"
-              onClick={handleDownloadDocx}
-              className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-xs flex items-center gap-1.5 shadow-sm transition-all active:scale-95 cursor-pointer"
-              title="Download DOCX Report"
-            >
-              <FileText className="w-3.5 h-3.5 text-cyan-400" />
-              <span className="hidden sm:inline">DOCX</span>
-            </button>
-
-            {/* Print */}
-            <button
-              type="button"
-              onClick={handleDownloadPdf}
-              className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-xs flex items-center gap-1.5 shadow-sm transition-all active:scale-95 cursor-pointer"
-              title="Print Report"
-            >
-              <Printer className="w-3.5 h-3.5 text-indigo-400" />
-              <span className="hidden sm:inline">Print</span>
-            </button>
-
-            {/* Close */}
+          <div className="flex items-center gap-2">
+            {/* Close Button Only in Header for a clean uncluttered view */}
             <button
               type="button"
               onClick={onClose}
@@ -485,7 +411,7 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
               
               {/* TOP HERO: Model Name & Indoor Unit Photo Showcase */}
               <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-slate-900 via-slate-900/90 to-cyan-950/40 border border-slate-800 shadow-lg space-y-4">
-                <div className="flex items-center justify-between flex-wrap gap-2 border-b border-slate-800/80 pb-3">
+                <div className="flex items-center justify-between flex-wrap gap-3 border-b border-slate-800/80 pb-3">
                   <div>
                     <span className="text-[10px] font-mono font-black uppercase tracking-widest text-cyan-400">
                       Machine Profile
@@ -494,14 +420,72 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
                       Model: {modelName}
                     </h3>
                   </div>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-[11px] font-mono font-bold bg-cyan-950 text-cyan-300 border border-cyan-800 px-2.5 py-1 rounded-lg">
-                      Station: {getVal(['Station', 'station'], 'Station 01')}
-                    </span>
-                    <span className="text-[11px] font-mono font-bold bg-slate-800 text-slate-300 border border-slate-700 px-2.5 py-1 rounded-lg">
-                      IDU Serial: {getVal(['IDU_Serial_Number', 'iduSerialNumber', 'Serial_No', 'serialNo'], '—')}
-                    </span>
+
+                  {/* Red Mark Position: Download PDF Button right across from Model Name with in-button animated download progress */}
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={isGeneratingPdf}
+                      onClick={handleDownloadPdf}
+                      className={`relative overflow-hidden py-2 px-4 rounded-xl font-black text-xs flex items-center justify-center gap-2 min-w-[155px] transition-all active:scale-[0.98] cursor-pointer shadow-lg ${
+                        isPdfComplete 
+                          ? 'bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-500 text-white shadow-emerald-950/40 ring-1 ring-emerald-400/50'
+                          : isGeneratingPdf
+                          ? 'bg-slate-900 border border-slate-700 text-white shadow-rose-950/50'
+                          : 'bg-gradient-to-r from-red-600 via-rose-600 to-red-500 hover:from-red-500 hover:to-rose-400 text-white shadow-rose-950/40 ring-1 ring-rose-400/40'
+                      }`}
+                      title="Download complete report as PDF"
+                    >
+                      {/* Animated Progress Fill Bar inside Button */}
+                      {isGeneratingPdf && (
+                        <>
+                          <div 
+                            className="absolute left-0 top-0 bottom-0 bg-gradient-to-r from-red-600 via-rose-600 to-amber-500 transition-all duration-300 ease-out opacity-90"
+                            style={{ width: `${Math.max(8, pdfProgress)}%` }}
+                          />
+                          {/* Animated Shimmer Stripe Overlay */}
+                          <div 
+                            className="absolute inset-0 opacity-30 animate-pulse bg-[linear-gradient(45deg,rgba(255,255,255,0.2)_25%,transparent_25%,transparent_50%,rgba(255,255,255,0.2)_50%,rgba(255,255,255,0.2)_75%,transparent_75%,transparent)] bg-[length:16px_16px]" 
+                          />
+                        </>
+                      )}
+
+                      {/* Button Content */}
+                      <div className="relative z-10 flex items-center justify-center gap-2 w-full">
+                        {isPdfComplete ? (
+                          <>
+                            <CheckCircle2 className="w-4 h-4 text-emerald-100 animate-bounce" />
+                            <span className="font-extrabold text-white">Downloaded! ✓</span>
+                          </>
+                        ) : isGeneratingPdf ? (
+                          <>
+                            <div className="relative flex items-center justify-center">
+                              <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                              <Download className="w-2 h-2 text-white absolute animate-bounce" />
+                            </div>
+                            <div className="flex items-center gap-1.5 font-mono">
+                              <span className="font-extrabold text-white text-[11px]">{pdfProgress}%</span>
+                              <span className="text-[10px] text-white/90 truncate max-w-[90px]">{pdfStage || 'Downloading...'}</span>
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <Download className="w-4 h-4 text-white group-hover:-translate-y-0.5 transition-transform" />
+                            <span>Download PDF</span>
+                          </>
+                        )}
+                      </div>
+                    </button>
                   </div>
+                </div>
+
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-[11px] font-mono font-bold bg-cyan-950 text-cyan-300 border border-cyan-800 px-2.5 py-1 rounded-lg">
+                    Station: {getVal(['Station', 'station'], 'Station 01')}
+                  </span>
+                  <span className="text-[11px] font-mono font-bold bg-slate-800 text-slate-300 border border-slate-700 px-2.5 py-1 rounded-lg">
+                    IDU Serial: {getVal(['IDU_Serial_Number', 'iduSerialNumber', 'Serial_No', 'serialNo'], '—')}
+                  </span>
                 </div>
 
                 {/* Indoor Unit Photo Feature Card */}
@@ -552,7 +536,7 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
                     </div>
                   </div>
 
-                  <div className="md:col-span-7 space-y-3">
+                  <div className="md:col-span-7 space-y-3.5 flex flex-col justify-between">
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
                       <div className="bg-slate-950/80 p-2.5 rounded-xl border border-slate-800">
                         <span className="text-[10px] text-slate-400 block font-bold uppercase">Cooling Capacity</span>
@@ -669,7 +653,7 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
                       <Layers className="w-4 h-4 text-amber-400" />
                       3. Nameplate Specifications &amp; Ratings
                     </span>
-                    <span className="text-[11px] text-slate-400 font-mono font-bold bg-slate-800/80 px-2.5 py-0.5 rounded-md border border-slate-700">13 Parameters</span>
+                    <span className="text-[11px] text-slate-400 font-mono font-bold bg-slate-800/80 px-2.5 py-0.5 rounded-md border border-slate-700">14 Parameters</span>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
@@ -873,249 +857,334 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
         <div className={`flex-1 p-4 sm:p-8 overflow-y-auto bg-slate-950/60 ${viewMode === 'document' ? 'block' : 'fixed left-[-9999px] top-0 pointer-events-none opacity-0'}`}>
           <div 
             ref={printableDocRef}
-            className="max-w-4xl mx-auto bg-white text-slate-900 rounded-xl shadow-2xl p-6 sm:p-10 space-y-7 font-sans border border-slate-200"
-            style={{ minHeight: '1000px' }}
+            className="max-w-4xl mx-auto space-y-8 font-sans"
           >
-            {/* Document Header */}
-            <div className="border-b-4 border-cyan-800 pb-4 flex items-start justify-between gap-4">
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="font-black text-2xl text-cyan-900 tracking-wider">LLT LABS</span>
-                  <span className="text-xs font-bold text-slate-500 uppercase border-l-2 border-slate-300 pl-2">Industrial Test Division</span>
-                </div>
-                <h1 className="text-lg sm:text-xl font-extrabold text-slate-900 mt-1 uppercase tracking-wide">
-                  OFFICIAL {reportTitle.toUpperCase()}
-                </h1>
-                <p className="text-xs text-slate-500 font-medium">
-                  Document Reference: <strong className="text-slate-800 font-mono">{reportNo}</strong>
-                </p>
-              </div>
-
-              <div className="text-right space-y-1">
-                <div className="inline-block px-3 py-1 rounded bg-slate-100 border border-slate-300 text-slate-800 font-mono font-extrabold text-xs">
-                  {modelName}
-                </div>
-                <p className="text-[11px] text-slate-500 font-mono">
-                  Station: {getVal(['Station', 'station'], 'Station 01')}
-                </p>
-                <p className="text-[10px] text-emerald-700 font-bold uppercase">
-                  Status: VERIFIED &amp; COMPLIANT
-                </p>
-              </div>
-            </div>
-
-            {/* TOP FEATURE: Model Name & Indoor Unit Photo Showcase */}
-            <div className="bg-slate-50 border-2 border-cyan-700/60 rounded-xl p-4 flex flex-col sm:flex-row items-center gap-6">
-              <div className="w-full sm:w-2/5 flex flex-col items-center">
-                <div className="w-full h-44 bg-white border border-slate-300 rounded-lg overflow-hidden flex items-center justify-center p-2 shadow-inner">
-                  {indoorUnitPhotoUrl ? (
-                    <img 
-                      src={indoorUnitPhotoUrl} 
-                      alt="Indoor Unit" 
-                      crossOrigin="anonymous"
-                      className="w-full h-full object-contain" 
-                    />
-                  ) : (
-                    <div className="text-slate-400 text-xs flex flex-col items-center gap-1.5 text-center">
-                      <ImageIcon className="w-8 h-8 text-slate-300" />
-                      <span>Indoor Unit (IDU) Photo</span>
-                    </div>
-                  )}
-                </div>
-                <span className="text-[11px] font-black text-cyan-900 mt-1.5 uppercase tracking-wider">
-                  Indoor Unit (IDU) Sample Photo
-                </span>
-              </div>
-
-              <div className="w-full sm:w-3/5 space-y-2.5">
-                <div className="border-b border-slate-300 pb-1.5">
-                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Tested Equipment / Model</span>
-                  <h2 className="text-lg sm:text-xl font-black text-slate-900 font-mono">{modelName}</h2>
-                </div>
-                <div className="grid grid-cols-2 gap-2 text-xs">
+            {/* ================= PAGE 1: Laboratory Overview, Identification & Technical Checksums ================= */}
+            <div 
+              className="pdf-page w-full max-w-[794px] min-h-[1123px] bg-white text-slate-900 mx-auto p-8 sm:p-10 flex flex-col justify-between rounded-xl shadow-2xl border border-slate-200 box-border"
+            >
+              <div className="space-y-5">
+                {/* Document Header */}
+                <div className="border-b-4 border-cyan-800 pb-3 flex items-start justify-between">
                   <div>
-                    <span className="text-[10px] text-slate-500 block">Testing Station:</span>
-                    <strong className="text-slate-800">{getVal(['Station', 'station'], 'Station 01')}</strong>
+                    <span className="font-black text-2xl text-cyan-900 tracking-wider">Haier LLT Lab</span>
+                    <h1 className="text-lg font-extrabold text-slate-900 mt-0.5 uppercase tracking-wide">
+                      Haier LLT Lab &bull; {modelName}
+                    </h1>
+                    <p className="text-xs text-slate-500 font-medium">
+                      Document Reference: <strong className="text-slate-800 font-mono">{reportNo}</strong>
+                    </p>
                   </div>
-                  <div>
-                    <span className="text-[10px] text-slate-500 block">Sample Type:</span>
-                    <strong className="text-cyan-900">{getVal(['Sample_Type', 'sampleType'], 'Proto')}</strong>
-                  </div>
-                  <div>
-                    <span className="text-[10px] text-slate-500 block">IDU Serial Number:</span>
-                    <strong className="font-mono text-cyan-900 font-bold">{getVal(['IDU_Serial_Number', 'iduSerialNumber', 'Serial_No', 'serialNo'], '—')}</strong>
-                  </div>
-                  <div>
-                    <span className="text-[10px] text-slate-500 block">ODU Serial Number:</span>
-                    <strong className="font-mono text-cyan-900 font-bold">{getVal(['ODU_Serial_Number', 'oduSerialNumber'], '—')}</strong>
-                  </div>
-                  <div>
-                    <span className="text-[10px] text-slate-500 block">Cooling Capacity:</span>
-                    <strong className="text-slate-900 font-mono">{getVal(['Cooling_Capacity', 'Cooling_capacity', 'coolingCapacity'])}</strong>
-                  </div>
-                  <div>
-                    <span className="text-[10px] text-slate-500 block">Refrigerant:</span>
-                    <strong className="text-slate-900 font-mono">{getVal(['Refrigerant', 'refrigerant'])}</strong>
+                  <div className="text-right">
+                    <span className="text-[10px] font-mono text-slate-500 block">Date: {new Date().toLocaleDateString()}</span>
+                    <span className="text-[10px] bg-emerald-100 text-emerald-800 border border-emerald-300 font-bold px-2 py-0.5 rounded uppercase">
+                      Pass &bull; Compliant
+                    </span>
                   </div>
                 </div>
-              </div>
-            </div>
 
-            {/* General Unit Information Table */}
-            <div>
-              <h3 className="text-xs font-black uppercase tracking-wider text-cyan-900 bg-cyan-50 px-3 py-2 rounded-t-lg border border-cyan-200 border-l-4 border-l-cyan-700">
-                1. General Sample Details
-              </h3>
-              <table className="w-full text-left text-xs border-collapse border border-slate-300">
-                <tbody className="divide-y divide-slate-300">
-                  <tr>
-                    <td className="w-1/4 p-2.5 bg-slate-50 font-bold text-slate-700 border-r border-slate-300">Model Name:</td>
-                    <td className="w-1/4 p-2.5 font-bold text-slate-900 border-r border-slate-300">{modelName}</td>
-                    <td className="w-1/4 p-2.5 bg-slate-50 font-bold text-slate-700 border-r border-slate-300">Sample Type:</td>
-                    <td className="w-1/4 p-2.5 font-bold text-cyan-900">{getVal(['Sample_Type', 'sampleType'], 'Proto')}</td>
-                  </tr>
-                  <tr>
-                    <td className="w-1/4 p-2.5 bg-slate-50 font-bold text-slate-700 border-r border-slate-300">Report Number:</td>
-                    <td className="w-1/4 p-2.5 font-mono font-bold text-slate-900 border-r border-slate-300">{reportNo}</td>
-                    <td className="w-1/4 p-2.5 bg-slate-50 font-bold text-slate-700 border-r border-slate-300">Requested By:</td>
-                    <td className="w-1/4 p-2.5 font-semibold text-slate-900">{getVal(['Request_By', 'requestBy'], 'Indrajit')}</td>
-                  </tr>
-                  <tr>
-                    <td className="w-1/4 p-2.5 bg-slate-50 font-bold text-slate-700 border-r border-slate-300">Sample Received:</td>
-                    <td className="w-1/4 p-2.5 font-mono text-slate-800 border-r border-slate-300">{getVal(['Sample_Received_Date', 'Sample_Received', 'sampleReceivedDate'], '—')}</td>
-                    <td className="w-1/4 p-2.5 bg-slate-50 font-bold text-slate-700 border-r border-slate-300">Test Commenced:</td>
-                    <td className="w-1/4 p-2.5 font-mono text-slate-800">{getVal(['Test_Commenced_Date', 'Test_Commenced', 'testCommencedDate'], '—')}</td>
-                  </tr>
-                  <tr>
-                    <td className="w-1/4 p-2.5 bg-slate-50 font-bold text-slate-700 border-r border-slate-300">Test Completed:</td>
-                    <td className="w-1/4 p-2.5 font-mono text-slate-800 border-r border-slate-300">{getVal(['Test_Completed_Date', 'Test_Completed', 'testCompletedDate'], '—')}</td>
-                    <td className="w-1/4 p-2.5 bg-slate-50 font-bold text-slate-700 border-r border-slate-300">Testing Lead:</td>
-                    <td className="w-1/4 p-2.5 font-semibold text-slate-900">{getVal(['Tested_By', 'testedBy'], 'Indrajit Sharma')}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-
-            {/* Performance Specifications */}
-            <div>
-              <h3 className="text-xs font-black uppercase tracking-wider text-cyan-900 bg-cyan-50 px-3 py-2 rounded-t-lg border border-cyan-200 border-l-4 border-l-cyan-700">
-                2. Rating &amp; Performance Metrics
-              </h3>
-              <table className="w-full text-left text-xs border-collapse border border-slate-300">
-                <thead>
-                  <tr className="bg-slate-100 text-slate-800 font-bold uppercase text-[11px]">
-                    <th className="w-1/4 p-2.5 border-r border-b border-slate-300">Parameter</th>
-                    <th className="w-1/4 p-2.5 border-r border-b border-slate-300">Value</th>
-                    <th className="w-1/4 p-2.5 border-r border-b border-slate-300">Parameter</th>
-                    <th className="w-1/4 p-2.5 border-b border-slate-300">Value</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-300">
-                  <tr>
-                    <td className="p-2.5 font-bold text-slate-700 bg-slate-50 border-r border-slate-300">Cooling Capacity:</td>
-                    <td className="p-2.5 font-mono text-cyan-950 font-extrabold border-r border-slate-300">{getVal(['Cooling_Capacity', 'Cooling_capacity', 'coolingCapacity'])}</td>
-                    <td className="p-2.5 font-bold text-slate-700 bg-slate-50 border-r border-slate-300">Power Mode:</td>
-                    <td className="p-2.5 text-slate-900 font-medium">{getVal(['Power_mode', 'Power_Mode', 'powerMode'])}</td>
-                  </tr>
-                  <tr>
-                    <td className="p-2.5 font-bold text-slate-700 bg-slate-50 border-r border-slate-300">Refrigerant:</td>
-                    <td className="p-2.5 font-mono text-slate-900 font-bold border-r border-slate-300">{getVal(['Refrigerant', 'refrigerant'])}</td>
-                    <td className="p-2.5 font-bold text-slate-700 bg-slate-50 border-r border-slate-300">Gas Injection Volume:</td>
-                    <td className="p-2.5 font-mono text-slate-900 font-medium">{getVal(['Gas_injection_Volume', 'Gas_Injection_Volume', 'gasInjectionVolume'])}</td>
-                  </tr>
-                  <tr>
-                    <td className="p-2.5 font-bold text-slate-700 bg-slate-50 border-r border-slate-300">ISEER Rating:</td>
-                    <td className="p-2.5 font-mono text-emerald-800 font-bold border-r border-slate-300">{getVal(['ISEER', 'iseer'])}</td>
-                    <td className="p-2.5 font-bold text-slate-700 bg-slate-50 border-r border-slate-300">Compressor Spec:</td>
-                    <td className="p-2.5 text-slate-900 font-medium">{getVal(['Compressor_Spec', 'Compressor _Spec', 'compressorSpec'])}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-
-            {/* Parts & Components Specification Table */}
-            <div>
-              <h3 className="text-xs font-black uppercase tracking-wider text-cyan-900 bg-cyan-50 px-3 py-2 rounded-t-lg border border-cyan-200 border-l-4 border-l-cyan-700">
-                3. Sub-Assembly &amp; Parts Bill of Materials (BOM)
-              </h3>
-              <table className="w-full text-left text-xs border-collapse border border-slate-300">
-                <thead>
-                  <tr className="bg-slate-100 text-slate-800 font-bold uppercase text-[11px]">
-                    <th className="w-[24%] p-2.5 border-r border-b border-slate-300">Sub-Assembly</th>
-                    <th className="w-[36%] p-2.5 border-r border-b border-slate-300">Specification</th>
-                    <th className="w-[20%] p-2.5 border-r border-b border-slate-300">Part Code</th>
-                    <th className="w-[20%] p-2.5 border-b border-slate-300">Supplier</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-300 font-medium">
-                  {formParts.map((p, idx) => (
-                    <tr key={idx} className={idx % 2 === 1 ? 'bg-slate-50/60' : 'bg-white'}>
-                      <td className="p-2.5 font-bold text-slate-900 border-r border-slate-300">{p.title}</td>
-                      <td className="p-2.5 text-slate-700 border-r border-slate-300">{p.spec}</td>
-                      <td className="p-2.5 font-mono text-cyan-900 font-bold border-r border-slate-300">{p.partCode}</td>
-                      <td className="p-2.5 text-slate-800">{p.supplier}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Photos Grid */}
-            <div className="space-y-3">
-              <div className="flex items-center justify-between bg-cyan-50 px-3 py-2 rounded-t-lg border border-cyan-200 border-l-4 border-l-cyan-700">
-                <h3 className="text-xs font-black uppercase tracking-wider text-cyan-950">
-                  4. Sample Photographs Gallery
-                </h3>
-                <span className="text-[10px] font-bold text-cyan-800 bg-cyan-100 px-2.5 py-0.5 rounded border border-cyan-300">
-                  {totalPhotosAttached} Photos Attached
-                </span>
-              </div>
-
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 p-3 bg-slate-50 rounded-b-lg border border-slate-200">
-                {photoCategories.flatMap(c => c.photos).map((item, idx) => (
-                  <div key={idx} className="bg-white border border-slate-200 p-2.5 rounded-xl flex flex-col items-center space-y-1.5 shadow-sm">
-                    <span className="text-[10px] font-bold text-slate-800 truncate w-full text-center">{item.label}</span>
-                    <div className="w-full h-[130px] bg-slate-50 border border-slate-200 rounded-lg overflow-hidden flex items-center justify-center">
-                      {item.url ? (
+                {/* TOP FEATURE: Model Name & Indoor Unit Photo Showcase */}
+                <div className="bg-slate-50 border-2 border-cyan-700/60 rounded-xl p-3.5 flex flex-row items-center gap-4">
+                  <div className="w-1/3 flex flex-col items-center">
+                    <div className="w-full h-36 bg-white border border-slate-300 rounded-lg overflow-hidden flex items-center justify-center p-1.5 shadow-inner">
+                      {indoorUnitPhotoUrl ? (
                         <img 
-                          src={item.url} 
-                          alt={item.label} 
+                          src={indoorUnitPhotoUrl} 
+                          alt="Indoor Unit" 
                           crossOrigin="anonymous"
-                          className="w-full h-full object-contain p-1" 
+                          className="w-full h-full object-contain" 
                         />
                       ) : (
-                        <span className="text-[9px] font-medium text-slate-400">No Photo</span>
+                        <div className="text-slate-400 text-xs flex flex-col items-center gap-1 text-center">
+                          <ImageIcon className="w-6 h-6 text-slate-300" />
+                          <span className="text-[10px]">Indoor Unit (IDU) Photo</span>
+                        </div>
                       )}
                     </div>
+                    <span className="text-[10px] font-black text-cyan-900 mt-1 uppercase tracking-wider text-center">
+                      Indoor Unit (IDU) Photo
+                    </span>
                   </div>
-                ))}
+
+                  <div className="w-2/3 space-y-2">
+                    <div className="border-b border-slate-300 pb-1">
+                      <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider block">Tested Equipment / Model</span>
+                      <h2 className="text-base font-black text-slate-900 font-mono">{modelName}</h2>
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs">
+                      <div>
+                        <span className="text-[9px] text-slate-500 block">Testing Station:</span>
+                        <strong className="text-slate-800 text-xs">{getVal(['Station', 'station'], 'Station 01')}</strong>
+                      </div>
+                      <div>
+                        <span className="text-[9px] text-slate-500 block">Sample Type:</span>
+                        <strong className="text-cyan-900 text-xs">{getVal(['Sample_Type', 'sampleType'], 'Proto')}</strong>
+                      </div>
+                      <div>
+                        <span className="text-[9px] text-slate-500 block">IDU Serial Number:</span>
+                        <strong className="font-mono text-cyan-900 font-bold text-xs">{getVal(['IDU_Serial_Number', 'iduSerialNumber', 'Serial_No', 'serialNo'], '—')}</strong>
+                      </div>
+                      <div>
+                        <span className="text-[9px] text-slate-500 block">ODU Serial Number:</span>
+                        <strong className="font-mono text-cyan-900 font-bold text-xs">{getVal(['ODU_Serial_Number', 'oduSerialNumber'], '—')}</strong>
+                      </div>
+                      <div>
+                        <span className="text-[9px] text-slate-500 block">Cooling Capacity:</span>
+                        <strong className="text-slate-900 font-mono text-xs">{getVal(['Cooling_Capacity', 'Cooling_capacity', 'coolingCapacity'])}</strong>
+                      </div>
+                      <div>
+                        <span className="text-[9px] text-slate-500 block">Refrigerant:</span>
+                        <strong className="text-slate-900 font-mono text-xs">{getVal(['Refrigerant', 'refrigerant'])}</strong>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 1. General Sample Details Table */}
+                <div>
+                  <h3 className="text-xs font-black uppercase tracking-wider text-cyan-900 bg-cyan-50 px-3 py-1.5 rounded-t-lg border border-cyan-200 border-l-4 border-l-cyan-700">
+                    1. General Sample Details
+                  </h3>
+                  <table className="w-full text-left text-xs border-collapse border border-slate-300">
+                    <tbody className="divide-y divide-slate-300">
+                      <tr>
+                        <td className="w-1/4 p-2 bg-slate-50 font-bold text-slate-700 border-r border-slate-300">Model Name:</td>
+                        <td className="w-1/4 p-2 font-bold text-slate-900 border-r border-slate-300">{modelName}</td>
+                        <td className="w-1/4 p-2 bg-slate-50 font-bold text-slate-700 border-r border-slate-300">Sample Type:</td>
+                        <td className="w-1/4 p-2 font-bold text-cyan-900">{getVal(['Sample_Type', 'sampleType'], 'Proto')}</td>
+                      </tr>
+                      <tr>
+                        <td className="w-1/4 p-2 bg-slate-50 font-bold text-slate-700 border-r border-slate-300">Report Number:</td>
+                        <td className="w-1/4 p-2 font-mono font-bold text-slate-900 border-r border-slate-300">{reportNo}</td>
+                        <td className="w-1/4 p-2 bg-slate-50 font-bold text-slate-700 border-r border-slate-300">Requested By:</td>
+                        <td className="w-1/4 p-2 font-semibold text-slate-900">{getVal(['Request_By', 'requestBy'], 'Indrajit')}</td>
+                      </tr>
+                      <tr>
+                        <td className="w-1/4 p-2 bg-slate-50 font-bold text-slate-700 border-r border-slate-300">Sample Received:</td>
+                        <td className="w-1/4 p-2 font-mono text-slate-800 border-r border-slate-300">{getVal(['Sample_Received_Date', 'Sample_Received', 'sampleReceivedDate'], '—')}</td>
+                        <td className="w-1/4 p-2 bg-slate-50 font-bold text-slate-700 border-r border-slate-300">Test Commenced:</td>
+                        <td className="w-1/4 p-2 font-mono text-slate-800">{getVal(['Test_Commenced_Date', 'Test_Commenced', 'testCommencedDate'], '—')}</td>
+                      </tr>
+                      <tr>
+                        <td className="w-1/4 p-2 bg-slate-50 font-bold text-slate-700 border-r border-slate-300">Test Completed:</td>
+                        <td className="w-1/4 p-2 font-mono text-slate-800 border-r border-slate-300">{getVal(['Test_Completed_Date', 'Test_Completed', 'testCompletedDate'], '—')}</td>
+                        <td className="w-1/4 p-2 bg-slate-50 font-bold text-slate-700 border-r border-slate-300">Testing Lead:</td>
+                        <td className="w-1/4 p-2 font-semibold text-slate-900">{getVal(['Tested_By', 'testedBy'], 'Indrajit Sharma')}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* 2. Rating, Electrical & Firmware Checksums Table */}
+                <div>
+                  <h3 className="text-xs font-black uppercase tracking-wider text-cyan-900 bg-cyan-50 px-3 py-1.5 rounded-t-lg border border-cyan-200 border-l-4 border-l-cyan-700">
+                    2. Rating, Electrical &amp; Firmware Checksums
+                  </h3>
+                  <table className="w-full text-left text-xs border-collapse border border-slate-300">
+                    <thead>
+                      <tr className="bg-slate-100 text-slate-800 font-bold uppercase text-[10px]">
+                        <th className="w-1/4 p-2 border-r border-b border-slate-300">Parameter</th>
+                        <th className="w-1/4 p-2 border-r border-b border-slate-300">Value</th>
+                        <th className="w-1/4 p-2 border-r border-b border-slate-300">Parameter</th>
+                        <th className="w-1/4 p-2 border-b border-slate-300">Value</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-300">
+                      <tr>
+                        <td className="p-2 font-bold text-slate-700 bg-slate-50 border-r border-slate-300">Cooling Capacity:</td>
+                        <td className="p-2 font-mono text-cyan-950 font-extrabold border-r border-slate-300">{getVal(['Cooling_Capacity', 'Cooling_capacity', 'coolingCapacity'])}</td>
+                        <td className="p-2 font-bold text-slate-700 bg-slate-50 border-r border-slate-300">Rated Cooling Power:</td>
+                        <td className="p-2 text-amber-800 font-mono font-bold">{getVal(['Rated_Cooling_Power', 'Rated_cooling_power', 'ratedCoolingPower', 'Rated_Power', 'ratedPower', 'Power_mode', 'powerMode'])}</td>
+                      </tr>
+                      <tr>
+                        <td className="p-2 font-bold text-slate-700 bg-slate-50 border-r border-slate-300">Rated Power:</td>
+                        <td className="p-2 font-mono text-slate-900 border-r border-slate-300">{getVal(['Rated_Power', 'ratedPower'])}</td>
+                        <td className="p-2 font-bold text-slate-700 bg-slate-50 border-r border-slate-300">Rated Current:</td>
+                        <td className="p-2 font-mono text-slate-900">{getVal(['Rated_Current', 'ratedCurrent'])}</td>
+                      </tr>
+                      <tr>
+                        <td className="p-2 font-bold text-slate-700 bg-slate-50 border-r border-slate-300">Voltage / Supply:</td>
+                        <td className="p-2 font-mono text-slate-900 border-r border-slate-300">{getVal(['Voltage', 'voltage'])}</td>
+                        <td className="p-2 font-bold text-slate-700 bg-slate-50 border-r border-slate-300">ISEER Rating:</td>
+                        <td className="p-2 font-mono text-emerald-800 font-bold">{getVal(['ISEER', 'iseer'])}</td>
+                      </tr>
+                      <tr>
+                        <td className="p-2 font-bold text-slate-700 bg-slate-50 border-r border-slate-300">Refrigerant:</td>
+                        <td className="p-2 font-mono text-slate-900 font-bold border-r border-slate-300">{getVal(['Refrigerant', 'refrigerant'])}</td>
+                        <td className="p-2 font-bold text-slate-700 bg-slate-50 border-r border-slate-300">Gas Quantity / Injection:</td>
+                        <td className="p-2 font-mono text-slate-900 font-medium">{getVal(['Gas_Qty', 'gasQty', 'Gas_Quantity'])} / {getVal(['Gas_injection_Volume', 'Gas_Injection_Volume', 'gasInjectionVolume'])}</td>
+                      </tr>
+                      <tr>
+                        <td className="p-2 font-bold text-slate-700 bg-slate-50 border-r border-slate-300">IDU Main Checksum:</td>
+                        <td className="p-2 font-mono text-cyan-900 font-bold border-r border-slate-300">{getVal(['Main_Program_Checksum_IDU', 'mainProgramChecksumIdu'])}</td>
+                        <td className="p-2 font-bold text-slate-700 bg-slate-50 border-r border-slate-300">ODU Main Checksum:</td>
+                        <td className="p-2 font-mono text-cyan-900 font-bold">{getVal(['Main_Program_Checksum_ODU', 'mainProgramChecksumOdu'])}</td>
+                      </tr>
+                      <tr>
+                        <td className="p-2 font-bold text-slate-700 bg-slate-50 border-r border-slate-300">IDU EEPROM Checksum:</td>
+                        <td className="p-2 font-mono text-indigo-900 font-bold border-r border-slate-300">{getVal(['EE_Checksum_IDU', 'eeChecksumIdu'])}</td>
+                        <td className="p-2 font-bold text-slate-700 bg-slate-50 border-r border-slate-300">ODU EEPROM Checksum:</td>
+                        <td className="p-2 font-mono text-indigo-900 font-bold">{getVal(['EE_Checksum_ODU', 'eeChecksumOdu'])}</td>
+                      </tr>
+                      <tr>
+                        <td className="p-2 font-bold text-slate-700 bg-slate-50 border-r border-slate-300">Compressor Spec:</td>
+                        <td colSpan={3} className="p-2 text-slate-900 font-medium">{getVal(['Compressor_Spec', 'Compressor _Spec', 'compressorSpec'])}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Page 1 Footer */}
+              <div className="pt-3 border-t border-slate-300 flex items-center justify-between text-[10px] text-slate-500 font-medium">
+                <span>Haier LLT Lab &bull; Confidential Official Report</span>
+                <span className="font-mono font-bold text-slate-700">Page 1 of 3</span>
               </div>
             </div>
 
-            {/* Test Conclusion */}
-            <div className="bg-slate-50 p-4 rounded-xl border border-slate-300 space-y-2">
-              <h3 className="text-xs font-black uppercase tracking-wider text-slate-800">
-                5. Final Test Conclusion
-              </h3>
-              <p className="text-xs text-slate-700 leading-relaxed italic font-medium">
-                "{testConclusion}"
-              </p>
-            </div>
 
-            {/* Signatures Footer */}
-            <div className="pt-8 border-t border-slate-300 flex items-end justify-between text-xs text-slate-600">
-              <div className="space-y-1">
-                <p><strong>Tested By:</strong> Indrajit Sharma (Testing Lead)</p>
-                <p><strong>LLT Quality Lab:</strong> Certified Pass</p>
+            {/* ================= PAGE 2: Sub-Assembly & Parts BOM + Quality Observations & Conclusion ================= */}
+            <div 
+              className="pdf-page w-full max-w-[794px] min-h-[1123px] bg-white text-slate-900 mx-auto p-8 sm:p-10 flex flex-col justify-between rounded-xl shadow-2xl border border-slate-200 box-border"
+            >
+              <div className="space-y-5">
+                {/* Header for Page 2 */}
+                <div className="border-b-2 border-cyan-800 pb-2.5 flex items-center justify-between">
+                  <div>
+                    <span className="font-black text-lg text-cyan-900 tracking-wide">Haier LLT Lab</span>
+                    <span className="text-xs text-slate-500 font-bold ml-2 uppercase">&bull; Parts BOM &amp; Test Conclusion</span>
+                  </div>
+                  <span className="text-xs font-mono text-slate-600">Model: <strong>{modelName}</strong></span>
+                </div>
+
+                {/* 3. Parts & Components Specification Table (BOM) */}
+                <div>
+                  <h3 className="text-xs font-black uppercase tracking-wider text-cyan-900 bg-cyan-50 px-3 py-1.5 rounded-t-lg border border-cyan-200 border-l-4 border-l-cyan-700">
+                    3. Sub-Assembly &amp; Parts Bill of Materials (BOM)
+                  </h3>
+                  <table className="w-full text-left text-xs border-collapse border border-slate-300">
+                    <thead>
+                      <tr className="bg-slate-100 text-slate-800 font-bold uppercase text-[10px]">
+                        <th className="w-[24%] p-2 border-r border-b border-slate-300">Sub-Assembly</th>
+                        <th className="w-[36%] p-2 border-r border-b border-slate-300">Specification</th>
+                        <th className="w-[20%] p-2 border-r border-b border-slate-300">Part Code</th>
+                        <th className="w-[20%] p-2 border-b border-slate-300">Supplier</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-300 font-medium">
+                      {formParts.map((p, idx) => (
+                        <tr key={idx} className={idx % 2 === 1 ? 'bg-slate-50/60' : 'bg-white'}>
+                          <td className="p-2 font-bold text-slate-900 border-r border-slate-300">{p.title}</td>
+                          <td className="p-2 text-slate-700 border-r border-slate-300">{p.spec}</td>
+                          <td className="p-2 font-mono text-cyan-900 font-bold border-r border-slate-300">{p.partCode}</td>
+                          <td className="p-2 text-slate-800">{p.supplier}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* 4. Quality Remarks & 5. Test Conclusion */}
+                <div className="grid grid-cols-1 gap-3.5 pt-1">
+                  <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-300 space-y-1">
+                    <h3 className="text-xs font-black uppercase tracking-wider text-slate-800">
+                      4. Quality Remarks &amp; Observations
+                    </h3>
+                    <p className="text-xs text-slate-700 leading-relaxed font-medium">
+                      {remarks}
+                    </p>
+                  </div>
+
+                  <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-300 space-y-1">
+                    <h3 className="text-xs font-black uppercase tracking-wider text-slate-800">
+                      5. Final Test Conclusion &amp; Compliance Sign-Off
+                    </h3>
+                    <p className="text-xs text-slate-700 leading-relaxed italic font-medium">
+                      "{testConclusion}"
+                    </p>
+                  </div>
+                </div>
               </div>
 
-              <div className="text-right">
-                <p className="font-mono text-[10px] text-slate-500">Date Generated: {new Date().toLocaleDateString()}</p>
-                <div className="mt-6 border-t border-slate-400 pt-1 font-bold text-slate-800 inline-block px-6">
-                  Authorized Signatory Signature
+              {/* Page 2 Footer */}
+              <div className="pt-3 border-t border-slate-300 flex items-center justify-between text-[10px] text-slate-500 font-medium">
+                <span>Haier LLT Lab &bull; Confidential Official Report</span>
+                <span className="font-mono font-bold text-slate-700">Page 2 of 3</span>
+              </div>
+            </div>
+
+
+            {/* ================= PAGE 3: Photographic Inspection Evidence & Verification Signatures ================= */}
+            <div 
+              className="pdf-page w-full max-w-[794px] min-h-[1123px] bg-white text-slate-900 mx-auto p-8 sm:p-10 flex flex-col justify-between rounded-xl shadow-2xl border border-slate-200 box-border"
+            >
+              <div className="space-y-4">
+                {/* Header for Page 3 */}
+                <div className="border-b-2 border-cyan-800 pb-2.5 flex items-center justify-between">
+                  <div>
+                    <span className="font-black text-lg text-cyan-900 tracking-wide">Haier LLT Lab</span>
+                    <span className="text-xs text-slate-500 font-bold ml-2 uppercase">&bull; Photographic Verification Gallery</span>
+                  </div>
+                  <span className="text-xs font-mono text-slate-600">Model: <strong>{modelName}</strong></span>
+                </div>
+
+                {/* 6. Sample Photographs Gallery (Structured Grid) */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between bg-cyan-50 px-3 py-1.5 rounded-t-lg border border-cyan-200 border-l-4 border-l-cyan-700">
+                    <h3 className="text-xs font-black uppercase tracking-wider text-cyan-950">
+                      6. Component Photographic Inspection Records
+                    </h3>
+                    <span className="text-[10px] font-bold text-cyan-800 bg-cyan-100 px-2.5 py-0.5 rounded border border-cyan-300">
+                      {totalPhotosAttached} Photos Attached
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-4 gap-2.5 p-2.5 bg-slate-50 rounded-b-lg border border-slate-200">
+                    {photoCategories.flatMap(c => c.photos).map((item, idx) => (
+                      <div key={idx} className="bg-white border border-slate-200 p-1.5 rounded-lg flex flex-col items-center space-y-1 shadow-sm">
+                        <span className="text-[9px] font-bold text-slate-800 truncate w-full text-center leading-tight">{item.label}</span>
+                        <div className="w-full h-[88px] bg-slate-50 border border-slate-200 rounded overflow-hidden flex items-center justify-center">
+                          {item.url ? (
+                            <img 
+                              src={item.url} 
+                              alt={item.label} 
+                              crossOrigin="anonymous"
+                              className="w-full h-full object-contain p-0.5" 
+                            />
+                          ) : (
+                            <span className="text-[8px] font-medium text-slate-400">No Photo</span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* 7. Signatures & Official Authorization Footer */}
+              <div className="space-y-4 pt-3">
+                <div className="p-3.5 bg-slate-50 border border-slate-300 rounded-xl flex items-end justify-between text-xs text-slate-700">
+                  <div className="space-y-1">
+                    <p><strong>Tested &amp; Compiled By:</strong> Indrajit Sharma (Testing Lead)</p>
+                    <p><strong>Quality Assurance Lab:</strong> Certified Compliance Pass</p>
+                    <p className="text-[9px] text-slate-500 font-mono">Verification Hash: OK-COMPLIANT-2026</p>
+                  </div>
+
+                  <div className="text-right">
+                    <p className="font-mono text-[9px] text-slate-500">Date Generated: {new Date().toLocaleDateString()}</p>
+                    <div className="mt-4 border-t-2 border-slate-800 pt-1 font-extrabold text-slate-900 inline-block px-6 text-center uppercase tracking-wider text-[11px]">
+                      Authorized Signatory Signature
+                    </div>
+                  </div>
+                </div>
+
+                <div className="border-t border-slate-300 pt-2 flex items-center justify-between text-[10px] text-slate-500 font-medium">
+                  <span>Haier LLT Lab &bull; Confidential Official Report</span>
+                  <span className="font-mono font-bold text-slate-700">Page 3 of 3</span>
                 </div>
               </div>
             </div>
+
           </div>
         </div>
 

@@ -299,6 +299,12 @@ export const PpUnitDetailsDialog: React.FC<PpUnitDetailsDialogProps> = ({
                     <span className="text-white font-mono font-bold">{currentUnit.namePlate.coolingCapacity}</span>
                   </div>
                 )}
+                {(currentUnit.namePlate.ratedCoolingPower || currentUnit.namePlate.ratedPower) && (
+                  <div>
+                    <span className="text-slate-400 block text-[10px]">Rated Cooling Power</span>
+                    <span className="text-amber-300 font-mono font-bold">{currentUnit.namePlate.ratedCoolingPower || currentUnit.namePlate.ratedPower}</span>
+                  </div>
+                )}
                 {currentUnit.namePlate.ratedPower && (
                   <div>
                     <span className="text-slate-400 block text-[10px]">Rated Power</span>

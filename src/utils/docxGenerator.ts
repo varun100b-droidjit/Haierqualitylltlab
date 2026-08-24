@@ -1,7 +1,7 @@
 import PizZip from 'pizzip';
 import Docxtemplater from 'docxtemplater';
 import { jsPDF } from 'jspdf';
-import html2canvas from 'html2canvas';
+import { toJpeg } from 'html-to-image';
 import { 
   PHOTO_FIELD_DEFINITIONS, 
   PhotoInsertionLog, 
@@ -845,6 +845,17 @@ function prepareNormalizedDataMap(dataValues: ReportDataValues): Record<string, 
   }
 
   // Explicit aliases
+  const ratedCoolingPower = dataValues.Rated_Cooling_Power || dataValues.Rated_cooling_power || dataValues.ratedCoolingPower || dataValues.rated_cooling_power || dataValues['Rated Cooling Power'] || dataValues['Rated cooling power'] || dataValues.Rated_Power || dataValues.ratedPower || '';
+  if (ratedCoolingPower) {
+    normalizedData.Rated_Cooling_Power = ratedCoolingPower;
+    normalizedData.Rated_cooling_power = ratedCoolingPower;
+    normalizedData.ratedCoolingPower = ratedCoolingPower;
+    normalizedData.rated_cooling_power = ratedCoolingPower;
+    normalizedData['Rated Cooling Power'] = ratedCoolingPower;
+    normalizedData['Rated cooling power'] = ratedCoolingPower;
+    normalizedData.RatedCoolingPower = ratedCoolingPower;
+  }
+
   const gasVol = dataValues.Gas_injection_Volume || dataValues.Gas_Injection_Volume || dataValues.gasInjectionVolume || dataValues.gas_injection_volume || dataValues['Gas Injection Volume'] || dataValues.Gas_Injection || '';
   if (gasVol) {
     normalizedData.Gas_injection_Volume = gasVol;
@@ -1172,10 +1183,53 @@ export async function shareOrDownloadFile(blob: Blob, fileName: string, title?: 
 }
 
 /**
- * Generates and downloads PDF from an HTML container element using html2canvas + jsPDF
+ * Converts modern CSS colors (oklch, oklab, color(srgb...), lab, lch) to standard rgb/rgba format using 2D canvas rasterization
  */
-export async function downloadElementAsPdf(element: HTMLElement, fileName: string) {
+function sanitizeColorString(str: string): string {
+  if (!str || typeof str !== 'string') return '#000000';
+  const trimmed = str.trim();
+  if (!trimmed.includes('oklch') && !trimmed.includes('oklab') && !trimmed.includes('color(') && !trimmed.includes('lab(') && !trimmed.includes('lch(')) {
+    return trimmed;
+  }
+
   try {
+    const canvas = document.createElement('canvas');
+    canvas.width = 1;
+    canvas.height = 1;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (ctx) {
+      ctx.clearRect(0, 0, 1, 1);
+      ctx.fillStyle = '#000000';
+      ctx.fillStyle = trimmed;
+      ctx.fillRect(0, 0, 1, 1);
+      const data = ctx.getImageData(0, 0, 1, 1).data;
+      const r = data[0];
+      const g = data[1];
+      const b = data[2];
+      const a = data[3];
+      if (a === 255) {
+        return `rgb(${r}, ${g}, ${b})`;
+      }
+      return `rgba(${r}, ${g}, ${b}, ${(a / 255).toFixed(2)})`;
+    }
+  } catch (e) {}
+
+  if (trimmed.includes('white') || trimmed.includes('255')) return '#ffffff';
+  return '#0f172a';
+}
+
+/**
+ * Generates and downloads PDF from an HTML container element using html-to-image + jsPDF.
+ * If the container has '.pdf-page' elements, it renders each page cleanly into dedicated A4 pages
+ * without breaking tables or parameters across page boundaries.
+ */
+export async function downloadElementAsPdf(
+  element: HTMLElement, 
+  fileName: string,
+  onProgress?: (progress: number, stage: string) => void
+) {
+  try {
+    onProgress?.(10, 'Loading Assets...');
     // Wait for all images in the element to finish loading
     const images = Array.from(element.querySelectorAll('img'));
     await Promise.all(
@@ -1208,13 +1262,69 @@ export async function downloadElementAsPdf(element: HTMLElement, fileName: strin
       parent.style.zIndex = '-999';
     }
 
-    const canvas = await html2canvas(element, {
-      scale: 2,
-      useCORS: true,
-      allowTaint: true,
-      logging: false,
-      backgroundColor: '#ffffff'
-    });
+    const pageElements = Array.from(element.querySelectorAll<HTMLElement>('.pdf-page'));
+    const pdf = new jsPDF('p', 'mm', 'a4');
+    const pdfWidth = pdf.internal.pageSize.getWidth();
+    const pdfHeight = pdf.internal.pageSize.getHeight();
+
+    if (pageElements.length > 0) {
+      // Clean per-page rendering: each .pdf-page becomes exactly 1 A4 page
+      for (let i = 0; i < pageElements.length; i++) {
+        const pageEl = pageElements[i];
+        onProgress?.(
+          20 + Math.round(((i + 1) / pageElements.length) * 70),
+          `Rendering Page ${i + 1} of ${pageElements.length}...`
+        );
+
+        const dataUrl = await toJpeg(pageEl, {
+          quality: 0.98,
+          backgroundColor: '#ffffff',
+          pixelRatio: 2,
+          cacheBust: true,
+          skipAutoScale: true
+        });
+
+        if (i > 0) {
+          pdf.addPage();
+        }
+        pdf.addImage(dataUrl, 'JPEG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
+      }
+    } else {
+      // Fallback single container capturing
+      onProgress?.(30, 'Capturing Document...');
+      const dataUrl = await toJpeg(element, {
+        quality: 0.96,
+        backgroundColor: '#ffffff',
+        pixelRatio: 2,
+        cacheBust: true,
+        skipAutoScale: true
+      });
+
+      const img = new Image();
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = reject;
+        img.src = dataUrl;
+      });
+
+      const naturalWidth = img.naturalWidth || element.offsetWidth || 800;
+      const naturalHeight = img.naturalHeight || element.offsetHeight || 1200;
+      const imgWidth = pdfWidth;
+      const imgHeight = (naturalHeight * pdfWidth) / naturalWidth;
+
+      let heightLeft = imgHeight;
+      let position = 0;
+
+      pdf.addImage(dataUrl, 'JPEG', 0, position, imgWidth, imgHeight, undefined, 'FAST');
+      heightLeft -= pdfHeight;
+
+      while (heightLeft > 4) {
+        position -= pdfHeight;
+        pdf.addPage();
+        pdf.addImage(dataUrl, 'JPEG', 0, position, imgWidth, imgHeight, undefined, 'FAST');
+        heightLeft -= pdfHeight;
+      }
+    }
 
     // Restore parent styles if altered
     if (isHiddenParent && parent) {
@@ -1224,27 +1334,9 @@ export async function downloadElementAsPdf(element: HTMLElement, fileName: strin
       parent.style.zIndex = originalZIndex || '';
     }
 
-    const imgData = canvas.toDataURL('image/jpeg', 0.95);
-    const pdf = new jsPDF('p', 'mm', 'a4');
-    const pdfWidth = pdf.internal.pageSize.getWidth();
-    const pdfHeight = pdf.internal.pageSize.getHeight();
-    const imgWidth = pdfWidth;
-    const imgHeight = (canvas.height * pdfWidth) / canvas.width;
-
-    let heightLeft = imgHeight;
-    let position = 0;
-
-    pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);
-    heightLeft -= pdfHeight;
-
-    while (heightLeft > 5) {
-      position -= pdfHeight;
-      pdf.addPage();
-      pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);
-      heightLeft -= pdfHeight;
-    }
-
+    onProgress?.(95, 'Finalizing Download...');
     pdf.save(fileName);
+    onProgress?.(100, 'Download Complete');
   } catch (err) {
     console.error("PDF export error:", err);
     window.print();
@@ -1347,6 +1439,10 @@ export function createDefaultMasterDocxBase64(reportType: string = 'proto'): str
       <w:tr>
         <w:tc><w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Cooling Capacity</w:t></w:r></w:p></w:tc>
         <w:tc><w:p><w:r><w:t>{{Cooling_capacity}}</w:t></w:r></w:p></w:tc>
+      </w:tr>
+      <w:tr>
+        <w:tc><w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Rated Cooling Power</w:t></w:r></w:p></w:tc>
+        <w:tc><w:p><w:r><w:t>{{Rated_Cooling_Power}}</w:t></w:r></w:p></w:tc>
       </w:tr>
       <w:tr>
         <w:tc><w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Power Mode</w:t></w:r></w:p></w:tc>

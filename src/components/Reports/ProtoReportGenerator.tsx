@@ -117,6 +117,7 @@ export const ProtoReportGenerator: React.FC<ProtoReportGeneratorProps> = ({
 
     // Nameplate & Electrical
     coolingCapacity: string;
+    ratedCoolingPower: string;
     ratedPower: string;
     ratedCurrent: string;
     voltage: string;
@@ -175,6 +176,7 @@ export const ProtoReportGenerator: React.FC<ProtoReportGeneratorProps> = ({
     testCompletedDate: '',
 
     coolingCapacity: '',
+    ratedCoolingPower: '',
     ratedPower: '',
     ratedCurrent: '',
     voltage: '',
@@ -332,6 +334,7 @@ export const ProtoReportGenerator: React.FC<ProtoReportGeneratorProps> = ({
       testCompletedDate: report.testCompleted || unit.updatedAt?.slice(0, 10) || 'NA',
 
       coolingCapacity: nameplate.coolingCapacity || '5200 W (1.5 Ton)',
+      ratedCoolingPower: nameplate.ratedCoolingPower || nameplate.ratedPower || '1450 W',
       ratedPower: nameplate.ratedPower || '1450 W',
       ratedCurrent: nameplate.ratedCurrent || '6.5 A',
       voltage: nameplate.voltage || '230V / 50Hz / 1Ph',
@@ -461,6 +464,13 @@ export const ProtoReportGenerator: React.FC<ProtoReportGeneratorProps> = ({
 
     Cooling_capacity: formData.coolingCapacity,
     Cooling_Capacity: formData.coolingCapacity,
+    Rated_Cooling_Power: formData.ratedCoolingPower || formData.ratedPower,
+    Rated_cooling_power: formData.ratedCoolingPower || formData.ratedPower,
+    "Rated Cooling Power": formData.ratedCoolingPower || formData.ratedPower,
+    "Rated cooling power": formData.ratedCoolingPower || formData.ratedPower,
+    ratedCoolingPower: formData.ratedCoolingPower || formData.ratedPower,
+    rated_cooling_power: formData.ratedCoolingPower || formData.ratedPower,
+    RatedCoolingPower: formData.ratedCoolingPower || formData.ratedPower,
     Rated_Power: formData.ratedPower,
     Rated_Current: formData.ratedCurrent,
     Voltage: formData.voltage,
@@ -562,6 +572,10 @@ export const ProtoReportGenerator: React.FC<ProtoReportGeneratorProps> = ({
       generatedDate: new Date().toISOString().split('T')[0],
       specs: {
         coolingCapacity: formData.coolingCapacity,
+        ratedCoolingPower: formData.ratedCoolingPower,
+        ratedPower: formData.ratedPower,
+        ratedCurrent: formData.ratedCurrent,
+        voltage: formData.voltage,
         powerMode: formData.powerMode,
         refrigerant: formData.refrigerant,
         iseer: formData.iseer,
@@ -1170,7 +1184,7 @@ export const ProtoReportGenerator: React.FC<ProtoReportGeneratorProps> = ({
                   <Layers className="w-3.5 h-3.5" />
                   3. Nameplate Specifications & Ratings
                 </span>
-                <span className="text-[10px] text-slate-500 font-mono">13 Parameters</span>
+                <span className="text-[10px] text-slate-500 font-mono">14 Parameters</span>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
                 <div className="space-y-1">
@@ -1180,6 +1194,20 @@ export const ProtoReportGenerator: React.FC<ProtoReportGeneratorProps> = ({
                     value={formData.coolingCapacity}
                     onChange={(e) => setFormData({ ...formData, coolingCapacity: e.target.value })}
                     className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-cyan-300 font-bold text-xs focus:outline-none focus:border-cyan-500"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] text-slate-400 font-bold uppercase block">Rated Cooling Power</span>
+                    <span className="text-[9px] font-mono text-cyan-400">{"{{Rated_Cooling_Power}}"}</span>
+                  </div>
+                  <input
+                    type="text"
+                    value={formData.ratedCoolingPower}
+                    onChange={(e) => setFormData({ ...formData, ratedCoolingPower: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-amber-300 font-bold text-xs focus:outline-none focus:border-cyan-500"
+                    placeholder="e.g. 1450 W"
                   />
                 </div>
 
@@ -1240,20 +1268,6 @@ export const ProtoReportGenerator: React.FC<ProtoReportGeneratorProps> = ({
                     value={formData.iseer}
                     onChange={(e) => setFormData({ ...formData, iseer: e.target.value })}
                     className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-emerald-400 font-bold text-xs focus:outline-none focus:border-cyan-500"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] text-slate-400 font-bold uppercase block">Power Mode</span>
-                    <span className="text-[9px] font-mono text-cyan-400">{"{{Power_mode}}"}</span>
-                  </div>
-                  <input
-                    type="text"
-                    value={formData.powerMode}
-                    onChange={(e) => setFormData({ ...formData, powerMode: e.target.value })}
-                    placeholder="e.g. Inverter Dual AC / Heat Pump"
-                    className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-white text-xs focus:outline-none focus:border-cyan-500"
                   />
                 </div>
 

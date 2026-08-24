@@ -95,6 +95,7 @@ export interface ReportDetails {
 
 export interface NamePlateDetails {
   coolingCapacity?: string;
+  ratedCoolingPower?: string;
   ratedPower?: string;
   ratedCurrent?: string;
   voltage?: string;
