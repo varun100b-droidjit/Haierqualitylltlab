@@ -48,12 +48,31 @@
         "updatedAt": { "type": "string" }
       },
       "required": ["id", "reportType", "fileName", "fileSize"]
+    },
+    "users": {
+      "title": "Application Users",
+      "description": "Stores user authorization profiles, roles, and status for Role-Based Access Control",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "userId": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "random"] },
+        "status": { "type": "string", "enum": ["active", "disabled", "deleted"] },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["name", "userId", "role", "status"]
     }
   },
   "firestore": {
     "/master_templates/{reportType}": {
       "schema": "master_templates",
       "description": "DOCX Master Template files indexed by reportType (proto, reliability, etc)"
+    },
+    "/users/{uid}": {
+      "schema": "users",
+      "description": "User authorization profile records keyed by Firebase Auth UID"
     }
   }
 }

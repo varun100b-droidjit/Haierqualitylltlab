@@ -1,4 +1,4 @@
-import { initializeApp, getApps, getApp } from 'firebase/app';
+import { initializeApp, getApps, getApp, deleteApp } from 'firebase/app';
 import { 
   getFirestore, 
   collection, 
@@ -10,16 +10,25 @@ import {
   updateDoc, 
   deleteDoc, 
   query, 
+  where,
   orderBy,
   writeBatch 
 } from 'firebase/firestore';
-import { getAuth } from 'firebase/auth';
+import { 
+  getAuth, 
+  signInWithEmailAndPassword, 
+  signOut, 
+  onAuthStateChanged,
+  createUserWithEmailAndPassword,
+  updatePassword,
+  User as FirebaseUser
+} from 'firebase/auth';
 import firebaseAppletConfig from '../../firebase-applet-config.json';
 
 const metaEnv = (import.meta as any).env || {};
 
 // Standard Firebase config loaded from env or local applet json config
-const firebaseConfig = {
+export const firebaseConfig = {
   apiKey: metaEnv.VITE_FIREBASE_API_KEY || firebaseAppletConfig.apiKey || "",
   authDomain: metaEnv.VITE_FIREBASE_AUTH_DOMAIN || firebaseAppletConfig.authDomain || "",
   projectId: metaEnv.VITE_FIREBASE_PROJECT_ID || firebaseAppletConfig.projectId || "",
@@ -47,5 +56,30 @@ if (isFirebaseConfigured) {
   }
 }
 
-export { app, db, auth, collection, doc, setDoc, getDoc, getDocs, onSnapshot, updateDoc, deleteDoc, query, orderBy, writeBatch };
+export { 
+  app, 
+  db, 
+  auth, 
+  initializeApp,
+  deleteApp,
+  collection, 
+  doc, 
+  setDoc, 
+  getDoc, 
+  getDocs, 
+  onSnapshot, 
+  updateDoc, 
+  deleteDoc, 
+  query, 
+  where,
+  orderBy, 
+  writeBatch,
+  signInWithEmailAndPassword,
+  signOut,
+  onAuthStateChanged,
+  createUserWithEmailAndPassword,
+  updatePassword
+};
+export type { FirebaseUser };
+
 

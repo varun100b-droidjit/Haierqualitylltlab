@@ -28,8 +28,14 @@ import { ReportRoomModule } from './components/ReportRoom/ReportRoomModule';
 import { GraphModule } from './components/Graph/GraphModule';
 import { MobileToastContainer } from './components/Layout/MobileToastContainer';
 import { SupabaseSyncModal } from './components/Supabase/SupabaseSyncModal';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import { LoginScreen } from './components/Auth/LoginScreen';
+import { AccessDeniedView } from './components/Auth/AccessDeniedView';
+import { UserManagementModule } from './components/Admin/UserManagementModule';
+import { FlaskConical, RefreshCw } from 'lucide-react';
 
 import { Unit, UserProfile, DynamicUnitRow } from './types';
+
 import { 
   getUnits, 
   getActivityLogs, 
@@ -43,12 +49,21 @@ import {
   calculateRemainingDays
 } from './services/unitStore';
 
-export default function App() {
+export function MainApp() {
+  const { user, isAuthenticated, isLoading, isAdmin, isRandom } = useAuth();
+
   // Theme state: default dark mode for industrial lab look & feel
   const [theme, setTheme] = useState<'light' | 'dark'>('dark');
 
-  // Navigation tab state: default 'dashboard'
+  // Navigation tab state: default 'dashboard' for Admin, 'rd-units' for Random
   const [activeTab, setActiveTab] = useState<TabType>('dashboard');
+
+  // Automatically ensure random user starts on permitted rd-units tab
+  useEffect(() => {
+    if (isRandom && activeTab !== 'rd-units') {
+      setActiveTab('rd-units');
+    }
+  }, [isRandom]);
 
   // Mobile sidebar toggle
   const [isOpenMobileSidebar, setIsOpenMobileSidebar] = useState(false);
@@ -57,6 +72,7 @@ export default function App() {
   const [units, setUnits] = useState<Unit[]>(getUnits());
   const [activityLogs, setActivityLogs] = useState(getActivityLogs());
   const [notifications, setNotifications] = useState(getNotifications());
+
 
   // Modal dialog states
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -264,6 +280,30 @@ export default function App() {
   const liveUnitsCount = units.filter(u => u.status !== 'received' && u.status !== 'completed').length;
   const receivedUnitsCount = units.filter(u => u.status === 'received' || u.status === 'completed').length;
 
+  // 1. Loading Screen while Firebase Auth initializes
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-slate-100 p-4">
+        <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-cyan-600 to-blue-600 flex items-center justify-center text-white shadow-xl shadow-cyan-950/60 mb-4 animate-pulse">
+          <FlaskConical className="w-8 h-8" />
+        </div>
+        <div className="flex items-center gap-2.5 text-sm font-semibold text-slate-300">
+          <RefreshCw className="w-4 h-4 animate-spin text-cyan-400" />
+          <span>Authenticating with Firebase Cloud...</span>
+        </div>
+        <p className="text-xs text-slate-500 font-mono mt-2">LLT LAB &bull; Role-Based Access Control</p>
+      </div>
+    );
+  }
+
+  // 2. Unauthenticated Screen -> Render Firebase Login Screen
+  if (!isAuthenticated) {
+    return <LoginScreen />;
+  }
+
+  // 3. Security Guard: If Random role user attempts to navigate to restricted views
+  const isTabUnauthorizedForRandom = isRandom && activeTab !== 'rd-units';
+
   return (
     <div className={`min-h-screen font-sans bg-slate-950 text-slate-100 flex flex-col ${theme === 'dark' ? 'dark' : ''}`}>
       {/* Top App Bar */}
@@ -289,6 +329,7 @@ export default function App() {
           onCloseMobile={() => setIsOpenMobileSidebar(false)}
           liveUnitsCount={liveUnitsCount}
           receivedUnitsCount={receivedUnitsCount}
+          userRole={user?.role}
           onOpenAddPpModal={(type) => {
             setActiveTab('pp-units');
             if (type) setAddPpInitialType(type);
@@ -298,122 +339,141 @@ export default function App() {
 
         {/* Workspace Canvas Area */}
         <main className="flex-1 p-4 sm:p-6 md:p-8 max-w-7xl mx-auto w-full overflow-hidden">
-          {activeTab === 'dashboard' && (
-            <DashboardView
-              units={units}
-              activityLogs={activityLogs}
-              notifications={notifications}
-              onNavigateToRDUnits={() => setActiveTab('rd-units')}
-              onNavigateToProtoUnits={() => setActiveTab('proto-units')}
-              onNavigateToPpUnits={() => setActiveTab('pp-units')}
-              onNavigateToFieldUnits={() => setActiveTab('field-units')}
-              onNavigateToSmog={() => setActiveTab('smog')}
-              onOpenAddUnitModal={() => setIsAddModalOpen(true)}
-            />
-          )}
+          
+          {/* Access Denied Guard View for Random User */}
+          {isTabUnauthorizedForRandom ? (
+            <AccessDeniedView onRedirectToAllowed={() => setActiveTab('rd-units')} />
+          ) : (
+            <>
+              {activeTab === 'dashboard' && (
+                <DashboardView
+                  units={units}
+                  activityLogs={activityLogs}
+                  notifications={notifications}
+                  onNavigateToRDUnits={() => setActiveTab('rd-units')}
+                  onNavigateToProtoUnits={() => setActiveTab('proto-units')}
+                  onNavigateToPpUnits={() => setActiveTab('pp-units')}
+                  onNavigateToFieldUnits={() => setActiveTab('field-units')}
+                  onNavigateToSmog={() => setActiveTab('smog')}
+                  onOpenAddUnitModal={() => setIsAddModalOpen(true)}
+                />
+              )}
 
-          {activeTab === 'proto-units' && (
-            <ProtoUnitsModule
-              defaultSection={protoSection}
-              onOpenAddModal={() => setIsAddProtoModalOpen(true)}
-              onNavigateToGenerateReport={(serialNo) => {
-                setReportPreselectedSerial(serialNo);
-                setReportPreselectedSource('proto');
-                setActiveTab('reports');
-              }}
-            />
-          )}
+              {activeTab === 'proto-units' && (
+                <ProtoUnitsModule
+                  defaultSection={protoSection}
+                  onOpenAddModal={() => setIsAddProtoModalOpen(true)}
+                  onNavigateToGenerateReport={(serialNo) => {
+                    setReportPreselectedSerial(serialNo);
+                    setReportPreselectedSource('proto');
+                    setActiveTab('reports');
+                  }}
+                />
+              )}
 
-          {activeTab === 'pp-units' && (
-            <PpUnitsModule
-              defaultSection={ppSection}
-              onOpenAddModal={() => setIsAddPpModalOpen(true)}
-            />
-          )}
+              {activeTab === 'pp-units' && (
+                <PpUnitsModule
+                  defaultSection={ppSection}
+                  onOpenAddModal={() => setIsAddPpModalOpen(true)}
+                />
+              )}
 
-          {(activeTab === 'pp-models' || activeTab === 'pp-add-idu' || activeTab === 'pp-add-odu') && (
-            <ModelRegistrationScreen
-              initialUnitType={activeTab === 'pp-add-odu' ? 'ODU' : 'IDU'}
-              onNavigateToTesting={() => setActiveTab('pp-units')}
-            />
-          )}
+              {(activeTab === 'pp-models' || activeTab === 'pp-add-idu' || activeTab === 'pp-add-odu') && (
+                <ModelRegistrationScreen
+                  initialUnitType={activeTab === 'pp-add-odu' ? 'ODU' : 'IDU'}
+                  onNavigateToTesting={() => setActiveTab('pp-units')}
+                />
+              )}
 
-          {activeTab === 'rd-units' && (
-            <RDUnitsModule
-              units={units}
-              onOpenAddUnitModal={() => setIsAddModalOpen(true)}
-              onTrackUnit={(unit) => setTrackedUnit(unit)}
-              onEditUnit={(unit) => setEditedUnit(unit)}
-              onDeleteUnit={handleDeleteUnit}
-              onAdvanceStage={handleAdvanceStage}
-              onReworkUnit={handleReworkUnit}
-            />
-          )}
+              {activeTab === 'rd-units' && (
+                <RDUnitsModule
+                  units={units}
+                  onOpenAddUnitModal={() => setIsAddModalOpen(true)}
+                  onTrackUnit={(unit) => setTrackedUnit(unit)}
+                  onEditUnit={(unit) => setEditedUnit(unit)}
+                  onDeleteUnit={handleDeleteUnit}
+                  onAdvanceStage={handleAdvanceStage}
+                  onReworkUnit={handleReworkUnit}
+                />
+              )}
 
-          {activeTab === 'field-units' && (
-            <FieldUnitsModule
-              onNavigateToDashboard={() => {
-                setActiveTab('dashboard');
-              }}
-            />
-          )}
+              {activeTab === 'field-units' && (
+                <FieldUnitsModule
+                  onNavigateToDashboard={() => {
+                    setActiveTab('dashboard');
+                  }}
+                />
+              )}
 
-          {activeTab === 'smog' && (
-            <SmogModule
-              currentUser={currentUser}
-              onNavigateToDashboard={() => {
-                setActiveTab('dashboard');
-              }}
-            />
-          )}
+              {activeTab === 'smog' && (
+                <SmogModule
+                  currentUser={currentUser}
+                  onNavigateToDashboard={() => {
+                    setActiveTab('dashboard');
+                  }}
+                />
+              )}
 
-          {(activeTab === 'reports' || activeTab === 'cs-report' || activeTab === 'ce-report') && (
-            <ReportsModule
-              initialReportType={activeTab === 'ce-report' ? 'ce-report' : 'cs-report'}
-              initialSerialNo={reportPreselectedSerial}
-              initialUnitSource={reportPreselectedSource}
-              units={units}
-              onNavigateToDashboard={() => setActiveTab('dashboard')}
-              onNavigateToReportRoom={() => setActiveTab('report-room')}
-            />
-          )}
+              {(activeTab === 'reports' || activeTab === 'cs-report' || activeTab === 'ce-report') && (
+                <ReportsModule
+                  initialReportType={activeTab === 'ce-report' ? 'ce-report' : 'cs-report'}
+                  initialSerialNo={reportPreselectedSerial}
+                  initialUnitSource={reportPreselectedSource}
+                  units={units}
+                  onNavigateToDashboard={() => setActiveTab('dashboard')}
+                  onNavigateToReportRoom={() => setActiveTab('report-room')}
+                />
+              )}
 
-          {activeTab === 'report-room' && (
-            <ReportRoomModule
-              onNavigateToReportSection={(subTab) => {
-                setActiveTab(subTab === 'reliability' ? 'ce-report' : 'cs-report');
-              }}
-              onNavigateToDashboard={() => setActiveTab('dashboard')}
-            />
-          )}
+              {activeTab === 'report-room' && (
+                <ReportRoomModule
+                  onNavigateToReportSection={(subTab) => {
+                    setActiveTab(subTab === 'reliability' ? 'ce-report' : 'cs-report');
+                  }}
+                  onNavigateToDashboard={() => setActiveTab('dashboard')}
+                />
+              )}
 
-          {activeTab === 'graph' && (
-            <GraphModule
-              currentUser={currentUser}
-            />
-          )}
+              {activeTab === 'graph' && (
+                <GraphModule
+                  currentUser={currentUser}
+                />
+              )}
 
-          {activeTab === 'export-data' && (
-            <ExportDataModule
-              units={units}
-              onNavigateToDashboard={() => {
-                setActiveTab('dashboard');
-              }}
-            />
-          )}
+              {activeTab === 'export-data' && (
+                <ExportDataModule
+                  units={units}
+                  onNavigateToDashboard={() => {
+                    setActiveTab('dashboard');
+                  }}
+                />
+              )}
 
-          {activeTab === 'ai-support' && (
-            <AISupportModule
-              units={units}
-            />
-          )}
+              {activeTab === 'ai-support' && (
+                <AISupportModule
+                  units={units}
+                />
+              )}
 
-          {activeTab === 'settings' && (
-            <SettingsModule
-              theme={theme}
-              onToggleTheme={handleToggleTheme}
-              onOpenSupabaseModal={() => setIsSupabaseModalOpen(true)}
-            />
+              {activeTab === 'settings' && (
+                <SettingsModule
+                  theme={theme}
+                  onToggleTheme={handleToggleTheme}
+                  onOpenSupabaseModal={() => setIsSupabaseModalOpen(true)}
+                />
+              )}
+
+              {/* Admin User Management */}
+              {activeTab === 'user-management' && (
+                isAdmin ? (
+                  <UserManagementModule 
+                    onNavigateToDashboard={() => setActiveTab('dashboard')} 
+                  />
+                ) : (
+                  <AccessDeniedView onRedirectToAllowed={() => setActiveTab('rd-units')} />
+                )
+              )}
+            </>
           )}
         </main>
       </div>
@@ -474,3 +534,12 @@ export default function App() {
     </div>
   );
 }
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <MainApp />
+    </AuthProvider>
+  );
+}
+

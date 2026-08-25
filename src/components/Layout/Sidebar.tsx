@@ -22,10 +22,15 @@ import {
   PlusCircle,
   Box,
   Activity,
-  FolderArchive
+  Building2,
+  FolderArchive,
+  UserCheck,
+  Users
 } from 'lucide-react';
 import { subscribeReportRoom, getSavedReports } from '../../services/reportRoomStore';
 import { subscribeAppVersion, getAppVersionState } from '../../services/versionService';
+import { useAuth } from '../../context/AuthContext';
+import { AuthRole } from '../../types';
 
 export type TabType = 
   | 'dashboard' 
@@ -44,7 +49,8 @@ export type TabType =
   | 'graph'
   | 'export-data' 
   | 'ai-support' 
-  | 'settings';
+  | 'settings'
+  | 'user-management';
 
 interface SidebarProps {
   activeTab: TabType;
@@ -54,6 +60,7 @@ interface SidebarProps {
   liveUnitsCount: number;
   receivedUnitsCount: number;
   onOpenAddPpModal?: (initialType?: 'IDU' | 'ODU' | 'BOTH') => void;
+  userRole?: AuthRole;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -64,10 +71,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
   liveUnitsCount,
   receivedUnitsCount,
   onOpenAddPpModal,
+  userRole = 'admin',
 }) => {
+  const { logout, user } = useAuth();
   const [isPpDropdownOpen, setIsPpDropdownOpen] = useState(true);
   const [reportRoomCount, setReportRoomCount] = useState<number>(() => getSavedReports().length);
   const [appVersion, setAppVersion] = useState<string>(() => getAppVersionState().currentVersion);
+
+  const effectiveRole = user?.role || userRole;
+  const isRandom = effectiveRole === 'random';
 
   useEffect(() => {
     const unsubRoom = subscribeReportRoom((reports) => {
@@ -82,7 +94,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     };
   }, []);
 
-  const mainNavItems = [
+  const allMainItems = [
     {
       id: 'dashboard' as TabType,
       label: 'Dashboard',
@@ -133,25 +145,52 @@ export const Sidebar: React.FC<SidebarProps> = ({
     }
   ];
 
-  const utilityNavItems = [
+  // For random role: strictly restricted to R&D units & Transfer only
+  const mainNavItems = isRandom
+    ? allMainItems.filter(item => item.id === 'rd-units')
+    : allMainItems;
+
+  const utilityNavItems = isRandom
+    ? []
+    : [
+        {
+          id: 'export-data' as TabType,
+          label: 'Export Data',
+          icon: FileSpreadsheet,
+          badge: null
+        },
+        {
+          id: 'settings' as TabType,
+          label: 'Settings',
+          icon: Settings,
+          badge: null
+        }
+      ];
+
+  const adminNavItems = !isRandom ? [
     {
-      id: 'export-data' as TabType,
-      label: 'Export Data',
-      icon: FileSpreadsheet,
-      badge: null
-    },
-    {
-      id: 'settings' as TabType,
-      label: 'Settings',
-      icon: Settings,
-      badge: null
+      id: 'user-management' as TabType,
+      label: 'User Management',
+      icon: Users,
+      badge: 'ADMIN'
     }
-  ];
+  ] : [];
 
   const handleNavClick = (tabId: TabType) => {
     onSelectTab(tabId);
     onCloseMobile();
   };
+
+  const handleLogout = async () => {
+    if (window.confirm("Are you sure you want to log out of LLT Lab?")) {
+      try {
+        await logout();
+      } catch {
+        window.location.reload();
+      }
+    }
+  };
+
 
   return (
     <>
@@ -314,47 +353,97 @@ export const Sidebar: React.FC<SidebarProps> = ({
             })}
 
             {/* Utilities / Tools */}
-            <div className="pt-3 pb-1">
-              <div className="px-3 text-[10px] font-black uppercase tracking-wider text-slate-500">
-                <span>SYSTEM TOOLS</span>
-              </div>
-            </div>
-
-            {utilityNavItems.map((item) => {
-              const Icon = item.icon;
-              const isActive = activeTab === item.id;
-
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => handleNavClick(item.id)}
-                  className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl font-medium text-sm transition-all duration-200 group ${
-                    isActive
-                      ? 'bg-gradient-to-r from-cyan-600/90 to-blue-600/90 text-white font-semibold shadow-lg shadow-cyan-950/50'
-                      : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60'
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
-                    <Icon className={`w-5 h-5 transition-transform duration-200 group-hover:scale-110 ${
-                      isActive ? 'text-white' : 'text-slate-400 group-hover:text-cyan-400'
-                    }`} />
-                    <span>{item.label}</span>
+            {utilityNavItems.length > 0 && (
+              <>
+                <div className="pt-3 pb-1">
+                  <div className="px-3 text-[10px] font-black uppercase tracking-wider text-slate-500">
+                    <span>SYSTEM TOOLS</span>
                   </div>
+                </div>
 
-                  {item.badge !== null && (
-                    <span
-                      className={`px-2 py-0.5 text-xs font-bold rounded-full ${
+                {utilityNavItems.map((item) => {
+                  const Icon = item.icon;
+                  const isActive = activeTab === item.id;
+
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => handleNavClick(item.id)}
+                      className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl font-medium text-sm transition-all duration-200 group ${
                         isActive
-                          ? 'bg-white/20 text-white'
-                          : 'bg-cyan-950 text-cyan-300 border border-cyan-800'
+                          ? 'bg-gradient-to-r from-cyan-600/90 to-blue-600/90 text-white font-semibold shadow-lg shadow-cyan-950/50'
+                          : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60'
                       }`}
                     >
-                      {item.badge}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
+                      <div className="flex items-center gap-3">
+                        <Icon className={`w-5 h-5 transition-transform duration-200 group-hover:scale-110 ${
+                          isActive ? 'text-white' : 'text-slate-400 group-hover:text-cyan-400'
+                        }`} />
+                        <span>{item.label}</span>
+                      </div>
+
+                      {item.badge !== null && (
+                        <span
+                          className={`px-2 py-0.5 text-xs font-bold rounded-full ${
+                            isActive
+                              ? 'bg-white/20 text-white'
+                              : 'bg-cyan-950 text-cyan-300 border border-cyan-800'
+                          }`}
+                        >
+                          {item.badge}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </>
+            )}
+
+            {/* Admin Management Section */}
+            {adminNavItems.length > 0 && (
+              <>
+                <div className="pt-3 pb-1">
+                  <div className="px-3 text-[10px] font-black uppercase tracking-wider text-cyan-400/80 flex items-center justify-between">
+                    <span>ADMINISTRATION</span>
+                    <span className="text-[9px] px-1.5 py-0.2 bg-cyan-950 text-cyan-300 border border-cyan-800 rounded">RBAC</span>
+                  </div>
+                </div>
+
+                {adminNavItems.map((item) => {
+                  const Icon = item.icon;
+                  const isActive = activeTab === item.id;
+
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => handleNavClick(item.id)}
+                      className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl font-medium text-sm transition-all duration-200 group ${
+                        isActive
+                          ? 'bg-gradient-to-r from-cyan-600/90 to-blue-600/90 text-white font-semibold shadow-lg shadow-cyan-950/50'
+                          : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <Icon className={`w-5 h-5 transition-transform duration-200 group-hover:scale-110 ${
+                          isActive ? 'text-white' : 'text-slate-400 group-hover:text-cyan-400'
+                        }`} />
+                        <span>{item.label}</span>
+                      </div>
+
+                      <span
+                        className={`px-2 py-0.5 text-[10px] font-bold rounded-full uppercase ${
+                          isActive
+                            ? 'bg-white/20 text-white'
+                            : 'bg-cyan-950 text-cyan-300 border border-cyan-800'
+                        }`}
+                      >
+                        ADMIN
+                      </span>
+                    </button>
+                  );
+                })}
+              </>
+            )}
           </nav>
         </div>
 
@@ -378,17 +467,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
 
           <button
-            onClick={() => {
-              if (window.confirm("Are you sure you want to log out of LLT Lab?")) {
-                alert("Logged out successfully. Reloading workspace.");
-                window.location.reload();
-              }
-            }}
-            className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium text-rose-400 hover:text-rose-300 hover:bg-rose-950/30 border border-transparent hover:border-rose-900/50 transition-all"
+            onClick={handleLogout}
+            className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium text-rose-400 hover:text-rose-300 hover:bg-rose-950/30 border border-transparent hover:border-rose-900/50 transition-all cursor-pointer"
           >
             <LogOut className="w-4 h-4" />
             <span>Logout</span>
           </button>
+
 
           {/* Version Footer Tag */}
           <div className="mt-2.5 pt-2 border-t border-slate-900/80 flex items-center justify-between px-1 text-[11px]">

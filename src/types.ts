@@ -266,3 +266,19 @@ export const WORKFLOW_STAGES: { stageName: string; department: Department; defau
   { stageName: 'Step 10: OQC → BSR Transfer', department: 'BSR', defaultRole: 'BSR Transfer Officer' },
   { stageName: 'Step 11: BSR Transfer Completed', department: 'BSR', defaultRole: 'BSR Receiver' },
 ];
+
+export type AuthRole = 'admin' | 'random';
+export type UserAccountStatus = 'active' | 'disabled' | 'deleted';
+
+export interface AppUserAccount {
+  id: string; // Document ID / Auth UID
+  name: string;
+  userId: string; // Unique User ID e.g. ADMIN01, CLIENT001
+  role: AuthRole;
+  status: UserAccountStatus;
+  passwordHash?: string;
+  password?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+

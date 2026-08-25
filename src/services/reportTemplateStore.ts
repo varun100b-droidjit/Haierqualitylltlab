@@ -154,8 +154,9 @@ async function fetchTemplatesFromFirebase(): Promise<void> {
       }
     });
     notifyListeners();
-  } catch (err) {
-    console.error('Error fetching master templates from Firebase:', err);
+  } catch (err: any) {
+    // If permissions are not granted or offline, log warning and use local/cached master templates
+    console.warn('Note on fetching master templates from Firebase:', err?.message || err);
   }
 }
 

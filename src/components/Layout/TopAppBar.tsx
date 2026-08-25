@@ -30,6 +30,8 @@ import { markNotificationAsRead, clearNotifications } from '../../services/unitS
 import { subscribeVoiceStatus, VoiceStatus } from '../../utils/meghaVoice';
 import { requestMobileNotificationPermission, sendMobilePushNotification, getMobileNotificationPermissionState } from '../../utils/mobileNotification';
 import { LabShiftSelector } from '../Common/LabShiftSelector';
+import { useAuth } from '../../context/AuthContext';
+import { LogOut } from 'lucide-react';
 
 interface TopAppBarProps {
   theme: 'light' | 'dark';
@@ -54,9 +56,15 @@ export const TopAppBar: React.FC<TopAppBarProps> = ({
   onToggleSidebarMobile,
   onOpenSupabaseModal,
 }) => {
+  const { user: authAccount, logout, isAdmin } = useAuth();
   const [showNotifications, setShowNotifications] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [voiceStatus, setVoiceStatus] = useState<VoiceStatus>('idle');
+
+  const displayName = authAccount?.name || currentUser.name;
+  const displayUserId = authAccount?.userId || 'ADMIN01';
+  const displayRole = authAccount ? (authAccount.role === 'admin' ? 'Admin' : 'Random') : currentUser.role;
+
 
   useEffect(() => {
     const unsubscribe = subscribeVoiceStatus((status) => {
@@ -372,17 +380,19 @@ export const TopAppBar: React.FC<TopAppBarProps> = ({
         <div className="relative">
           <button
             onClick={() => setShowUserMenu(!showUserMenu)}
-            className="flex items-center gap-2 p-1.5 pl-2.5 pr-2 rounded-xl bg-slate-800/60 hover:bg-slate-800 border border-slate-700/60 text-slate-200 transition-all"
+            className="flex items-center gap-2 p-1.5 pl-2.5 pr-2 rounded-xl bg-slate-800/60 hover:bg-slate-800 border border-slate-700/60 text-slate-200 transition-all cursor-pointer"
           >
             <div className="w-7 h-7 rounded-lg bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center text-white font-bold text-xs shadow-sm">
-              {currentUser.name.charAt(0)}
+              {displayName.charAt(0).toUpperCase()}
             </div>
             <div className="hidden lg:block text-left pr-1">
               <div className="text-xs font-semibold text-slate-100 leading-none">
-                {currentUser.name}
+                {displayName}
               </div>
-              <div className="text-[10px] text-cyan-400 mt-0.5 leading-none">
-                {currentUser.role}
+              <div className="text-[10px] text-cyan-400 mt-0.5 leading-none flex items-center gap-1 font-mono">
+                <span>{displayUserId}</span>
+                <span>&bull;</span>
+                <span className="capitalize">{displayRole}</span>
               </div>
             </div>
             <ChevronDown className="w-4 h-4 text-slate-400" />
@@ -390,37 +400,36 @@ export const TopAppBar: React.FC<TopAppBarProps> = ({
 
           {showUserMenu && (
             <div className="absolute right-0 mt-2 w-64 bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl z-50 p-2 animate-in fade-in slide-in-from-top-2 duration-150">
-              <div className="px-3 py-2 border-b border-slate-800 mb-1">
-                <p className="text-xs font-bold text-slate-200">{currentUser.name}</p>
-                <p className="text-[11px] text-slate-400 truncate">{currentUser.email}</p>
+              <div className="px-3 py-2.5 border-b border-slate-800 mb-1 bg-slate-950/60 rounded-xl">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-bold text-slate-100">{displayName}</p>
+                  <span className={`px-2 py-0.5 text-[9px] font-bold uppercase rounded-full border ${
+                    displayRole.toLowerCase() === 'admin'
+                      ? 'bg-cyan-950 text-cyan-300 border-cyan-800'
+                      : 'bg-slate-800 text-slate-300 border-slate-700'
+                  }`}>
+                    {displayRole}
+                  </span>
+                </div>
+                <p className="text-[11px] text-cyan-400 font-mono mt-0.5">User ID: <strong>{displayUserId}</strong></p>
                 <div className="inline-flex items-center gap-1 px-2 py-0.5 mt-1.5 text-[10px] font-medium text-emerald-400 bg-emerald-950/60 border border-emerald-800/60 rounded-full">
-                  <ShieldCheck className="w-3 h-3" /> Dept: {currentUser.department}
+                  <ShieldCheck className="w-3 h-3" /> Auth: Firebase RBAC
                 </div>
               </div>
 
-              <div className="px-3 py-1.5 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-                Switch Role Context
-              </div>
-
-              <div className="space-y-0.5">
-                {rolesList.map((r) => (
-                  <button
-                    key={r}
-                    onClick={() => {
-                      onChangeUserRole(r);
-                      setShowUserMenu(false);
-                    }}
-                    className={`w-full flex items-center justify-between px-3 py-2 text-xs rounded-xl text-left transition-colors ${
-                      currentUser.role === r
-                        ? 'bg-cyan-950/80 text-cyan-300 font-semibold'
-                        : 'text-slate-300 hover:bg-slate-800'
-                    }`}
-                  >
-                    <span>{r}</span>
-                    {currentUser.role === r && <Check className="w-3.5 h-3.5 text-cyan-400" />}
-                  </button>
-                ))}
-              </div>
+              {/* Real Logout Button */}
+              <button
+                onClick={async () => {
+                  setShowUserMenu(false);
+                  if (window.confirm("Are you sure you want to sign out of LLT Lab?")) {
+                    await logout();
+                  }
+                }}
+                className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold text-rose-400 hover:text-rose-300 hover:bg-rose-950/40 rounded-xl transition-colors cursor-pointer mt-1"
+              >
+                <LogOut className="w-4 h-4 text-rose-400" />
+                <span>Sign Out Account</span>
+              </button>
             </div>
           )}
         </div>
