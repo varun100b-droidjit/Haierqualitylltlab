@@ -857,11 +857,11 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
         <div className={`flex-1 p-4 sm:p-8 overflow-y-auto bg-slate-950/60 ${viewMode === 'document' ? 'block' : 'fixed left-[-9999px] top-0 pointer-events-none opacity-0'}`}>
           <div 
             ref={printableDocRef}
-            className="max-w-4xl mx-auto bg-white text-slate-900 rounded-xl shadow-2xl p-6 sm:p-10 space-y-7 font-sans border border-slate-200"
+            className="max-w-4xl mx-auto bg-white text-slate-900 rounded-xl shadow-2xl p-6 sm:p-8 space-y-4 font-sans border border-slate-200"
             style={{ minHeight: '1000px' }}
           >
             {/* Document Header */}
-            <div className="border-b-4 border-cyan-800 pb-4 flex items-center justify-between">
+            <div className="border-b-4 border-cyan-800 pb-3 flex items-center justify-between">
               <div>
                 <h1 className="text-xl sm:text-2xl font-black text-slate-900 uppercase tracking-wide">
                   {modelName}
@@ -879,9 +879,9 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
             </div>
 
             {/* TOP FEATURE: Model Name & Indoor Unit Photo Showcase */}
-            <div className="bg-slate-50 border-2 border-cyan-700/60 rounded-xl p-4 flex flex-col sm:flex-row items-center gap-6">
+            <div className="bg-slate-50 border-2 border-cyan-700/60 rounded-xl p-3.5 flex flex-col sm:flex-row items-center gap-5">
               <div className="w-full sm:w-2/5 flex flex-col items-center">
-                <div className="w-full h-44 bg-white border border-slate-300 rounded-lg overflow-hidden flex items-center justify-center p-2 shadow-inner">
+                <div className="w-full h-40 bg-white border border-slate-300 rounded-lg overflow-hidden flex items-center justify-center p-2 shadow-inner">
                   {indoorUnitPhotoUrl ? (
                     <img 
                       src={indoorUnitPhotoUrl} 
@@ -901,8 +901,8 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
                 </span>
               </div>
 
-              <div className="w-full sm:w-3/5 space-y-2.5">
-                <div className="border-b border-slate-300 pb-1.5">
+              <div className="w-full sm:w-3/5 space-y-2">
+                <div className="border-b border-slate-300 pb-1">
                   <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Tested Equipment / Model</span>
                   <h2 className="text-lg sm:text-xl font-black text-slate-900 font-mono">{modelName}</h2>
                 </div>
@@ -937,34 +937,34 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
 
             {/* General Unit Information Table */}
             <div>
-              <h3 className="text-xs font-black uppercase tracking-wider text-cyan-900 bg-cyan-50 px-3 py-2 rounded-t-lg border border-cyan-200 border-l-4 border-l-cyan-700">
+              <h3 className="text-xs font-black uppercase tracking-wider text-cyan-900 bg-cyan-50 px-3 py-1.5 rounded-t-lg border border-cyan-200 border-l-4 border-l-cyan-700">
                 1. General Sample Details
               </h3>
               <table className="w-full text-left text-xs border-collapse border border-slate-300">
                 <tbody className="divide-y divide-slate-300">
                   <tr>
-                    <td className="w-1/4 p-2.5 bg-slate-50 font-bold text-slate-700 border-r border-slate-300">Model Name:</td>
-                    <td className="w-1/4 p-2.5 font-bold text-slate-900 border-r border-slate-300">{modelName}</td>
-                    <td className="w-1/4 p-2.5 bg-slate-50 font-bold text-slate-700 border-r border-slate-300">Sample Type:</td>
-                    <td className="w-1/4 p-2.5 font-bold text-cyan-900">{getVal(['Sample_Type', 'sampleType'], 'Proto')}</td>
+                    <td className="w-1/4 px-2.5 py-1.5 bg-slate-50 font-bold text-slate-700 border-r border-slate-300">Model Name:</td>
+                    <td className="w-1/4 px-2.5 py-1.5 font-bold text-slate-900 border-r border-slate-300">{modelName}</td>
+                    <td className="w-1/4 px-2.5 py-1.5 bg-slate-50 font-bold text-slate-700 border-r border-slate-300">Sample Type:</td>
+                    <td className="w-1/4 px-2.5 py-1.5 font-bold text-cyan-900">{getVal(['Sample_Type', 'sampleType'], 'Proto')}</td>
                   </tr>
                   <tr>
-                    <td className="w-1/4 p-2.5 bg-slate-50 font-bold text-slate-700 border-r border-slate-300">Report Number:</td>
-                    <td className="w-1/4 p-2.5 font-mono font-bold text-slate-900 border-r border-slate-300">{reportNo}</td>
-                    <td className="w-1/4 p-2.5 bg-slate-50 font-bold text-slate-700 border-r border-slate-300">Requested By:</td>
-                    <td className="w-1/4 p-2.5 font-semibold text-slate-900">{getVal(['Request_By', 'requestBy'], 'Indrajit')}</td>
+                    <td className="w-1/4 px-2.5 py-1.5 bg-slate-50 font-bold text-slate-700 border-r border-slate-300">Report Number:</td>
+                    <td className="w-1/4 px-2.5 py-1.5 font-mono font-bold text-slate-900 border-r border-slate-300">{reportNo}</td>
+                    <td className="w-1/4 px-2.5 py-1.5 bg-slate-50 font-bold text-slate-700 border-r border-slate-300">Requested By:</td>
+                    <td className="w-1/4 px-2.5 py-1.5 font-semibold text-slate-900">{getVal(['Request_By', 'requestBy'], 'Indrajit')}</td>
                   </tr>
                   <tr>
-                    <td className="w-1/4 p-2.5 bg-slate-50 font-bold text-slate-700 border-r border-slate-300">Sample Received:</td>
-                    <td className="w-1/4 p-2.5 font-mono text-slate-800 border-r border-slate-300">{getVal(['Sample_Received_Date', 'Sample_Received', 'sampleReceivedDate'], '—')}</td>
-                    <td className="w-1/4 p-2.5 bg-slate-50 font-bold text-slate-700 border-r border-slate-300">Test Commenced:</td>
-                    <td className="w-1/4 p-2.5 font-mono text-slate-800">{getVal(['Test_Commenced_Date', 'Test_Commenced', 'testCommencedDate'], '—')}</td>
+                    <td className="w-1/4 px-2.5 py-1.5 bg-slate-50 font-bold text-slate-700 border-r border-slate-300">Sample Received:</td>
+                    <td className="w-1/4 px-2.5 py-1.5 font-mono text-slate-800 border-r border-slate-300">{getVal(['Sample_Received_Date', 'Sample_Received', 'sampleReceivedDate'], '—')}</td>
+                    <td className="w-1/4 px-2.5 py-1.5 bg-slate-50 font-bold text-slate-700 border-r border-slate-300">Test Commenced:</td>
+                    <td className="w-1/4 px-2.5 py-1.5 font-mono text-slate-800">{getVal(['Test_Commenced_Date', 'Test_Commenced', 'testCommencedDate'], '—')}</td>
                   </tr>
                   <tr>
-                    <td className="w-1/4 p-2.5 bg-slate-50 font-bold text-slate-700 border-r border-slate-300">Test Completed:</td>
-                    <td className="w-1/4 p-2.5 font-mono text-slate-800 border-r border-slate-300">{getVal(['Test_Completed_Date', 'Test_Completed', 'testCompletedDate'], '—')}</td>
-                    <td className="w-1/4 p-2.5 bg-slate-50 font-bold text-slate-700 border-r border-slate-300">Testing Lead:</td>
-                    <td className="w-1/4 p-2.5 font-semibold text-slate-900">{getVal(['Tested_By', 'testedBy'], 'Indrajit Sharma')}</td>
+                    <td className="w-1/4 px-2.5 py-1.5 bg-slate-50 font-bold text-slate-700 border-r border-slate-300">Test Completed:</td>
+                    <td className="w-1/4 px-2.5 py-1.5 font-mono text-slate-800 border-r border-slate-300">{getVal(['Test_Completed_Date', 'Test_Completed', 'testCompletedDate'], '—')}</td>
+                    <td className="w-1/4 px-2.5 py-1.5 bg-slate-50 font-bold text-slate-700 border-r border-slate-300">Testing Lead:</td>
+                    <td className="w-1/4 px-2.5 py-1.5 font-semibold text-slate-900">{getVal(['Tested_By', 'testedBy'], 'Indrajit Sharma')}</td>
                   </tr>
                 </tbody>
               </table>
@@ -972,58 +972,58 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
 
             {/* Performance Specifications & Checksums */}
             <div>
-              <h3 className="text-xs font-black uppercase tracking-wider text-cyan-900 bg-cyan-50 px-3 py-2 rounded-t-lg border border-cyan-200 border-l-4 border-l-cyan-700">
+              <h3 className="text-xs font-black uppercase tracking-wider text-cyan-900 bg-cyan-50 px-3 py-1.5 rounded-t-lg border border-cyan-200 border-l-4 border-l-cyan-700">
                 2. Rating, Electrical &amp; Firmware Checksums
               </h3>
               <table className="w-full text-left text-xs border-collapse border border-slate-300">
                 <thead>
                   <tr className="bg-slate-100 text-slate-800 font-bold uppercase text-[11px]">
-                    <th className="w-1/4 p-2.5 border-r border-b border-slate-300">Parameter</th>
-                    <th className="w-1/4 p-2.5 border-r border-b border-slate-300">Value</th>
-                    <th className="w-1/4 p-2.5 border-r border-b border-slate-300">Parameter</th>
-                    <th className="w-1/4 p-2.5 border-b border-slate-300">Value</th>
+                    <th className="w-1/4 px-2.5 py-1.5 border-r border-b border-slate-300">Parameter</th>
+                    <th className="w-1/4 px-2.5 py-1.5 border-r border-b border-slate-300">Value</th>
+                    <th className="w-1/4 px-2.5 py-1.5 border-r border-b border-slate-300">Parameter</th>
+                    <th className="w-1/4 px-2.5 py-1.5 border-b border-slate-300">Value</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-300">
                   <tr>
-                    <td className="p-2.5 font-bold text-slate-700 bg-slate-50 border-r border-slate-300">Cooling Capacity:</td>
-                    <td className="p-2.5 font-mono text-cyan-950 font-extrabold border-r border-slate-300">{getVal(['Cooling_Capacity', 'Cooling_capacity', 'coolingCapacity'])}</td>
-                    <td className="p-2.5 font-bold text-slate-700 bg-slate-50 border-r border-slate-300">Rated Cooling Power:</td>
-                    <td className="p-2.5 text-amber-800 font-mono font-bold">{getVal(['Rated_Cooling_Power', 'Rated_cooling_power', 'ratedCoolingPower', 'Rated_Power', 'ratedPower', 'Power_mode', 'powerMode'])}</td>
+                    <td className="px-2.5 py-1.5 font-bold text-slate-700 bg-slate-50 border-r border-slate-300">Cooling Capacity:</td>
+                    <td className="px-2.5 py-1.5 font-mono text-cyan-950 font-extrabold border-r border-slate-300">{getVal(['Cooling_Capacity', 'Cooling_capacity', 'coolingCapacity'])}</td>
+                    <td className="px-2.5 py-1.5 font-bold text-slate-700 bg-slate-50 border-r border-slate-300">Rated Cooling Power:</td>
+                    <td className="px-2.5 py-1.5 text-amber-800 font-mono font-bold">{getVal(['Rated_Cooling_Power', 'Rated_cooling_power', 'ratedCoolingPower', 'Rated_Power', 'ratedPower', 'Power_mode', 'powerMode'])}</td>
                   </tr>
                   <tr>
-                    <td className="p-2.5 font-bold text-slate-700 bg-slate-50 border-r border-slate-300">Rated Power:</td>
-                    <td className="p-2.5 font-mono text-slate-900 border-r border-slate-300">{getVal(['Rated_Power', 'ratedPower'])}</td>
-                    <td className="p-2.5 font-bold text-slate-700 bg-slate-50 border-r border-slate-300">Rated Current:</td>
-                    <td className="p-2.5 font-mono text-slate-900">{getVal(['Rated_Current', 'ratedCurrent'])}</td>
+                    <td className="px-2.5 py-1.5 font-bold text-slate-700 bg-slate-50 border-r border-slate-300">Rated Power:</td>
+                    <td className="px-2.5 py-1.5 font-mono text-slate-900 border-r border-slate-300">{getVal(['Rated_Power', 'ratedPower'])}</td>
+                    <td className="px-2.5 py-1.5 font-bold text-slate-700 bg-slate-50 border-r border-slate-300">Rated Current:</td>
+                    <td className="px-2.5 py-1.5 font-mono text-slate-900">{getVal(['Rated_Current', 'ratedCurrent'])}</td>
                   </tr>
                   <tr>
-                    <td className="p-2.5 font-bold text-slate-700 bg-slate-50 border-r border-slate-300">Voltage / Supply:</td>
-                    <td className="p-2.5 font-mono text-slate-900 border-r border-slate-300">{getVal(['Voltage', 'voltage'])}</td>
-                    <td className="p-2.5 font-bold text-slate-700 bg-slate-50 border-r border-slate-300">ISEER Rating:</td>
-                    <td className="p-2.5 font-mono text-emerald-800 font-bold">{getVal(['ISEER', 'iseer'])}</td>
+                    <td className="px-2.5 py-1.5 font-bold text-slate-700 bg-slate-50 border-r border-slate-300">Voltage / Supply:</td>
+                    <td className="px-2.5 py-1.5 font-mono text-slate-900 border-r border-slate-300">{getVal(['Voltage', 'voltage'])}</td>
+                    <td className="px-2.5 py-1.5 font-bold text-slate-700 bg-slate-50 border-r border-slate-300">ISEER Rating:</td>
+                    <td className="px-2.5 py-1.5 font-mono text-emerald-800 font-bold">{getVal(['ISEER', 'iseer'])}</td>
                   </tr>
                   <tr>
-                    <td className="p-2.5 font-bold text-slate-700 bg-slate-50 border-r border-slate-300">Refrigerant:</td>
-                    <td className="p-2.5 font-mono text-slate-900 font-bold border-r border-slate-300">{getVal(['Refrigerant', 'refrigerant'])}</td>
-                    <td className="p-2.5 font-bold text-slate-700 bg-slate-50 border-r border-slate-300">Gas Quantity / Injection:</td>
-                    <td className="p-2.5 font-mono text-slate-900 font-medium">{getVal(['Gas_Qty', 'gasQty', 'Gas_Quantity'])} / {getVal(['Gas_injection_Volume', 'Gas_Injection_Volume', 'gasInjectionVolume'])}</td>
+                    <td className="px-2.5 py-1.5 font-bold text-slate-700 bg-slate-50 border-r border-slate-300">Refrigerant:</td>
+                    <td className="px-2.5 py-1.5 font-mono text-slate-900 font-bold border-r border-slate-300">{getVal(['Refrigerant', 'refrigerant'])}</td>
+                    <td className="px-2.5 py-1.5 font-bold text-slate-700 bg-slate-50 border-r border-slate-300">Gas Quantity / Injection:</td>
+                    <td className="px-2.5 py-1.5 font-mono text-slate-900 font-medium">{getVal(['Gas_Qty', 'gasQty', 'Gas_Quantity'])} / {getVal(['Gas_injection_Volume', 'Gas_Injection_Volume', 'gasInjectionVolume'])}</td>
                   </tr>
                   <tr>
-                    <td className="p-2.5 font-bold text-slate-700 bg-slate-50 border-r border-slate-300">IDU Main Checksum:</td>
-                    <td className="p-2.5 font-mono text-cyan-900 font-bold border-r border-slate-300">{getVal(['Main_Program_Checksum_IDU', 'mainProgramChecksumIdu'])}</td>
-                    <td className="p-2.5 font-bold text-slate-700 bg-slate-50 border-r border-slate-300">ODU Main Checksum:</td>
-                    <td className="p-2.5 font-mono text-cyan-900 font-bold">{getVal(['Main_Program_Checksum_ODU', 'mainProgramChecksumOdu'])}</td>
+                    <td className="px-2.5 py-1.5 font-bold text-slate-700 bg-slate-50 border-r border-slate-300">IDU Main Checksum:</td>
+                    <td className="px-2.5 py-1.5 font-mono text-cyan-900 font-bold border-r border-slate-300">{getVal(['Main_Program_Checksum_IDU', 'mainProgramChecksumIdu'])}</td>
+                    <td className="px-2.5 py-1.5 font-bold text-slate-700 bg-slate-50 border-r border-slate-300">ODU Main Checksum:</td>
+                    <td className="px-2.5 py-1.5 font-mono text-cyan-900 font-bold">{getVal(['Main_Program_Checksum_ODU', 'mainProgramChecksumOdu'])}</td>
                   </tr>
                   <tr>
-                    <td className="p-2.5 font-bold text-slate-700 bg-slate-50 border-r border-slate-300">IDU EEPROM Checksum:</td>
-                    <td className="p-2.5 font-mono text-indigo-900 font-bold border-r border-slate-300">{getVal(['EE_Checksum_IDU', 'eeChecksumIdu'])}</td>
-                    <td className="p-2.5 font-bold text-slate-700 bg-slate-50 border-r border-slate-300">ODU EEPROM Checksum:</td>
-                    <td className="p-2.5 font-mono text-indigo-900 font-bold">{getVal(['EE_Checksum_ODU', 'eeChecksumOdu'])}</td>
+                    <td className="px-2.5 py-1.5 font-bold text-slate-700 bg-slate-50 border-r border-slate-300">IDU EEPROM Checksum:</td>
+                    <td className="px-2.5 py-1.5 font-mono text-indigo-900 font-bold border-r border-slate-300">{getVal(['EE_Checksum_IDU', 'eeChecksumIdu'])}</td>
+                    <td className="px-2.5 py-1.5 font-bold text-slate-700 bg-slate-50 border-r border-slate-300">ODU EEPROM Checksum:</td>
+                    <td className="px-2.5 py-1.5 font-mono text-indigo-900 font-bold">{getVal(['EE_Checksum_ODU', 'eeChecksumOdu'])}</td>
                   </tr>
                   <tr>
-                    <td className="p-2.5 font-bold text-slate-700 bg-slate-50 border-r border-slate-300">Compressor Spec:</td>
-                    <td colSpan={3} className="p-2.5 text-slate-900 font-medium">{getVal(['Compressor_Spec', 'Compressor _Spec', 'compressorSpec'])}</td>
+                    <td className="px-2.5 py-1.5 font-bold text-slate-700 bg-slate-50 border-r border-slate-300">Compressor Spec:</td>
+                    <td colSpan={3} className="px-2.5 py-1.5 text-slate-900 font-medium">{getVal(['Compressor_Spec', 'Compressor _Spec', 'compressorSpec'])}</td>
                   </tr>
                 </tbody>
               </table>
@@ -1031,25 +1031,25 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
 
             {/* Parts & Components Specification Table */}
             <div>
-              <h3 className="text-xs font-black uppercase tracking-wider text-cyan-900 bg-cyan-50 px-3 py-2 rounded-t-lg border border-cyan-200 border-l-4 border-l-cyan-700">
+              <h3 className="text-xs font-black uppercase tracking-wider text-cyan-900 bg-cyan-50 px-3 py-1.5 rounded-t-lg border border-cyan-200 border-l-4 border-l-cyan-700">
                 3. Sub-Assembly &amp; Parts Bill of Materials (BOM)
               </h3>
               <table className="w-full text-left text-xs border-collapse border border-slate-300">
                 <thead>
                   <tr className="bg-slate-100 text-slate-800 font-bold uppercase text-[11px]">
-                    <th className="w-[24%] p-2.5 border-r border-b border-slate-300">Sub-Assembly</th>
-                    <th className="w-[36%] p-2.5 border-r border-b border-slate-300">Specification</th>
-                    <th className="w-[20%] p-2.5 border-r border-b border-slate-300">Part Code</th>
-                    <th className="w-[20%] p-2.5 border-b border-slate-300">Supplier</th>
+                    <th className="w-[24%] px-2.5 py-1.5 border-r border-b border-slate-300">Sub-Assembly</th>
+                    <th className="w-[36%] px-2.5 py-1.5 border-r border-b border-slate-300">Specification</th>
+                    <th className="w-[20%] px-2.5 py-1.5 border-r border-b border-slate-300">Part Code</th>
+                    <th className="w-[20%] px-2.5 py-1.5 border-b border-slate-300">Supplier</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-300 font-medium">
                   {formParts.map((p, idx) => (
                     <tr key={idx} className={idx % 2 === 1 ? 'bg-slate-50/60' : 'bg-white'}>
-                      <td className="p-2.5 font-bold text-slate-900 border-r border-slate-300">{p.title}</td>
-                      <td className="p-2.5 text-slate-700 border-r border-slate-300">{p.spec}</td>
-                      <td className="p-2.5 font-mono text-cyan-900 font-bold border-r border-slate-300">{p.partCode}</td>
-                      <td className="p-2.5 text-slate-800">{p.supplier}</td>
+                      <td className="px-2.5 py-1.5 font-bold text-slate-900 border-r border-slate-300">{p.title}</td>
+                      <td className="px-2.5 py-1.5 text-slate-700 border-r border-slate-300">{p.spec}</td>
+                      <td className="px-2.5 py-1.5 font-mono text-cyan-900 font-bold border-r border-slate-300">{p.partCode}</td>
+                      <td className="px-2.5 py-1.5 text-slate-800">{p.supplier}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -1057,8 +1057,8 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
             </div>
 
             {/* Photos Grid */}
-            <div className="space-y-3">
-              <div className="flex items-center justify-between bg-cyan-50 px-3 py-2 rounded-t-lg border border-cyan-200 border-l-4 border-l-cyan-700">
+            <div className="space-y-2.5">
+              <div className="flex items-center justify-between bg-cyan-50 px-3 py-1.5 rounded-t-lg border border-cyan-200 border-l-4 border-l-cyan-700">
                 <h3 className="text-xs font-black uppercase tracking-wider text-cyan-950">
                   4. Sample Photographs Gallery
                 </h3>
@@ -1089,8 +1089,8 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
             </div>
 
             {/* Quality Remarks & Test Conclusion */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="bg-slate-50 p-4 rounded-xl border border-slate-300 space-y-1.5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+              <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-300 space-y-1">
                 <h3 className="text-xs font-black uppercase tracking-wider text-slate-800">
                   5. Quality Remarks &amp; Observations
                 </h3>
@@ -1099,7 +1099,7 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
                 </p>
               </div>
 
-              <div className="bg-slate-50 p-4 rounded-xl border border-slate-300 space-y-1.5">
+              <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-300 space-y-1">
                 <h3 className="text-xs font-black uppercase tracking-wider text-slate-800">
                   6. Final Test Conclusion
                 </h3>
@@ -1110,7 +1110,7 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
             </div>
 
             {/* Signatures Footer */}
-            <div className="pt-8 border-t-2 border-slate-400 flex items-end justify-between text-xs text-slate-700">
+            <div className="pt-5 border-t-2 border-slate-400 flex items-end justify-between text-xs text-slate-700">
               <div className="space-y-1">
                 <p><strong>Tested &amp; Compiled By:</strong> Indrajit Sharma (Testing Lead)</p>
                 <p><strong>Quality Assurance Lab:</strong> Certified Compliance Pass</p>

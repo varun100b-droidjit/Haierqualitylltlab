@@ -7,16 +7,17 @@ import {
   FileText, 
   Calendar, 
   HardDrive,
-  Info,
-  ShieldCheck,
-  Loader2
+  Loader2,
+  Cloud,
+  Database
 } from 'lucide-react';
 import { 
   MasterTemplate, 
   getMasterTemplate, 
   getMasterTemplateAsync,
   saveMasterTemplateAsync, 
-  deleteMasterTemplateAsync 
+  deleteMasterTemplateAsync,
+  subscribeToMasterTemplates 
 } from '../../services/reportTemplateStore';
 import { arrayBufferToBase64 } from '../../utils/docxGenerator';
 
@@ -36,7 +37,7 @@ export const MasterTemplateSection: React.FC<MasterTemplateSectionProps> = ({
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
 
-  // Sync / async load template whenever reportType changes
+  // Subscribe to realtime updates across Firebase & cache
   useEffect(() => {
     let isMounted = true;
     const initialSync = getMasterTemplate(reportType);
@@ -50,8 +51,17 @@ export const MasterTemplateSection: React.FC<MasterTemplateSectionProps> = ({
       }
     });
 
+    const unsubscribe = subscribeToMasterTemplates((templates) => {
+      if (isMounted && templates[reportType]) {
+        const cur = templates[reportType];
+        setTemplate(cur);
+        onTemplateChange(cur);
+      }
+    });
+
     return () => {
       isMounted = false;
+      unsubscribe();
     };
   }, [reportType]);
 
@@ -87,7 +97,8 @@ export const MasterTemplateSection: React.FC<MasterTemplateSectionProps> = ({
           fileName: file.name,
           fileSize: file.size,
           uploadedAt: formattedDate,
-          base64Data: base64
+          base64Data: base64,
+          isFirebaseSynced: true
         };
 
         await saveMasterTemplateAsync(newTemplate);
@@ -130,11 +141,15 @@ export const MasterTemplateSection: React.FC<MasterTemplateSectionProps> = ({
             <FileText className="w-4 h-4" />
           </div>
           <div>
-            <h2 className="text-xs sm:text-sm font-extrabold text-white tracking-wide">
-              Master Report Template (.docx)
+            <h2 className="text-xs sm:text-sm font-extrabold text-white tracking-wide flex items-center gap-2">
+              <span>Master Report Template (.docx)</span>
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-950/70 border border-amber-600/40 text-amber-300">
+                <Database className="w-3 h-3 text-amber-400" />
+                Firebase Synced
+              </span>
             </h2>
             <p className="text-[11px] text-slate-400 leading-tight">
-              Official template for {reportTypeName}
+              Official template for {reportTypeName} (stored in Firebase Firestore)
             </p>
           </div>
         </div>
@@ -160,9 +175,9 @@ export const MasterTemplateSection: React.FC<MasterTemplateSectionProps> = ({
             </div>
 
             <div>
-              <h3 className="text-xs font-bold text-slate-200">No Template File Uploaded</h3>
+              <h3 className="text-xs font-bold text-slate-200">No Custom Template Uploaded</h3>
               <p className="text-[11px] text-slate-400 mt-0.5">
-                Supports Word files with placeholders like <code className="text-cyan-300 bg-slate-800 px-1 py-0.2 rounded font-mono text-[10px]">{"{{Model_Name}}"}</code>
+                Upload to save to Firebase Firestore with placeholders like <code className="text-cyan-300 bg-slate-800 px-1 py-0.2 rounded font-mono text-[10px]">{"{{Model_Name}}"}</code>
               </p>
             </div>
           </div>
@@ -190,6 +205,10 @@ export const MasterTemplateSection: React.FC<MasterTemplateSectionProps> = ({
               <div className="flex items-center gap-2">
                 <span className="text-[10px] font-black text-emerald-400 uppercase tracking-wider">
                   Template Active
+                </span>
+                <span className="inline-flex items-center gap-1 text-[9px] font-bold text-cyan-300 bg-cyan-950/80 border border-cyan-800/60 px-1.5 py-0.2 rounded">
+                  <Cloud className="w-2.5 h-2.5 text-cyan-400" />
+                  Firebase Cloud Saved
                 </span>
               </div>
               <p className="text-xs font-bold text-white font-mono truncate">
@@ -229,12 +248,12 @@ export const MasterTemplateSection: React.FC<MasterTemplateSectionProps> = ({
               </div>
               <div>
                 <h3 className="text-lg font-black text-white">Delete Master Template?</h3>
-                <p className="text-xs text-slate-400">Action cannot be undone</p>
+                <p className="text-xs text-slate-400">Action will remove file from Firebase Cloud & local storage</p>
               </div>
             </div>
 
             <p className="text-sm text-slate-300 leading-relaxed">
-              «Are you sure you want to delete the Master Report Template?»
+              «Are you sure you want to delete the Master Report Template from Firebase?»
             </p>
 
             <div className="flex items-center justify-end gap-3 pt-2">

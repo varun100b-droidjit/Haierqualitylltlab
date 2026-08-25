@@ -32,6 +32,28 @@
         "timeColumn": { "type": "string" }
       },
       "required": ["id", "fileName", "rowCount", "columnCount"]
+    },
+    "master_templates": {
+      "title": "Master Report Templates",
+      "description": "Stores uploaded official DOCX Master Report templates synchronized across devices via Firebase",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "reportType": { "type": "string" },
+        "fileName": { "type": "string" },
+        "fileSize": { "type": "number" },
+        "uploadedAt": { "type": "string" },
+        "base64Data": { "type": "string" },
+        "chunks": { "type": "array" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "reportType", "fileName", "fileSize"]
+    }
+  },
+  "firestore": {
+    "/master_templates/{reportType}": {
+      "schema": "master_templates",
+      "description": "DOCX Master Template files indexed by reportType (proto, reliability, etc)"
     }
   }
 }

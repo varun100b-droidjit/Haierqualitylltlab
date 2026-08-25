@@ -4,6 +4,7 @@ import {
   collection, 
   doc, 
   setDoc, 
+  getDoc,
   getDocs, 
   onSnapshot, 
   updateDoc, 
@@ -46,5 +47,5 @@ if (isFirebaseConfigured) {
   }
 }
 
-export { app, db, auth, collection, doc, setDoc, getDocs, onSnapshot, updateDoc, deleteDoc, query, orderBy, writeBatch };
+export { app, db, auth, collection, doc, setDoc, getDoc, getDocs, onSnapshot, updateDoc, deleteDoc, query, orderBy, writeBatch };
 
