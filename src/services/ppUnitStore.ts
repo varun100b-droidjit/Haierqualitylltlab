@@ -6,7 +6,7 @@ import {
   fetchPpUnitsFromSupabase 
 } from '../lib/supabase';
 import { db, collection, doc, setDoc, deleteDoc, getDocs } from './firebase';
-import { idbSaveAll, idbGetAll, safeLocalStorageSet } from '../lib/indexedDbStorage';
+import { requireOnlineForSave } from './networkManager';
 
 const STORAGE_KEY_PP_UNITS = 'llt_pp_units_v1';
 
@@ -75,7 +75,7 @@ async function initDataSync() {
     if (firestoreData && firestoreData.length > 0) {
       const clean = firestoreData.filter(u => u && !u.id.startsWith('pp-idu-') && !u.id.startsWith('pp-odu-'));
       ppUnitsCache = clean;
-      localStorage.setItem(STORAGE_KEY_PP_UNITS, JSON.stringify(clean));
+      try { localStorage.setItem(STORAGE_KEY_PP_UNITS, JSON.stringify(clean)); } catch {}
       notifyListeners();
       return;
     }
@@ -85,7 +85,7 @@ async function initDataSync() {
     if (remoteData && remoteData.length > 0) {
       const clean = remoteData.filter(u => u && !u.id.startsWith('pp-idu-') && !u.id.startsWith('pp-odu-'));
       ppUnitsCache = clean;
-      localStorage.setItem(STORAGE_KEY_PP_UNITS, JSON.stringify(clean));
+      try { localStorage.setItem(STORAGE_KEY_PP_UNITS, JSON.stringify(clean)); } catch {}
       notifyListeners();
       clean.forEach(u => syncPpUnitToFirestore(u));
     }
@@ -108,8 +108,7 @@ export function subscribePpUnitStore(callback: () => void) {
 function saveLocalPpUnits(data: PpUnit[]) {
   const clean = (data || []).filter(u => u && !u.id.startsWith('pp-idu-') && !u.id.startsWith('pp-odu-'));
   ppUnitsCache = clean;
-  safeLocalStorageSet(STORAGE_KEY_PP_UNITS, clean);
-  idbSaveAll('pp_units', clean);
+  try { localStorage.setItem(STORAGE_KEY_PP_UNITS, JSON.stringify(clean)); } catch {}
   notifyListeners();
 }
 
@@ -127,20 +126,6 @@ function loadLocalPpUnits(): PpUnit[] {
     return [];
   }
 }
-
-// Background sync from IndexedDB
-idbGetAll<PpUnit>('pp_units').then((idbUnits) => {
-  const currentRaw = localStorage.getItem(STORAGE_KEY_PP_UNITS);
-  if (currentRaw === '[]') return; // Purged state, do not restore
-  if (idbUnits && idbUnits.length > 0) {
-    const cleanIdb = idbUnits.filter(u => u && !u.id.startsWith('pp-idu-') && !u.id.startsWith('pp-odu-'));
-    const mergedMap = new Map<string, PpUnit>();
-    ppUnitsCache.forEach(u => { if (u && !u.id.startsWith('pp-idu-') && !u.id.startsWith('pp-odu-')) mergedMap.set(u.id, u); });
-    cleanIdb.forEach(u => { if (u && !u.id.startsWith('pp-idu-') && !u.id.startsWith('pp-odu-')) mergedMap.set(u.id, u); });
-    ppUnitsCache = Array.from(mergedMap.values());
-    notifyListeners();
-  }
-}).catch(() => {});
 
 export function getPpUnits(): PpUnit[] {
   return [...ppUnitsCache];
@@ -188,7 +173,10 @@ function sanitizeStringFields<T>(obj: T, parentKey = ''): T {
   return obj;
 }
 
-export function addPpUnit(unit: Omit<PpUnit, 'id' | 'createdAt' | 'updatedAt'> & { status?: 'live' | 'stopped' | 'finished' }): PpUnit {
+export function addPpUnit(unit: Omit<PpUnit, 'id' | 'createdAt' | 'updatedAt'> & { status?: 'live' | 'stopped' | 'finished' }): PpUnit | null {
+  if (!requireOnlineForSave(`Add PP Unit: ${unit.modelName || 'New Unit'}`)) {
+    return null;
+  }
   const formattedDate = getFormattedNow();
   const sanitizedUnit = sanitizeStringFields(unit);
 
@@ -219,6 +207,9 @@ export function addPpUnit(unit: Omit<PpUnit, 'id' | 'createdAt' | 'updatedAt'> &
 }
 
 export function updatePpUnit(id: string, updates: Partial<PpUnit>): PpUnit | null {
+  if (!requireOnlineForSave(`Update PP Unit (${id})`)) {
+    return null;
+  }
   const formattedDate = getFormattedNow();
   let targetUnit: PpUnit | null = null;
   const updated = ppUnitsCache.map(u => {
@@ -242,6 +233,9 @@ export function updatePpUnit(id: string, updates: Partial<PpUnit>): PpUnit | nul
 }
 
 export function togglePpUnitStatus(id: string, newStatus: 'live' | 'finished' | 'stopped'): PpUnit | null {
+  if (!requireOnlineForSave(`Change PP Unit status to ${newStatus}`)) {
+    return null;
+  }
   const formattedDate = getFormattedNow();
   let targetUnit: PpUnit | null = null;
   const updated = ppUnitsCache.map(u => {
@@ -265,6 +259,9 @@ export function togglePpUnitStatus(id: string, newStatus: 'live' | 'finished' | 
 }
 
 export function updatePpUnitStatus(id: string, status: 'live' | 'finished' | 'stopped'): void {
+  if (!requireOnlineForSave(`Update PP Unit status to ${status}`)) {
+    return;
+  }
   const formattedDate = getFormattedNow();
 
   let targetUnit: PpUnit | null = null;
@@ -293,6 +290,9 @@ export function passPpUnitWithDetails(
   endDate?: string, 
   calculatedHours?: number
 ): void {
+  if (!requireOnlineForSave(`Pass PP Unit (${id})`)) {
+    return;
+  }
   const formattedNow = getFormattedNow();
 
   let targetUnit: PpUnit | null = null;
@@ -330,6 +330,9 @@ export function passPpUnitWithDetails(
 }
 
 export function deletePpUnit(id: string): void {
+  if (!requireOnlineForSave(`Delete PP Unit (${id})`)) {
+    return;
+  }
   const updated = ppUnitsCache.filter(u => u.id !== id);
   saveLocalPpUnits(updated);
 

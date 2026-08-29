@@ -5,6 +5,8 @@ import {
   deleteReportRoomFromSupabase, 
   fetchReportRoomFromSupabase 
 } from '../lib/supabase';
+import { db, collection, doc, setDoc, deleteDoc, getDocs } from './firebase';
+import { requireOnlineForSave } from './networkManager';
 
 export type ReportTagType = 'C Simulation' | 'C Experience';
 export type ReportCategoryKey = 'cs-simulation' | 'cs-experience';
@@ -62,11 +64,65 @@ const INITIAL_SAVED_REPORTS: SavedReport[] = [];
 let savedReportsCache: SavedReport[] = loadLocalReports();
 let listeners: ((reports: SavedReport[]) => void)[] = [];
 
-// Initialize IndexedDB async sync
-initIndexedDbReports();
+/* ==========================================
+   FIREBASE FIRESTORE SYNC HELPERS FOR REPORTS
+   ========================================== */
 
-async function initIndexedDbReports() {
+export async function syncReportRoomToFirestore(report: SavedReport) {
+  if (!db || !report || report.id === 'rep-cs-101' || report.id === 'rep-ce-102') return;
   try {
+    const docRef = doc(db, 'report_room', report.id);
+    await setDoc(docRef, { ...report }, { merge: true });
+    console.log('Successfully synced Report to Firebase Firestore:', report.id);
+  } catch (e) {
+    console.warn('Firestore Report sync note:', e);
+  }
+}
+
+export async function deleteReportRoomFromFirestore(id: string) {
+  if (!db) return;
+  try {
+    const docRef = doc(db, 'report_room', id);
+    await deleteDoc(docRef);
+  } catch (e) {
+    console.warn('Firestore Report delete note:', e);
+  }
+}
+
+export async function fetchReportRoomFromFirestore(): Promise<SavedReport[] | null> {
+  if (!db) return null;
+  try {
+    const colRef = collection(db, 'report_room');
+    const snap = await getDocs(colRef);
+    if (snap.empty) return null;
+    const list: SavedReport[] = [];
+    snap.forEach(d => {
+      const data = d.data() as SavedReport;
+      if (data && data.id !== 'rep-cs-101' && data.id !== 'rep-ce-102') {
+        list.push(data);
+      }
+    });
+    return list;
+  } catch (e) {
+    console.warn('Firestore Report fetch note:', e);
+    return null;
+  }
+}
+
+// Initialize Cloud and IndexedDB async sync
+initCloudAndLocalReports();
+
+async function initCloudAndLocalReports() {
+  try {
+    const firestoreReports = await fetchReportRoomFromFirestore();
+    if (firestoreReports && firestoreReports.length > 0) {
+      const cleanFs = firestoreReports.filter(r => r && r.id !== 'rep-cs-101' && r.id !== 'rep-ce-102');
+      savedReportsCache = cleanFs;
+      persistReports(cleanFs);
+      notifyListeners(cleanFs);
+      return;
+    }
+
     const remoteReports = await fetchReportRoomFromSupabase();
     if (remoteReports && remoteReports.length > 0) {
       const cleanRemote = remoteReports.filter(r => r && r.id !== 'rep-cs-101' && r.id !== 'rep-ce-102');
@@ -76,20 +132,10 @@ async function initIndexedDbReports() {
       savedReportsCache = Array.from(mergedMap.values());
       persistReports(savedReportsCache);
       notifyListeners(savedReportsCache);
-    }
-
-    const idbReports = await idbGetAll<SavedReport>('saved_reports');
-    if (idbReports && idbReports.length > 0) {
-      const cleanIdb = idbReports.filter(r => r && r.id !== 'rep-cs-101' && r.id !== 'rep-ce-102');
-      // Merge with in-memory / local storage cache (prefer IDB since it holds full high-res photos)
-      const mergedMap = new Map<string, SavedReport>();
-      savedReportsCache.forEach(r => { if (r && r.id !== 'rep-cs-101' && r.id !== 'rep-ce-102') mergedMap.set(r.id, r); });
-      cleanIdb.forEach(r => { if (r && r.id !== 'rep-cs-101' && r.id !== 'rep-ce-102') mergedMap.set(r.id, r); });
-      savedReportsCache = Array.from(mergedMap.values());
-      notifyListeners(savedReportsCache);
+      cleanRemote.forEach((r: SavedReport) => syncReportRoomToFirestore(r));
     }
   } catch (err) {
-    console.warn('[ReportRoom] Failed to load from IndexedDB:', err);
+    console.warn('[ReportRoom] Failed to load from remote:', err);
   }
 }
 
@@ -140,7 +186,10 @@ export function setSavedReportsDirectly(reports: SavedReport[]): void {
   notifyListeners(reports);
 }
 
-export function saveReportToRoom(reportData: Omit<SavedReport, 'id' | 'createdAt'> & { id?: string }): SavedReport {
+export function saveReportToRoom(reportData: Omit<SavedReport, 'id' | 'createdAt'> & { id?: string }): SavedReport | null {
+  if (!requireOnlineForSave(`Save Report (${reportData.reportNo || reportData.modelName})`)) {
+    return null;
+  }
   const current = getSavedReports();
   const now = new Date();
   const pad = (n: number) => n.toString().padStart(2, '0');
@@ -166,8 +215,9 @@ export function saveReportToRoom(reportData: Omit<SavedReport, 'id' | 'createdAt
   const updated = [newReport, ...current.filter(r => r.id !== id)];
   persistReports(updated);
 
-  // Sync to Supabase
+  // Sync to Supabase & Firestore
   syncReportRoomToSupabase(newReport);
+  syncReportRoomToFirestore(newReport);
 
   // Trigger lab notification
   addNotification(
@@ -181,12 +231,16 @@ export function saveReportToRoom(reportData: Omit<SavedReport, 'id' | 'createdAt
 }
 
 export function deleteSavedReport(id: string): boolean {
+  if (!requireOnlineForSave(`Delete Report (${id})`)) {
+    return false;
+  }
   const current = getSavedReports();
   const deletedItem = current.find(r => r.id === id);
   const updated = current.filter(r => r.id !== id);
   
   persistReports(updated);
   deleteReportRoomFromSupabase(id);
+  deleteReportRoomFromFirestore(id);
 
   if (deletedItem) {
     addNotification(
@@ -200,6 +254,9 @@ export function deleteSavedReport(id: string): boolean {
 }
 
 export function updateSavedReport(id: string, updates: Partial<SavedReport>): SavedReport | null {
+  if (!requireOnlineForSave(`Update Report (${id})`)) {
+    return null;
+  }
   const current = getSavedReports();
   const idx = current.findIndex(r => r.id === id);
   if (idx === -1) return null;
@@ -211,6 +268,7 @@ export function updateSavedReport(id: string, updates: Partial<SavedReport>): Sa
 
   persistReports(current);
   syncReportRoomToSupabase(current[idx]);
+  syncReportRoomToFirestore(current[idx]);
   notifyListeners(current);
   return current[idx];
 }

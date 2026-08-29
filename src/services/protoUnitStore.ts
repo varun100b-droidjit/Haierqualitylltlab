@@ -5,7 +5,9 @@ import {
   deleteProtoUnitFromSupabase, 
   fetchProtoUnitsFromSupabase 
 } from '../lib/supabase';
-import { idbSaveAll, idbGetAll, safeLocalStorageSet } from '../lib/indexedDbStorage';
+import { db, collection, doc, setDoc, deleteDoc, getDocs } from './firebase';
+import { requireOnlineForSave } from './networkManager';
+import { buildNormalizedPhotos } from '../utils/photoManager';
 
 const STORAGE_KEY_PROTO_UNITS = 'llt_proto_units_v1';
 
@@ -19,20 +21,77 @@ const INITIAL_PROTO_UNITS: ProtoUnit[] = [];
 let protoUnitsCache: ProtoUnit[] = loadLocalProtoUnits();
 const listeners: Set<() => void> = new Set();
 
-// Automatically fetch from Supabase on init
-initSupabaseSync();
+/* ==========================================
+   FIREBASE FIRESTORE SYNC HELPERS
+   ========================================== */
 
-async function initSupabaseSync() {
+export async function syncProtoUnitToFirestore(unit: ProtoUnit) {
+  if (!db || !unit || unit.id.startsWith('proto-101') || unit.id.startsWith('proto-102')) return;
   try {
+    const docRef = doc(db, 'proto_units', unit.id);
+    await setDoc(docRef, { ...unit }, { merge: true });
+    console.log('Successfully synced Proto Unit to Firebase Firestore:', unit.id);
+  } catch (e) {
+    console.warn('Firestore Proto Unit sync note:', e);
+  }
+}
+
+export async function deleteProtoUnitFromFirestore(id: string) {
+  if (!db) return;
+  try {
+    const docRef = doc(db, 'proto_units', id);
+    await deleteDoc(docRef);
+  } catch (e) {
+    console.warn('Firestore Proto Unit delete note:', e);
+  }
+}
+
+export async function fetchProtoUnitsFromFirestore(): Promise<ProtoUnit[] | null> {
+  if (!db) return null;
+  try {
+    const colRef = collection(db, 'proto_units');
+    const snap = await getDocs(colRef);
+    if (snap.empty) return null;
+    const list: ProtoUnit[] = [];
+    snap.forEach(d => {
+      const data = d.data() as ProtoUnit;
+      if (data && data.id !== 'proto-101' && data.id !== 'proto-102') {
+        list.push(data);
+      }
+    });
+    return list;
+  } catch (e) {
+    console.warn('Firestore Proto Unit fetch note:', e);
+    return null;
+  }
+}
+
+// Automatically fetch from Firestore / Supabase on init
+initDataSync();
+
+async function initDataSync() {
+  try {
+    // Try fetching from Firestore first
+    const firestoreData = await fetchProtoUnitsFromFirestore();
+    if (firestoreData && firestoreData.length > 0) {
+      const clean = firestoreData.filter(u => u && u.id !== 'proto-101' && u.id !== 'proto-102');
+      protoUnitsCache = clean;
+      try { localStorage.setItem(STORAGE_KEY_PROTO_UNITS, JSON.stringify(clean)); } catch {}
+      notifyListeners();
+      return;
+    }
+
+    // Fallback to Supabase
     const remoteData = await fetchProtoUnitsFromSupabase();
     if (remoteData && remoteData.length > 0) {
       const cleanRemote = remoteData.filter(u => u && u.id !== 'proto-101' && u.id !== 'proto-102');
       protoUnitsCache = cleanRemote;
-      localStorage.setItem(STORAGE_KEY_PROTO_UNITS, JSON.stringify(cleanRemote));
+      try { localStorage.setItem(STORAGE_KEY_PROTO_UNITS, JSON.stringify(cleanRemote)); } catch {}
       notifyListeners();
+      cleanRemote.forEach(u => syncProtoUnitToFirestore(u));
     }
   } catch (e) {
-    console.warn('Supabase Proto Unit sync note:', e);
+    console.warn('Proto Units cloud sync note:', e);
   }
 }
 
@@ -50,8 +109,7 @@ export function subscribeProtoUnitStore(callback: () => void) {
 function saveLocalProtoUnits(data: ProtoUnit[]) {
   const clean = (data || []).filter(u => u && u.id !== 'proto-101' && u.id !== 'proto-102');
   protoUnitsCache = clean;
-  safeLocalStorageSet(STORAGE_KEY_PROTO_UNITS, clean);
-  idbSaveAll('proto_units', clean);
+  try { localStorage.setItem(STORAGE_KEY_PROTO_UNITS, JSON.stringify(clean)); } catch {}
   notifyListeners();
 }
 
@@ -70,20 +128,6 @@ function loadLocalProtoUnits(): ProtoUnit[] {
   }
 }
 
-// Background sync from IndexedDB
-idbGetAll<ProtoUnit>('proto_units').then((idbUnits) => {
-  const currentRaw = localStorage.getItem(STORAGE_KEY_PROTO_UNITS);
-  if (currentRaw === '[]') return; // Purged state, do not restore
-  if (idbUnits && idbUnits.length > 0) {
-    const cleanIdb = idbUnits.filter(u => u && u.id !== 'proto-101' && u.id !== 'proto-102');
-    const mergedMap = new Map<string, ProtoUnit>();
-    protoUnitsCache.forEach(u => { if (u && u.id !== 'proto-101' && u.id !== 'proto-102') mergedMap.set(u.id, u); });
-    cleanIdb.forEach(u => { if (u && u.id !== 'proto-101' && u.id !== 'proto-102') mergedMap.set(u.id, u); });
-    protoUnitsCache = Array.from(mergedMap.values());
-    notifyListeners();
-  }
-}).catch(() => {});
-
 export function getProtoUnits(): ProtoUnit[] {
   return [...protoUnitsCache];
 }
@@ -97,8 +141,6 @@ function getFormattedNow(): string {
   const minutes = String(now.getMinutes()).padStart(2, '0');
   return `${year}-${month}-${day} ${hours}:${minutes}`;
 }
-
-import { buildNormalizedPhotos } from '../utils/photoManager';
 
 function sanitizeStringFields<T>(obj: T, parentKey = ''): T {
   if (parentKey === 'photos' || parentKey === 'photoRecords' || parentKey === 'photoUrl') {
@@ -130,7 +172,10 @@ function sanitizeStringFields<T>(obj: T, parentKey = ''): T {
   return obj;
 }
 
-export function addProtoUnit(unit: Omit<ProtoUnit, 'id' | 'createdAt' | 'updatedAt'> & { status?: 'live' | 'stopped' | 'finished' }): ProtoUnit {
+export function addProtoUnit(unit: Omit<ProtoUnit, 'id' | 'createdAt' | 'updatedAt'> & { status?: 'live' | 'stopped' | 'finished' }): ProtoUnit | null {
+  if (!requireOnlineForSave(`Add Proto Unit: ${unit.modelName || 'New Unit'}`)) {
+    return null;
+  }
   const formattedDate = getFormattedNow();
   const sanitizedUnit = sanitizeStringFields(unit);
 
@@ -148,8 +193,9 @@ export function addProtoUnit(unit: Omit<ProtoUnit, 'id' | 'createdAt' | 'updated
   const updated = [newUnit, ...protoUnitsCache];
   saveLocalProtoUnits(updated);
 
-  // Sync to Supabase
+  // Sync to Supabase & Firebase Firestore
   syncProtoUnitToSupabase(newUnit);
+  syncProtoUnitToFirestore(newUnit);
 
   addLabNotification(
     `Proto Unit Added: ${newUnit.modelName}`,
@@ -160,6 +206,9 @@ export function addProtoUnit(unit: Omit<ProtoUnit, 'id' | 'createdAt' | 'updated
 }
 
 export function updateProtoUnitStatus(id: string, status: 'live' | 'finished' | 'stopped', doneHour?: number): void {
+  if (!requireOnlineForSave(`Update Proto Unit status to ${status}`)) {
+    return;
+  }
   const formattedDate = getFormattedNow();
 
   let targetUnit: ProtoUnit | null = null;
@@ -179,10 +228,14 @@ export function updateProtoUnitStatus(id: string, status: 'live' | 'finished' | 
 
   if (targetUnit) {
     syncProtoUnitToSupabase(targetUnit);
+    syncProtoUnitToFirestore(targetUnit);
   }
 }
 
 export function updateProtoUnit(id: string, updates: Partial<ProtoUnit>): ProtoUnit | null {
+  if (!requireOnlineForSave(`Update Proto Unit (${id})`)) {
+    return null;
+  }
   const formattedDate = getFormattedNow();
   let updatedUnit: ProtoUnit | null = null;
 
@@ -208,20 +261,28 @@ export function updateProtoUnit(id: string, updates: Partial<ProtoUnit>): ProtoU
 
   if (updatedUnit) {
     syncProtoUnitToSupabase(updatedUnit);
+    syncProtoUnitToFirestore(updatedUnit);
   }
 
   return updatedUnit;
 }
 
 export function deleteProtoUnit(id: string): void {
+  if (!requireOnlineForSave(`Delete Proto Unit (${id})`)) {
+    return;
+  }
   const updated = protoUnitsCache.filter(u => u.id !== id);
   saveLocalProtoUnits(updated);
 
-  // Delete from Supabase
+  // Delete from Supabase & Firestore
   deleteProtoUnitFromSupabase(id);
+  deleteProtoUnitFromFirestore(id);
 }
 
 export function addProtoUnitObservation(id: string, text: string): ProtoUnit | null {
+  if (!requireOnlineForSave(`Add Observation to Proto Unit (${id})`)) {
+    return null;
+  }
   const formattedDate = getFormattedNow();
   let updatedUnit: ProtoUnit | null = null;
 
@@ -247,12 +308,16 @@ export function addProtoUnitObservation(id: string, text: string): ProtoUnit | n
 
   if (updatedUnit) {
     syncProtoUnitToSupabase(updatedUnit);
+    syncProtoUnitToFirestore(updatedUnit);
   }
 
   return updatedUnit;
 }
 
 export function deleteProtoUnitObservation(id: string, obsId: string): ProtoUnit | null {
+  if (!requireOnlineForSave(`Delete Observation on Proto Unit (${id})`)) {
+    return null;
+  }
   const formattedDate = getFormattedNow();
   let updatedUnit: ProtoUnit | null = null;
 
@@ -273,6 +338,7 @@ export function deleteProtoUnitObservation(id: string, obsId: string): ProtoUnit
 
   if (updatedUnit) {
     syncProtoUnitToSupabase(updatedUnit);
+    syncProtoUnitToFirestore(updatedUnit);
   }
 
   return updatedUnit;
@@ -289,5 +355,3 @@ export function setProtoUnitsDirectly(units: ProtoUnit[]) {
 export function clearAllProtoUnits() {
   saveLocalProtoUnits([]);
 }
-
-

@@ -28,6 +28,7 @@ import { ReportRoomModule } from './components/ReportRoom/ReportRoomModule';
 import { GraphModule } from './components/Graph/GraphModule';
 import { MobileToastContainer } from './components/Layout/MobileToastContainer';
 import { SupabaseSyncModal } from './components/Supabase/SupabaseSyncModal';
+import { NoInternetModal } from './components/Common/NoInternetModal';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { LoginScreen } from './components/Auth/LoginScreen';
 import { AccessDeniedView } from './components/Auth/AccessDeniedView';
@@ -531,6 +532,9 @@ export function MainApp() {
 
       {/* Floating Mobile Notification Toast Banner */}
       <MobileToastContainer />
+
+      {/* Global No Internet Connection Guard Modal */}
+      <NoInternetModal />
     </div>
   );
 }

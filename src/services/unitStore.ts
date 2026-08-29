@@ -5,6 +5,7 @@ import {
   deleteRDUnitFromSupabase, 
   fetchRDUnitsFromSupabase 
 } from '../lib/supabase';
+import { requireOnlineForSave } from './networkManager';
 
 const STORAGE_KEY_UNITS = 'llt_lab_units_v2';
 const STORAGE_KEY_LOGS = 'llt_lab_activity_logs_v2';
@@ -41,19 +42,86 @@ let notifsCache: LabNotification[] = loadLocalNotifs();
 
 const listeners: Set<() => void> = new Set();
 
-// Automatically fetch from Supabase on init
-initSupabaseSync();
+/* ==========================================
+   FIREBASE FIRESTORE SYNC HELPERS FOR RD UNITS
+   ========================================== */
 
-async function initSupabaseSync() {
+export async function syncRDUnitToFirestore(unit: Unit) {
+  if (!db || !unit || isMockUnitId(unit.id)) return;
   try {
+    const docRef = doc(db, 'rd_units', unit.id);
+    await setDoc(docRef, { ...unit }, { merge: true });
+    // Also update 'units' collection for legacy queries
+    const legacyDocRef = doc(db, 'units', unit.id);
+    await setDoc(legacyDocRef, { ...unit }, { merge: true });
+    console.log('Successfully synced R&D Unit to Firebase Firestore:', unit.id);
+  } catch (e) {
+    console.warn('Firestore R&D Unit sync note:', e);
+  }
+}
+
+export async function deleteRDUnitFromFirestore(id: string) {
+  if (!db) return;
+  try {
+    await deleteDoc(doc(db, 'rd_units', id));
+    await deleteDoc(doc(db, 'units', id));
+  } catch (e) {
+    console.warn('Firestore R&D Unit delete note:', e);
+  }
+}
+
+export async function fetchRDUnitsFromFirestore(): Promise<Unit[] | null> {
+  if (!db) return null;
+  try {
+    const colRef = collection(db, 'rd_units');
+    const snap = await getDocs(colRef);
+    if (snap.empty) {
+      // Try legacy collection
+      const legacySnap = await getDocs(collection(db, 'units'));
+      if (legacySnap.empty) return null;
+      const list: Unit[] = [];
+      legacySnap.forEach(d => {
+        const data = d.data() as Unit;
+        if (data && !isMockUnitId(data.id)) list.push(data);
+      });
+      return list.length > 0 ? list : null;
+    }
+    const list: Unit[] = [];
+    snap.forEach(d => {
+      const data = d.data() as Unit;
+      if (data && !isMockUnitId(data.id)) list.push(data);
+    });
+    return list;
+  } catch (e) {
+    console.warn('Firestore R&D Unit fetch note:', e);
+    return null;
+  }
+}
+
+// Automatically fetch from Firestore / Supabase on init
+initDataSync();
+
+async function initDataSync() {
+  try {
+    // Try fetching from Firestore first
+    const firestoreData = await fetchRDUnitsFromFirestore();
+    if (firestoreData && firestoreData.length > 0) {
+      unitsCache = normalizeUnitTimelines(firestoreData);
+      try { localStorage.setItem(STORAGE_KEY_UNITS, JSON.stringify(unitsCache)); } catch {}
+      notifyListeners();
+      return;
+    }
+
+    // Fallback to Supabase
     const remoteData = await fetchRDUnitsFromSupabase();
     if (remoteData && remoteData.length > 0) {
       unitsCache = normalizeUnitTimelines(remoteData);
-      localStorage.setItem(STORAGE_KEY_UNITS, JSON.stringify(unitsCache));
+      try { localStorage.setItem(STORAGE_KEY_UNITS, JSON.stringify(unitsCache)); } catch {}
       notifyListeners();
+      remoteData.forEach(u => syncRDUnitToFirestore(u));
     }
   } catch (e) {
-    console.warn('RD Units Supabase sync note:', e);
+    console.warn('RD Units Cloud sync note:', e);
   }
 }
 
@@ -384,20 +452,10 @@ export async function addMultipleUnits(
   };
   saveLocalNotifs([newNotif, ...notifsCache]);
 
-  // Sync to Supabase
+  // Sync to Supabase & Firestore
   for (const u of newUnits) {
     syncRDUnitToSupabase(u);
-  }
-
-  // Sync to Firestore if configured
-  if (isFirebaseConfigured && db) {
-    try {
-      for (const u of newUnits) {
-        await setDoc(doc(db, 'units', u.id), u);
-      }
-    } catch (err) {
-      console.error("Firestore sync error:", err);
-    }
+    syncRDUnitToFirestore(u);
   }
 
   return newUnits;
@@ -410,6 +468,9 @@ export async function advanceUnitStage(
   nextStageIdx?: number,
   overrideStatus?: Unit['status']
 ) {
+  if (!requireOnlineForSave(`Advance Stage for Unit (${unitId})`)) {
+    return;
+  }
   const now = new Date();
   const dateStr = now.toISOString().split('T')[0];
   const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -500,21 +561,16 @@ export async function advanceUnitStage(
     };
     saveLocalLogs([newLog, ...logsCache]);
 
-    // Sync to Supabase
+    // Sync to Supabase & Firestore
     syncRDUnitToSupabase(targetUnit);
-  }
-
-  // Firestore sync
-  if (isFirebaseConfigured && db && targetUnit) {
-    try {
-      await setDoc(doc(db, 'units', targetUnit.id), targetUnit);
-    } catch (e) {
-      console.error(e);
-    }
+    syncRDUnitToFirestore(targetUnit);
   }
 }
 
 export async function reworkUnit(unitId: string, performerName: string, remarks: string) {
+  if (!requireOnlineForSave(`Flag Unit (${unitId}) for Rework`)) {
+    return;
+  }
   const now = new Date();
   const dateStr = now.toISOString().split('T')[0];
   const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -559,12 +615,16 @@ export async function reworkUnit(unitId: string, performerName: string, remarks:
     };
     saveLocalLogs([newLog, ...logsCache]);
 
-    // Sync to Supabase
+    // Sync to Supabase & Firestore
     syncRDUnitToSupabase(targetUnit);
+    syncRDUnitToFirestore(targetUnit);
   }
 }
 
 export async function updateUnitDetails(unitId: string, partial: Partial<Unit>) {
+  if (!requireOnlineForSave(`Update Unit (${unitId})`)) {
+    return;
+  }
   let updatedTarget: Unit | null = null;
   const updatedUnits = unitsCache.map(u => {
     if (u.id !== unitId) return u;
@@ -579,10 +639,14 @@ export async function updateUnitDetails(unitId: string, partial: Partial<Unit>) 
 
   if (updatedTarget) {
     syncRDUnitToSupabase(updatedTarget);
+    syncRDUnitToFirestore(updatedTarget);
   }
 }
 
 export async function deleteUnit(unitId: string) {
+  if (!requireOnlineForSave(`Delete Unit (${unitId})`)) {
+    return;
+  }
   const target = unitsCache.find(u => u.id === unitId);
   const updatedUnits = unitsCache.filter(u => u.id !== unitId);
   saveLocalUnits(updatedUnits);
@@ -601,16 +665,9 @@ export async function deleteUnit(unitId: string) {
     saveLocalLogs([newLog, ...logsCache]);
   }
 
-  // Delete from Supabase
+  // Delete from Supabase & Firestore
   deleteRDUnitFromSupabase(unitId);
-
-  if (isFirebaseConfigured && db) {
-    try {
-      await deleteDoc(doc(db, 'units', unitId));
-    } catch (e) {
-      console.error(e);
-    }
-  }
+  deleteRDUnitFromFirestore(unitId);
 }
 
 export function markNotificationAsRead(id: string) {
