@@ -21,7 +21,9 @@ import { UserProfile } from '../../types';
 import { 
   syncLeakUnitToSupabase, 
   deleteLeakUnitFromSupabase, 
-  fetchLeakUnitsFromSupabase 
+  fetchLeakUnitsFromSupabase,
+  broadcastLabRealtimeEvent,
+  subscribeToLabRealtimeEvents 
 } from '../../lib/supabase';
 
 export interface LeakUnitRecord {
@@ -44,6 +46,11 @@ export interface LeakUnitRecord {
 export type SmogUnit = LeakUnitRecord;
 
 const STORAGE_KEY_SMOG_UNITS = 'llt_smog_leak_units_v3';
+
+// Local Inter-Tab Broadcast Channel
+const localSmogBus = typeof window !== 'undefined' && 'BroadcastChannel' in window 
+  ? new BroadcastChannel('llt_smog_bus') 
+  : null;
 
 export function getSmogUnits(): LeakUnitRecord[] {
   try {
@@ -116,7 +123,15 @@ export function getSmogUnits(): LeakUnitRecord[] {
 }
 
 export function saveSmogUnits(units: LeakUnitRecord[]) {
-  localStorage.setItem(STORAGE_KEY_SMOG_UNITS, JSON.stringify(units));
+  try {
+    localStorage.setItem(STORAGE_KEY_SMOG_UNITS, JSON.stringify(units));
+  } catch (e) {
+    console.warn(e);
+  }
+  if (localSmogBus) {
+    try { localSmogBus.postMessage({ timestamp: Date.now() }); } catch {}
+  }
+  broadcastLabRealtimeEvent('smog_units_change', { timestamp: Date.now() });
 }
 
 interface SmogModuleProps {
@@ -153,14 +168,14 @@ export const SmogModule: React.FC<SmogModuleProps> = ({
     }
   }, [currentUser]);
 
-  // Initial load and Supabase sync
+  // Initial load, Supabase sync, and Real-time listener
   useEffect(() => {
     const loadFromSupabase = async () => {
       setSupabaseStatus('syncing');
       const remoteData = await fetchLeakUnitsFromSupabase();
       if (remoteData && remoteData.length > 0) {
         setLeakRecords(remoteData);
-        saveSmogUnits(remoteData);
+        try { localStorage.setItem(STORAGE_KEY_SMOG_UNITS, JSON.stringify(remoteData)); } catch {}
         setSupabaseStatus('connected');
       } else {
         // Sync local records to Supabase
@@ -174,6 +189,30 @@ export const SmogModule: React.FC<SmogModuleProps> = ({
     };
 
     loadFromSupabase();
+
+    // Listen to inter-tab changes
+    if (localSmogBus) {
+      localSmogBus.onmessage = () => {
+        setLeakRecords(getSmogUnits());
+      };
+    }
+
+    // Subscribe to cross-device realtime broadcast
+    const unsubscribe = subscribeToLabRealtimeEvents((event) => {
+      if (event === 'smog_units_change') {
+        loadFromSupabase();
+      }
+    });
+
+    // Periodic sync (every 8s)
+    const interval = setInterval(() => {
+      loadFromSupabase();
+    }, 8000);
+
+    return () => {
+      unsubscribe();
+      clearInterval(interval);
+    };
   }, []);
 
   // Handlers for dynamic Serial Number textboxes (+)

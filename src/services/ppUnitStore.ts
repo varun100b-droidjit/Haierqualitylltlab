@@ -3,9 +3,11 @@ import { addLabNotification } from './unitStore';
 import { 
   syncPpUnitToSupabase, 
   deletePpUnitFromSupabase, 
-  fetchPpUnitsFromSupabase 
+  fetchPpUnitsFromSupabase,
+  broadcastLabRealtimeEvent,
+  subscribeToLabRealtimeEvents 
 } from '../lib/supabase';
-import { db, collection, doc, setDoc, deleteDoc, getDocs } from './firebase';
+import { db, collection, doc, setDoc, deleteDoc, getDocs, onSnapshot } from './firebase';
 import { requireOnlineForSave } from './networkManager';
 
 const STORAGE_KEY_PP_UNITS = 'llt_pp_units_v1';
@@ -20,8 +22,44 @@ const INITIAL_PP_UNITS: PpUnit[] = [];
 let ppUnitsCache: PpUnit[] = loadLocalPpUnits();
 const listeners: Set<() => void> = new Set();
 
+// Local Inter-Tab Broadcast Channel
+const localPpBus = typeof window !== 'undefined' && 'BroadcastChannel' in window 
+  ? new BroadcastChannel('llt_pp_bus') 
+  : null;
+
+if (localPpBus) {
+  localPpBus.onmessage = () => {
+    ppUnitsCache = loadLocalPpUnits();
+    notifyListeners();
+  };
+}
+
+// Storage event listener
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (e) => {
+    if (e.key === STORAGE_KEY_PP_UNITS) {
+      ppUnitsCache = loadLocalPpUnits();
+      notifyListeners();
+    }
+  });
+}
+
+// Global Supabase Realtime event listener
+subscribeToLabRealtimeEvents((event) => {
+  if (event === 'pp_units_change') {
+    initDataSync();
+  }
+});
+
+// Periodic background sync check
+if (typeof window !== 'undefined') {
+  setInterval(() => {
+    initDataSync();
+  }, 6000);
+}
+
 /* ==========================================
-   FIREBASE FIRESTORE SYNC HELPERS
+   FIREBASE FIRESTORE SYNC HELPERS & REAL-TIME LISTENER
    ========================================== */
 
 export async function syncPpUnitToFirestore(unit: PpUnit) {
@@ -62,6 +100,35 @@ export async function fetchPpUnitsFromFirestore(): Promise<PpUnit[] | null> {
   } catch (e) {
     console.warn('Firestore PP Unit fetch note:', e);
     return null;
+  }
+}
+
+// Attach Real-Time Firestore Listener for Live Multi-Device Sync
+if (db) {
+  try {
+    const colRef = collection(db, 'pp_units');
+    onSnapshot(colRef, (snap: any) => {
+      if (snap) {
+        const list: PpUnit[] = [];
+        snap.forEach((d: any) => {
+          const data = d.data() as PpUnit;
+          if (data && !data.id.startsWith('pp-idu-') && !data.id.startsWith('pp-odu-')) {
+            list.push(data);
+          }
+        });
+        if (list.length > 0) {
+          // Sort by creation date descending
+          list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+          ppUnitsCache = list;
+          try { localStorage.setItem(STORAGE_KEY_PP_UNITS, JSON.stringify(list)); } catch {}
+          notifyListeners();
+        }
+      }
+    }, (err: any) => {
+      console.warn('[PPUnitStore] Real-time listener error:', err);
+    });
+  } catch (e) {
+    console.warn('[PPUnitStore] Could not set up real-time listener:', e);
   }
 }
 
@@ -109,6 +176,10 @@ function saveLocalPpUnits(data: PpUnit[]) {
   const clean = (data || []).filter(u => u && !u.id.startsWith('pp-idu-') && !u.id.startsWith('pp-odu-'));
   ppUnitsCache = clean;
   try { localStorage.setItem(STORAGE_KEY_PP_UNITS, JSON.stringify(clean)); } catch {}
+  if (localPpBus) {
+    try { localPpBus.postMessage({ timestamp: Date.now() }); } catch {}
+  }
+  broadcastLabRealtimeEvent('pp_units_change', { timestamp: Date.now() });
   notifyListeners();
 }
 

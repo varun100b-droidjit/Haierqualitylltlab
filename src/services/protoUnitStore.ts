@@ -3,9 +3,11 @@ import { addLabNotification } from './unitStore';
 import { 
   syncProtoUnitToSupabase, 
   deleteProtoUnitFromSupabase, 
-  fetchProtoUnitsFromSupabase 
+  fetchProtoUnitsFromSupabase,
+  broadcastLabRealtimeEvent,
+  subscribeToLabRealtimeEvents
 } from '../lib/supabase';
-import { db, collection, doc, setDoc, deleteDoc, getDocs } from './firebase';
+import { db, collection, doc, setDoc, deleteDoc, getDocs, onSnapshot } from './firebase';
 import { requireOnlineForSave } from './networkManager';
 import { buildNormalizedPhotos } from '../utils/photoManager';
 
@@ -21,8 +23,44 @@ const INITIAL_PROTO_UNITS: ProtoUnit[] = [];
 let protoUnitsCache: ProtoUnit[] = loadLocalProtoUnits();
 const listeners: Set<() => void> = new Set();
 
+// Local Inter-Tab Broadcast Channel
+const localProtoBus = typeof window !== 'undefined' && 'BroadcastChannel' in window 
+  ? new BroadcastChannel('llt_proto_bus') 
+  : null;
+
+if (localProtoBus) {
+  localProtoBus.onmessage = () => {
+    protoUnitsCache = loadLocalProtoUnits();
+    notifyListeners();
+  };
+}
+
+// Storage event listener
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (e) => {
+    if (e.key === STORAGE_KEY_PROTO_UNITS) {
+      protoUnitsCache = loadLocalProtoUnits();
+      notifyListeners();
+    }
+  });
+}
+
+// Global Supabase Realtime event listener
+subscribeToLabRealtimeEvents((event) => {
+  if (event === 'proto_units_change') {
+    initDataSync();
+  }
+});
+
+// Periodic background sync check
+if (typeof window !== 'undefined') {
+  setInterval(() => {
+    initDataSync();
+  }, 6000);
+}
+
 /* ==========================================
-   FIREBASE FIRESTORE SYNC HELPERS
+   FIREBASE FIRESTORE SYNC HELPERS & REAL-TIME LISTENER
    ========================================== */
 
 export async function syncProtoUnitToFirestore(unit: ProtoUnit) {
@@ -63,6 +101,34 @@ export async function fetchProtoUnitsFromFirestore(): Promise<ProtoUnit[] | null
   } catch (e) {
     console.warn('Firestore Proto Unit fetch note:', e);
     return null;
+  }
+}
+
+// Attach Real-Time Firestore Listener for Live Multi-Device Sync
+if (db) {
+  try {
+    const colRef = collection(db, 'proto_units');
+    onSnapshot(colRef, (snap: any) => {
+      if (snap) {
+        const list: ProtoUnit[] = [];
+        snap.forEach((d: any) => {
+          const data = d.data() as ProtoUnit;
+          if (data && data.id !== 'proto-101' && data.id !== 'proto-102') {
+            list.push(data);
+          }
+        });
+        if (list.length > 0) {
+          list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+          protoUnitsCache = list;
+          try { localStorage.setItem(STORAGE_KEY_PROTO_UNITS, JSON.stringify(list)); } catch {}
+          notifyListeners();
+        }
+      }
+    }, (err: any) => {
+      console.warn('[ProtoUnitStore] Real-time listener error:', err);
+    });
+  } catch (e) {
+    console.warn('[ProtoUnitStore] Could not set up real-time listener:', e);
   }
 }
 
@@ -110,6 +176,10 @@ function saveLocalProtoUnits(data: ProtoUnit[]) {
   const clean = (data || []).filter(u => u && u.id !== 'proto-101' && u.id !== 'proto-102');
   protoUnitsCache = clean;
   try { localStorage.setItem(STORAGE_KEY_PROTO_UNITS, JSON.stringify(clean)); } catch {}
+  if (localProtoBus) {
+    try { localProtoBus.postMessage({ timestamp: Date.now() }); } catch {}
+  }
+  broadcastLabRealtimeEvent('proto_units_change', { timestamp: Date.now() });
   notifyListeners();
 }
 

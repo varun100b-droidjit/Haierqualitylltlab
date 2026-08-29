@@ -3,7 +3,9 @@ import { db, isFirebaseConfigured, collection, doc, setDoc, getDocs, updateDoc, 
 import { 
   syncRDUnitToSupabase, 
   deleteRDUnitFromSupabase, 
-  fetchRDUnitsFromSupabase 
+  fetchRDUnitsFromSupabase,
+  broadcastLabRealtimeEvent,
+  subscribeToLabRealtimeEvents 
 } from '../lib/supabase';
 import { requireOnlineForSave } from './networkManager';
 
@@ -41,6 +43,42 @@ let logsCache: ActivityLog[] = loadLocalLogs();
 let notifsCache: LabNotification[] = loadLocalNotifs();
 
 const listeners: Set<() => void> = new Set();
+
+// Local Inter-Tab Broadcast Channel
+const localUnitBus = typeof window !== 'undefined' && 'BroadcastChannel' in window 
+  ? new BroadcastChannel('llt_units_bus') 
+  : null;
+
+if (localUnitBus) {
+  localUnitBus.onmessage = () => {
+    unitsCache = loadLocalUnits();
+    notifyListeners();
+  };
+}
+
+// Storage event listener
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (e) => {
+    if (e.key === STORAGE_KEY_UNITS) {
+      unitsCache = loadLocalUnits();
+      notifyListeners();
+    }
+  });
+}
+
+// Global Supabase Realtime event listener
+subscribeToLabRealtimeEvents((event) => {
+  if (event === 'rd_units_change') {
+    initDataSync();
+  }
+});
+
+// Periodic background sync check
+if (typeof window !== 'undefined') {
+  setInterval(() => {
+    initDataSync();
+  }, 6000);
+}
 
 /* ==========================================
    FIREBASE FIRESTORE SYNC HELPERS FOR RD UNITS
@@ -101,6 +139,33 @@ export async function fetchRDUnitsFromFirestore(): Promise<Unit[] | null> {
 // Automatically fetch from Firestore / Supabase on init
 initDataSync();
 
+// Attach Real-Time Firestore Listener for Live Multi-Device Sync (Phone <-> Tablet <-> Desktop)
+if (db) {
+  try {
+    const colRef = collection(db, 'rd_units');
+    onSnapshot(colRef, (snap: any) => {
+      if (snap) {
+        const list: Unit[] = [];
+        snap.forEach((d: any) => {
+          const data = d.data() as Unit;
+          if (data && !isMockUnitId(data.id)) {
+            list.push(data);
+          }
+        });
+        if (list.length > 0) {
+          unitsCache = normalizeUnitTimelines(list);
+          try { localStorage.setItem(STORAGE_KEY_UNITS, JSON.stringify(unitsCache)); } catch {}
+          notifyListeners();
+        }
+      }
+    }, (err: any) => {
+      console.warn('[UnitStore] Real-time rd_units listener error:', err);
+    });
+  } catch (e) {
+    console.warn('[UnitStore] Could not set up real-time listener:', e);
+  }
+}
+
 async function initDataSync() {
   try {
     // Try fetching from Firestore first
@@ -138,7 +203,11 @@ export function subscribeUnitStore(callback: () => void) {
 
 function saveLocalUnits(data: Unit[]) {
   unitsCache = data;
-  localStorage.setItem(STORAGE_KEY_UNITS, JSON.stringify(data));
+  try { localStorage.setItem(STORAGE_KEY_UNITS, JSON.stringify(data)); } catch {}
+  if (localUnitBus) {
+    try { localUnitBus.postMessage({ timestamp: Date.now() }); } catch {}
+  }
+  broadcastLabRealtimeEvent('rd_units_change', { timestamp: Date.now() });
   notifyListeners();
 }
 

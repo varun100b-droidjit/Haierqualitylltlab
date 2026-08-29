@@ -3,9 +3,11 @@ import { idbSaveAll, idbGetAll, safeLocalStorageSet } from '../lib/indexedDbStor
 import { 
   syncReportRoomToSupabase, 
   deleteReportRoomFromSupabase, 
-  fetchReportRoomFromSupabase 
+  fetchReportRoomFromSupabase,
+  broadcastLabRealtimeEvent,
+  subscribeToLabRealtimeEvents 
 } from '../lib/supabase';
-import { db, collection, doc, setDoc, deleteDoc, getDocs } from './firebase';
+import { db, collection, doc, setDoc, deleteDoc, getDocs, onSnapshot } from './firebase';
 import { requireOnlineForSave } from './networkManager';
 
 export type ReportTagType = 'C Simulation' | 'C Experience';
@@ -64,8 +66,44 @@ const INITIAL_SAVED_REPORTS: SavedReport[] = [];
 let savedReportsCache: SavedReport[] = loadLocalReports();
 let listeners: ((reports: SavedReport[]) => void)[] = [];
 
+// Local Inter-Tab Broadcast Channel
+const localReportBus = typeof window !== 'undefined' && 'BroadcastChannel' in window 
+  ? new BroadcastChannel('llt_reports_bus') 
+  : null;
+
+if (localReportBus) {
+  localReportBus.onmessage = () => {
+    savedReportsCache = loadLocalReports();
+    notifyListeners(savedReportsCache);
+  };
+}
+
+// Storage event listener
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (e) => {
+    if (e.key === STORAGE_KEY_REPORT_ROOM) {
+      savedReportsCache = loadLocalReports();
+      notifyListeners(savedReportsCache);
+    }
+  });
+}
+
+// Global Supabase Realtime event listener
+subscribeToLabRealtimeEvents((event) => {
+  if (event === 'reports_change') {
+    initCloudAndLocalReports();
+  }
+});
+
+// Periodic background sync check
+if (typeof window !== 'undefined') {
+  setInterval(() => {
+    initCloudAndLocalReports();
+  }, 7000);
+}
+
 /* ==========================================
-   FIREBASE FIRESTORE SYNC HELPERS FOR REPORTS
+   FIREBASE FIRESTORE SYNC HELPERS FOR REPORTS & REAL-TIME LISTENER
    ========================================== */
 
 export async function syncReportRoomToFirestore(report: SavedReport) {
@@ -106,6 +144,34 @@ export async function fetchReportRoomFromFirestore(): Promise<SavedReport[] | nu
   } catch (e) {
     console.warn('Firestore Report fetch note:', e);
     return null;
+  }
+}
+
+// Attach Real-Time Firestore Listener for Live Multi-Device Sync
+if (db) {
+  try {
+    const colRef = collection(db, 'report_room');
+    onSnapshot(colRef, (snap: any) => {
+      if (snap) {
+        const list: SavedReport[] = [];
+        snap.forEach((d: any) => {
+          const data = d.data() as SavedReport;
+          if (data && data.id !== 'rep-cs-101' && data.id !== 'rep-ce-102') {
+            list.push(data);
+          }
+        });
+        if (list.length > 0) {
+          list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+          savedReportsCache = list;
+          persistReports(list);
+          notifyListeners(list);
+        }
+      }
+    }, (err: any) => {
+      console.warn('[ReportRoom] Real-time listener error:', err);
+    });
+  } catch (e) {
+    console.warn('[ReportRoom] Could not set up real-time listener:', e);
   }
 }
 
@@ -170,6 +236,12 @@ function persistReports(reports: SavedReport[]) {
   safeLocalStorageSet(STORAGE_KEY_REPORT_ROOM, reports);
   // 2. Full high-capacity IndexedDB save (stores all high-res photos without 5MB quota limit)
   idbSaveAll('saved_reports', reports);
+  // 3. Local tab bus
+  if (localReportBus) {
+    try { localReportBus.postMessage({ timestamp: Date.now() }); } catch {}
+  }
+  // 4. Global cross-device broadcast
+  broadcastLabRealtimeEvent('reports_change', { timestamp: Date.now() });
 }
 
 export function getSavedReports(): SavedReport[] {

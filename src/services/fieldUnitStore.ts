@@ -3,9 +3,11 @@ import { addLabNotification } from './unitStore';
 import { 
   syncFieldUnitToSupabase, 
   deleteFieldUnitFromSupabase, 
-  fetchFieldUnitsFromSupabase 
+  fetchFieldUnitsFromSupabase,
+  broadcastLabRealtimeEvent,
+  subscribeToLabRealtimeEvents 
 } from '../lib/supabase';
-import { db, collection, doc, setDoc, deleteDoc, getDocs } from './firebase';
+import { db, collection, doc, setDoc, deleteDoc, getDocs, onSnapshot } from './firebase';
 import { requireOnlineForSave } from './networkManager';
 
 const STORAGE_KEY_FIELD_UNITS = 'llt_field_units_v2';
@@ -25,8 +27,44 @@ const INITIAL_FIELD_UNITS: FieldUnit[] = [];
 let fieldUnitsCache: FieldUnit[] = loadLocalFieldUnits();
 const subscribers: Set<() => void> = new Set();
 
+// Local Inter-Tab Broadcast Channel
+const localFieldBus = typeof window !== 'undefined' && 'BroadcastChannel' in window 
+  ? new BroadcastChannel('llt_field_bus') 
+  : null;
+
+if (localFieldBus) {
+  localFieldBus.onmessage = () => {
+    fieldUnitsCache = loadLocalFieldUnits();
+    notifySubscribers();
+  };
+}
+
+// Storage event listener
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (e) => {
+    if (e.key === STORAGE_KEY_FIELD_UNITS) {
+      fieldUnitsCache = loadLocalFieldUnits();
+      notifySubscribers();
+    }
+  });
+}
+
+// Global Supabase Realtime event listener
+subscribeToLabRealtimeEvents((event) => {
+  if (event === 'field_units_change') {
+    initDataSync();
+  }
+});
+
+// Periodic background sync check
+if (typeof window !== 'undefined') {
+  setInterval(() => {
+    initDataSync();
+  }, 6000);
+}
+
 /* ==========================================
-   FIREBASE FIRESTORE SYNC HELPERS
+   FIREBASE FIRESTORE SYNC HELPERS & REAL-TIME LISTENER
    ========================================== */
 
 export async function syncFieldUnitToFirestore(unit: FieldUnit) {
@@ -67,6 +105,34 @@ export async function fetchFieldUnitsFromFirestore(): Promise<FieldUnit[] | null
   } catch (e) {
     console.warn('Firestore Field Unit fetch note:', e);
     return null;
+  }
+}
+
+// Attach Real-Time Firestore Listener for Live Multi-Device Sync
+if (db) {
+  try {
+    const colRef = collection(db, 'field_units');
+    onSnapshot(colRef, (snap: any) => {
+      if (snap) {
+        const list: FieldUnit[] = [];
+        snap.forEach((d: any) => {
+          const data = d.data() as FieldUnit;
+          if (data && data.id !== 'field-101' && data.id !== 'field-102' && data.id !== 'field-103') {
+            list.push(data);
+          }
+        });
+        if (list.length > 0) {
+          list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+          fieldUnitsCache = list;
+          try { localStorage.setItem(STORAGE_KEY_FIELD_UNITS, JSON.stringify(list)); } catch {}
+          notifySubscribers();
+        }
+      }
+    }, (err: any) => {
+      console.warn('[FieldUnitStore] Real-time listener error:', err);
+    });
+  } catch (e) {
+    console.warn('[FieldUnitStore] Could not set up real-time listener:', e);
   }
 }
 
@@ -126,6 +192,10 @@ function saveLocalFieldUnits(units: FieldUnit[]) {
   } catch (err) {
     console.error('Error saving field units to localStorage:', err);
   }
+  if (localFieldBus) {
+    try { localFieldBus.postMessage({ timestamp: Date.now() }); } catch {}
+  }
+  broadcastLabRealtimeEvent('field_units_change', { timestamp: Date.now() });
   notifySubscribers();
 }
 

@@ -6,6 +6,100 @@ const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIU
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
+/* ==========================================
+   GLOBAL REAL-TIME CROSS-DEVICE BROADCAST HUB
+   ========================================== */
+export type LabRealtimeEventType = 
+  | 'shift_change' 
+  | 'rd_units_change' 
+  | 'pp_units_change' 
+  | 'proto_units_change' 
+  | 'field_units_change' 
+  | 'smog_units_change' 
+  | 'reports_change'
+  | 'system_update';
+
+const realtimeChannel = supabase.channel('llt_lab_global_realtime');
+const realtimeListeners = new Set<(event: string, payload: any) => void>();
+
+realtimeChannel
+  .on('broadcast', { event: '*' }, (data: any) => {
+    try {
+      const eventName = data.event;
+      const payload = data.payload;
+      console.log('[Supabase Realtime] Event received:', eventName, payload);
+      realtimeListeners.forEach(listener => {
+        try { listener(eventName, payload); } catch (e) { console.warn(e); }
+      });
+    } catch (err) {
+      console.warn('Realtime channel message error:', err);
+    }
+  })
+  .subscribe((status: string) => {
+    console.log('[Supabase Realtime] Channel status:', status);
+  });
+
+export function broadcastLabRealtimeEvent(event: LabRealtimeEventType, payload: any = {}) {
+  try {
+    realtimeChannel.send({
+      type: 'broadcast',
+      event,
+      payload: { ...payload, clientTimestamp: Date.now() }
+    });
+  } catch (e) {
+    console.warn('Realtime broadcast error:', e);
+  }
+}
+
+export function subscribeToLabRealtimeEvents(listener: (event: string, payload: any) => void): () => void {
+  realtimeListeners.add(listener);
+  return () => {
+    realtimeListeners.delete(listener);
+  };
+}
+
+/* ==========================================
+   0. SYSTEM SETTINGS & SHIFT SUPABASE SYNC
+   ========================================== */
+
+export async function syncShiftToSupabase(shift: string, shiftName: string, operatorName: string = 'Shift Manager') {
+  try {
+    const payload = {
+      id: 'active_shift',
+      setting_key: 'active_shift',
+      setting_value: shift,
+      shift_name: shiftName,
+      operator_name: operatorName,
+      updated_at: new Date().toISOString()
+    };
+    const { error } = await supabase.from('system_settings').upsert(payload);
+    if (error) {
+      console.warn('Supabase system_settings upsert note:', error.message);
+    }
+  } catch (err) {
+    console.warn('Supabase shift sync note:', err);
+  }
+}
+
+export async function fetchShiftFromSupabase(): Promise<{ shift: string; shiftName?: string; updatedAt?: string } | null> {
+  try {
+    const { data, error } = await supabase
+      .from('system_settings')
+      .select('*')
+      .eq('id', 'active_shift')
+      .maybeSingle();
+
+    if (error || !data) return null;
+    return {
+      shift: data.setting_value || data.shift || '',
+      shiftName: data.shift_name,
+      updatedAt: data.updated_at
+    };
+  } catch (err) {
+    return null;
+  }
+}
+
 export function safeIsoString(dateStr?: string): string {
   if (!dateStr) return new Date().toISOString();
   try {
@@ -764,7 +858,19 @@ CREATE TABLE IF NOT EXISTS public.report_room_reports (
 );
 
 -- ----------------------------------------------------------
--- 8. ENABLE ROW LEVEL SECURITY (RLS) & ALLOW ALL PERMISSIVE ACCESS
+-- 8. TABLE: system_settings (Global Lab Shifts & Config)
+-- ----------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.system_settings (
+    id TEXT PRIMARY KEY,
+    setting_key TEXT,
+    setting_value TEXT,
+    shift_name TEXT,
+    operator_name TEXT,
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ----------------------------------------------------------
+-- 9. ENABLE ROW LEVEL SECURITY (RLS) & ALLOW ALL PERMISSIVE ACCESS
 -- ----------------------------------------------------------
 
 ALTER TABLE public.proto_units ENABLE ROW LEVEL SECURITY;
@@ -773,6 +879,7 @@ ALTER TABLE public.field_units ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.rd_units ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.smog_leak_units ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.report_room_reports ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.system_settings ENABLE ROW LEVEL SECURITY;
 
 -- Drop existing policies if any to avoid duplication errors
 DROP POLICY IF EXISTS "Allow public all proto_units" ON public.proto_units;
@@ -781,6 +888,7 @@ DROP POLICY IF EXISTS "Allow public all field_units" ON public.field_units;
 DROP POLICY IF EXISTS "Allow public all rd_units" ON public.rd_units;
 DROP POLICY IF EXISTS "Allow public all smog_leak_units" ON public.smog_leak_units;
 DROP POLICY IF EXISTS "Allow public all report_room_reports" ON public.report_room_reports;
+DROP POLICY IF EXISTS "Allow public all system_settings" ON public.system_settings;
 
 -- Create Open Access Policies for Web Application Client
 CREATE POLICY "Allow public all proto_units" ON public.proto_units FOR ALL USING (true) WITH CHECK (true);
@@ -789,9 +897,10 @@ CREATE POLICY "Allow public all field_units" ON public.field_units FOR ALL USING
 CREATE POLICY "Allow public all rd_units" ON public.rd_units FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow public all smog_leak_units" ON public.smog_leak_units FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow public all report_room_reports" ON public.report_room_reports FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public all system_settings" ON public.system_settings FOR ALL USING (true) WITH CHECK (true);
 
 -- ----------------------------------------------------------
--- 9. CREATE INDEXES FOR FAST QUERYING & SEARCH
+-- 10. CREATE INDEXES FOR FAST QUERYING & SEARCH
 -- ----------------------------------------------------------
 CREATE INDEX IF NOT EXISTS idx_proto_created ON public.proto_units (created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_pp_created ON public.pp_units (created_at DESC);

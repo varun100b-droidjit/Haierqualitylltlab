@@ -48,9 +48,14 @@ let auth: any = null;
 if (isFirebaseConfigured) {
   try {
     app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
-    db = getFirestore(app, databaseId);
+    try {
+      db = databaseId ? getFirestore(app, databaseId) : getFirestore(app);
+    } catch (e1) {
+      console.warn("Named database fallback to default getFirestore(app):", e1);
+      db = getFirestore(app);
+    }
     auth = getAuth(app);
-    console.log("Firebase initialized successfully for LLT Lab with Database ID:", databaseId);
+    console.log("Firebase initialized successfully for LLT Lab");
   } catch (error) {
     console.warn("Firebase initialization note:", error);
   }
