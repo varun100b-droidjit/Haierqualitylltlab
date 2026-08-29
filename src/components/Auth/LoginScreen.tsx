@@ -9,7 +9,6 @@ import {
   Eye, 
   EyeOff, 
   ArrowRight,
-  Sparkles,
   CheckCircle2,
   Users
 } from 'lucide-react';
@@ -49,13 +48,6 @@ export const LoginScreen: React.FC = () => {
     } finally {
       setIsSubmitting(false);
     }
-  };
-
-  const handleQuickFillAdmin = () => {
-    setRole('admin');
-    setUserId('ADMIN01');
-    setPassword('Admin@123');
-    setLocalError(null);
   };
 
   const displayError = localError || authError;
@@ -198,28 +190,6 @@ export const LoginScreen: React.FC = () => {
             )}
           </button>
         </form>
-
-        {/* Quick Demo Credentials Footer */}
-        <div className="mt-6 pt-5 border-t border-slate-800/80">
-          <div className="flex items-center justify-between text-[11px] text-slate-400 mb-2">
-            <span className="font-semibold text-slate-300 flex items-center gap-1">
-              <Sparkles className="w-3 h-3 text-cyan-400" /> Default Admin Login:
-            </span>
-            <button
-              type="button"
-              onClick={handleQuickFillAdmin}
-              className="text-cyan-400 hover:text-cyan-300 font-mono font-bold underline transition-colors cursor-pointer"
-            >
-              Fill Admin
-            </button>
-          </div>
-          <div className="p-2.5 bg-slate-950/80 rounded-xl border border-slate-800 text-[10px] font-mono text-slate-400 flex items-center justify-between">
-            <span>User ID: <strong className="text-cyan-300">ADMIN01</strong></span>
-            <span className="text-slate-600">&bull;</span>
-            <span>Password: <strong className="text-cyan-300">Admin@123</strong></span>
-          </div>
-        </div>
-
       </div>
 
       {/* Footer Info */}

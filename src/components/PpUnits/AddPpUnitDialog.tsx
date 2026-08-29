@@ -72,6 +72,8 @@ export const AddPpUnitDialog: React.FC<AddPpUnitDialogProps> = ({
   const [eeChecksumIdu, setEeChecksumIdu] = useState('');
   const [eeChecksumOdu, setEeChecksumOdu] = useState('');
   const [refrigerant, setRefrigerant] = useState('');
+  const [fourWaySwing, setFourWaySwing] = useState('');
+  const [rpm, setRpm] = useState('');
 
   // IDU Details
   const [iduMotorSpec, setIduMotorSpec] = useState('');
@@ -156,6 +158,8 @@ export const AddPpUnitDialog: React.FC<AddPpUnitDialogProps> = ({
       const compDate = new Date(Date.now() + hours * 3600 * 1000);
       setTestCompleted(compDate.toISOString().split('T')[0]);
       setRequiredHour('72');
+      setFourWaySwing('');
+      setRpm('');
       setUnitType(initialUnitType);
       setErrors({});
     }
@@ -285,6 +289,8 @@ export const AddPpUnitDialog: React.FC<AddPpUnitDialogProps> = ({
       eeChecksumIdu: val(eeChecksumIdu),
       eeChecksumOdu: val(eeChecksumOdu),
       refrigerant: val(refrigerant),
+      fourWaySwing: val(fourWaySwing),
+      rpm: val(rpm),
     };
 
     const partsInfo: ProtoUnitParts = {
@@ -293,6 +299,10 @@ export const AddPpUnitDialog: React.FC<AddPpUnitDialogProps> = ({
       iduMotorSupplier: val(iduMotorSupplier),
       iduPcbPartCode: val(iduPcbPartCode),
       iduPcbSupplier: val(iduPcbSupplier),
+      iduRpm: val(rpm),
+      iduFourWaySwing: val(fourWaySwing),
+      fourWaySwing: val(fourWaySwing),
+      rpm: val(rpm),
 
       oduMotorSpec: val(oduMotorSpec),
       oduMotorPartCode: val(oduMotorPartCode),
@@ -330,6 +340,8 @@ export const AddPpUnitDialog: React.FC<AddPpUnitDialogProps> = ({
       namePlate,
       partsInfo,
       photos,
+      fourWaySwing: val(fourWaySwing),
+      rpm: val(rpm),
       remarks: val(remarks),
       status: targetStatus,
     });
@@ -908,6 +920,32 @@ export const AddPpUnitDialog: React.FC<AddPpUnitDialogProps> = ({
                     value={eeChecksumOdu}
                     onChange={(e) => setEeChecksumOdu(e.target.value)}
                     className="w-full px-3.5 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs font-mono text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+
+                {/* 4 Way Swing Dropdown */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">4 Way Swing</label>
+                  <select
+                    value={fourWaySwing}
+                    onChange={(e) => setFourWaySwing(e.target.value)}
+                    className="w-full px-3.5 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500 cursor-pointer"
+                  >
+                    <option value="" className="bg-slate-900 text-slate-400">Select (Yes / No)</option>
+                    <option value="Yes" className="bg-slate-900 text-emerald-400">Yes</option>
+                    <option value="No" className="bg-slate-900 text-rose-400">No</option>
+                  </select>
+                </div>
+
+                {/* RPM */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">RPM (Fan / Motor RPM)</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. 1250 RPM / 850 - 1350 RPM"
+                    value={rpm}
+                    onChange={(e) => setRpm(e.target.value)}
+                    className="w-full px-3.5 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
                   />
                 </div>
               </div>

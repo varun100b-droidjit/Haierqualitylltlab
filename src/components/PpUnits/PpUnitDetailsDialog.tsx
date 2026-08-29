@@ -371,6 +371,18 @@ export const PpUnitDetailsDialog: React.FC<PpUnitDetailsDialogProps> = ({
                     <span className="text-emerald-300 font-mono font-bold">{currentUnit.namePlate.eeChecksumOdu}</span>
                   </div>
                 )}
+                {(currentUnit.namePlate.fourWaySwing || currentUnit.fourWaySwing || currentUnit.partsInfo?.fourWaySwing) && (
+                  <div>
+                    <span className="text-slate-400 block text-[10px]">4 Way Swing</span>
+                    <span className="text-cyan-300 font-semibold">{currentUnit.namePlate.fourWaySwing || currentUnit.fourWaySwing || currentUnit.partsInfo?.fourWaySwing}</span>
+                  </div>
+                )}
+                {(currentUnit.namePlate.rpm || currentUnit.rpm || currentUnit.partsInfo?.rpm || currentUnit.partsInfo?.iduRpm) && (
+                  <div>
+                    <span className="text-slate-400 block text-[10px]">RPM</span>
+                    <span className="text-emerald-300 font-mono font-bold">{currentUnit.namePlate.rpm || currentUnit.rpm || currentUnit.partsInfo?.rpm || currentUnit.partsInfo?.iduRpm}</span>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -586,6 +598,7 @@ export const PpUnitDetailsDialog: React.FC<PpUnitDetailsDialogProps> = ({
                   { label: 'Cooling Capacity / Voltage', value: `${currentUnit.namePlate?.coolingCapacity || 'N/A'} / ${currentUnit.namePlate?.voltage || 'N/A'}` },
                   { label: 'ISEER / Gas Qty', value: `${currentUnit.namePlate?.iseer || 'N/A'} / ${currentUnit.namePlate?.gasQty || 'N/A'}` },
                   { label: 'Refrigerant / Power Mode', value: `${currentUnit.namePlate?.refrigerant || 'N/A'} / ${currentUnit.namePlate?.powerMode || 'N/A'}` },
+                  { label: '4 Way Swing / RPM', value: `${currentUnit.namePlate?.fourWaySwing || currentUnit.fourWaySwing || 'N/A'} / ${currentUnit.namePlate?.rpm || currentUnit.rpm || 'N/A'}` },
                   { label: 'Main Checksums (IDU / ODU)', value: `${currentUnit.namePlate?.mainProgramChecksumIdu || 'N/A'} / ${currentUnit.namePlate?.mainProgramChecksumOdu || 'N/A'}` },
                   { label: 'IDU PCB Supplier / Code', value: `${currentUnit.partsInfo?.iduPcbSupplier || 'N/A'} (${currentUnit.partsInfo?.iduPcbPartCode || 'N/A'})` },
                   { label: 'IDU Motor Supplier / Code', value: `${currentUnit.partsInfo?.iduMotorSupplier || 'N/A'} (${currentUnit.partsInfo?.iduMotorPartCode || 'N/A'})` },

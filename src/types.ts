@@ -108,6 +108,8 @@ export interface NamePlateDetails {
   eeChecksumIdu?: string;
   eeChecksumOdu?: string;
   refrigerant?: string;
+  fourWaySwing?: string;
+  rpm?: string;
 }
 
 export interface ProtoUnitParts {
@@ -117,6 +119,10 @@ export interface ProtoUnitParts {
   iduMotorSupplier?: string;
   iduPcbPartCode?: string;
   iduPcbSupplier?: string;
+  iduRpm?: string;
+  iduFourWaySwing?: string;
+  fourWaySwing?: string;
+  rpm?: string;
 
   // ODU Details
   oduMotorSpec?: string;
@@ -200,6 +206,8 @@ export interface ProtoUnit {
   namePlate?: NamePlateDetails;
   partsInfo: ProtoUnitParts;
   photos: ProtoUnitPhotos;
+  fourWaySwing?: string;
+  rpm?: string;
   remarks?: string;
   observations?: ObservationNote[];
   status: 'live' | 'finished' | 'stopped';
@@ -226,6 +234,8 @@ export interface PpUnit {
   namePlate?: NamePlateDetails;
   partsInfo: ProtoUnitParts;
   photos: ProtoUnitPhotos;
+  fourWaySwing?: string;
+  rpm?: string;
   remarks?: string;
   observations?: ObservationNote[];
   status: 'live' | 'finished' | 'stopped';
