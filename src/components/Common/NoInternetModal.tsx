@@ -13,8 +13,7 @@ import {
 import { 
   subscribeNoInternetModal, 
   closeNoInternetModal, 
-  testActiveConnection, 
-  isNetworkOnline 
+  testActiveConnection 
 } from '../../services/networkManager';
 
 export const NoInternetModal: React.FC = () => {
@@ -79,14 +78,14 @@ export const NoInternetModal: React.FC = () => {
 
           <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-rose-950/80 border border-rose-800 text-rose-300 text-[10px] font-black uppercase tracking-wider rounded-full mb-2">
             <Radio className="w-3 h-3 text-rose-400 animate-ping" />
-            <span>No Internet Connection</span>
+            <span>Connection Offline</span>
           </div>
 
           <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight">
-            इंटरनेट कनेक्शन नहीं है
+            No Internet Connection
           </h2>
           <p className="text-xs text-rose-300/90 font-medium mt-1">
-            No Active Internet Connection Detected
+            Active internet connection is required to interact with the database.
           </p>
         </div>
 
@@ -95,7 +94,7 @@ export const NoInternetModal: React.FC = () => {
           <div className="mb-4 p-3 rounded-xl bg-slate-950/80 border border-slate-800 flex items-center gap-2.5 text-xs text-slate-300">
             <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
             <div className="overflow-hidden">
-              <span className="text-slate-400 block text-[10px] uppercase font-bold">Failed Action</span>
+              <span className="text-slate-400 block text-[10px] uppercase font-bold">Interrupted Action</span>
               <span className="font-mono text-cyan-300 truncate block">{actionContext}</span>
             </div>
           </div>
@@ -108,11 +107,11 @@ export const NoInternetModal: React.FC = () => {
             <span>Direct Cloud Database Active</span>
           </div>
           <p className="text-slate-400 text-[11px] leading-relaxed">
-            Data ab direct <strong className="text-cyan-300">Firebase Firestore</strong> aur <strong className="text-emerald-300">Supabase</strong> me save hota hai. Unit create, update, ya delete karne ke liye internet connection zaroori hai.
+            All data is saved directly to <strong className="text-cyan-300">Firebase Firestore</strong> and <strong className="text-emerald-300">Supabase</strong>. Adding, updating, or deleting units is paused until the connection is restored.
           </p>
           <div className="flex items-center gap-1.5 text-[11px] text-amber-300 bg-amber-950/40 border border-amber-800/60 p-2 rounded-xl">
             <ShieldAlert className="w-3.5 h-3.5 shrink-0" />
-            <span>कृपया अपना Wi-Fi या Mobile Data ऑन करें और पुनः प्रयास करें।</span>
+            <span>Please check your Wi-Fi or Mobile Data connection and try again.</span>
           </div>
         </div>
 
@@ -120,14 +119,14 @@ export const NoInternetModal: React.FC = () => {
         {testResult === 'success' && (
           <div className="mb-4 p-3 rounded-xl bg-emerald-950/80 border border-emerald-700 text-emerald-300 text-xs font-semibold flex items-center gap-2">
             <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
-            <span>Internet connection restored! Syncing data...</span>
+            <span>Internet connection restored! Resuming cloud sync...</span>
           </div>
         )}
 
         {testResult === 'failed' && (
           <div className="mb-4 p-3 rounded-xl bg-rose-950/80 border border-rose-800 text-rose-300 text-xs font-semibold flex items-center gap-2">
             <CloudOff className="w-4 h-4 shrink-0 text-rose-400" />
-            <span>Abhi bhi offline hai. Please check network and try again.</span>
+            <span>Still offline. Please check your network and try again.</span>
           </div>
         )}
 
@@ -140,7 +139,7 @@ export const NoInternetModal: React.FC = () => {
             className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl font-bold text-xs sm:text-sm text-slate-900 bg-gradient-to-r from-cyan-400 via-teal-400 to-emerald-400 hover:from-cyan-300 hover:to-emerald-300 disabled:opacity-50 shadow-lg shadow-cyan-950/50 active:scale-[0.99] transition-all cursor-pointer"
           >
             <RefreshCw className={`w-4 h-4 ${isChecking ? 'animate-spin' : ''}`} />
-            <span>{isChecking ? 'Checking Connection...' : 'Retry Connection / पुनः प्रयास'}</span>
+            <span>{isChecking ? 'Checking Connection...' : 'Retry Connection'}</span>
           </button>
 
           <button
