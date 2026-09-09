@@ -32,6 +32,7 @@ export const ModelSheetManagementCard: React.FC = () => {
   const [manualMaterialCode, setManualMaterialCode] = useState<string>('');
   const [isUpdatingManual, setIsUpdatingManual] = useState<boolean>(false);
   const [manualFeedback, setManualFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   // Excel Upload State
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -444,19 +445,37 @@ export const ModelSheetManagementCard: React.FC = () => {
                     <td className="py-2.5 px-3.5 font-semibold text-slate-200">
                       {m.modelName}
                     </td>
-                    <td className="py-2.5 px-3.5 text-right">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (window.confirm(`Delete model ${m.modelName} (${m.materialCode})?`)) {
-                            deleteModel(m.id);
-                          }
-                        }}
-                        className="p-1 text-slate-500 hover:text-rose-400 hover:bg-rose-950/40 rounded transition-colors cursor-pointer"
-                        title="Delete model entry"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                    <td className="py-2.5 px-3.5 text-right whitespace-nowrap">
+                      {confirmDeleteId === m.id ? (
+                        <span className="inline-flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              deleteModel(m.id);
+                              setConfirmDeleteId(null);
+                            }}
+                            className="px-2 py-0.5 rounded bg-rose-600 hover:bg-rose-500 text-white text-[10px] font-bold cursor-pointer transition-colors shadow-sm"
+                          >
+                            Delete
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteId(null)}
+                            className="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] cursor-pointer transition-colors"
+                          >
+                            Cancel
+                          </button>
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setConfirmDeleteId(m.id)}
+                          className="p-1 text-slate-500 hover:text-rose-400 hover:bg-rose-950/40 rounded transition-colors cursor-pointer"
+                          title="Delete model entry"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))

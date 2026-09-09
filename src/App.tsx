@@ -29,12 +29,12 @@ import { GraphModule } from './components/Graph/GraphModule';
 import { MobileToastContainer } from './components/Layout/MobileToastContainer';
 import { SupabaseSyncModal } from './components/Supabase/SupabaseSyncModal';
 import { NoInternetModal } from './components/Common/NoInternetModal';
+import { InOutUnitsModule } from './components/InOutUnits/InOutUnitsModule';
+import { BarcodeScannerModal } from './components/Common/BarcodeScannerModal';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { LoginScreen } from './components/Auth/LoginScreen';
 import { AccessDeniedView } from './components/Auth/AccessDeniedView';
 import { UserManagementModule } from './components/Admin/UserManagementModule';
-import { InOutUnitsModule } from './components/InOutUnits/InOutUnitsModule';
-import { BarcodeScannerModal } from './components/Common/BarcodeScannerModal';
 import { FlaskConical, RefreshCw } from 'lucide-react';
 
 import { Unit, UserProfile, DynamicUnitRow } from './types';
@@ -403,7 +403,7 @@ export function MainApp() {
               )}
 
               {activeTab === 'in-out-units' && (
-                <InOutUnitsModule
+                <InOutUnitsModule 
                   onOpenScanner={() => setIsBarcodeScannerOpen(true)}
                 />
               )}
@@ -540,10 +540,7 @@ export function MainApp() {
         onSave={handleSaveEditUnit}
       />
 
-      {/* Floating Mobile Notification Toast Banner */}
-      <MobileToastContainer />
-
-      {/* Real-time Mobile Barcode / QR Scanner Modal (ELT & BSR) */}
+      {/* 1. Header Barcode Scanner Modal (Send ELT & Return BSR workflows) */}
       <BarcodeScannerModal
         isOpen={isBarcodeScannerOpen}
         onClose={() => setIsBarcodeScannerOpen(false)}
@@ -551,6 +548,9 @@ export function MainApp() {
           setActiveTab('in-out-units');
         }}
       />
+
+      {/* Floating Mobile Notification Toast Banner */}
+      <MobileToastContainer />
 
       {/* Global No Internet Connection Guard Modal */}
       <NoInternetModal />

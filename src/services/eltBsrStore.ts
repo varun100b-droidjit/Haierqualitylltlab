@@ -439,6 +439,98 @@ export async function returnMachineToBSR(
 }
 
 /**
+ * Return multiple machines from ELT to BSR in a single batch
+ */
+export async function returnMultipleMachinesToBSR(
+  serialNumbers: string[]
+): Promise<{ success: boolean; returnedCount: number; notFound: string[]; errors: string[] }> {
+  if (!serialNumbers || serialNumbers.length === 0) {
+    return { success: false, returnedCount: 0, notFound: [], errors: ['No serial numbers provided'] };
+  }
+
+  const notFound: string[] = [];
+  const errors: string[] = [];
+  const newBSRRecords: BSRRecord[] = [];
+  const deletedELTIds: string[] = [];
+  const cleanedSerials: string[] = [];
+
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const timestamp = now.getTime();
+  const bsrDateTime = `${now.toISOString().slice(0, 10)} ${now.toLocaleTimeString('en-GB')}`;
+
+  for (const s of serialNumbers) {
+    const cleanSerial = s.trim().toUpperCase();
+    if (!cleanSerial) continue;
+
+    const matchingELT = eltCache.find(r => r.serialNumber.trim().toUpperCase() === cleanSerial);
+    if (!matchingELT) {
+      notFound.push(cleanSerial);
+      continue;
+    }
+
+    cleanedSerials.push(cleanSerial);
+    deletedELTIds.push(matchingELT.id);
+
+    const originalELTDateTime = `${matchingELT.eltDate} ${matchingELT.eltTime}`;
+    const bsrDocId = `BSR-${cleanSerial.replace(/[^A-Z0-9_-]/gi, '_')}`;
+
+    const bsrRecord: BSRRecord = {
+      id: bsrDocId,
+      modelName: matchingELT.modelName,
+      materialCode: matchingELT.materialCode,
+      serialNumber: cleanSerial,
+      processType: 'BSR Return',
+      status: 'Returned from BSR',
+      originalELTDateTime,
+      bsrReturnDateTime: bsrDateTime,
+      createdAt: nowIso,
+      timestamp
+    };
+
+    newBSRRecords.push(bsrRecord);
+  }
+
+  if (newBSRRecords.length === 0) {
+    return { success: false, returnedCount: 0, notFound, errors };
+  }
+
+  // 1. Remove from ELT Cache
+  const updatedELT = eltCache.filter(r => !cleanedSerials.includes(r.serialNumber.trim().toUpperCase()));
+  saveLocalELT(updatedELT);
+  notifyELTListeners(updatedELT);
+
+  // 2. Add to BSR Cache
+  const updatedBSR = [
+    ...newBSRRecords,
+    ...bsrCache.filter(r => !cleanedSerials.includes(r.serialNumber.trim().toUpperCase()))
+  ];
+  saveLocalBSR(updatedBSR);
+  notifyBSRListeners(updatedBSR);
+
+  // 3. Atomically sync to Firestore
+  if (isFirebaseConfigured && db) {
+    for (const bsrRec of newBSRRecords) {
+      try {
+        await setDoc(doc(db, 'bsr_records', bsrRec.id), bsrRec, { merge: true });
+      } catch (e: any) {
+        errors.push(`Failed to save ${bsrRec.serialNumber} to BSR: ${e.message}`);
+      }
+    }
+
+    for (const eltId of deletedELTIds) {
+      try {
+        await deleteDoc(doc(db, 'elt_records', eltId));
+      } catch (e: any) {
+        errors.push(`Failed to remove ELT record ${eltId}: ${e.message}`);
+      }
+    }
+  }
+
+  return { success: true, returnedCount: newBSRRecords.length, notFound, errors };
+}
+
+/**
  * Delete a single ELT record manually
  */
 export async function deleteELTRecord(recordId: string): Promise<void> {

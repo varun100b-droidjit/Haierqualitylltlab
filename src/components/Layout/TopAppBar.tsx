@@ -266,13 +266,14 @@ export const TopAppBar: React.FC<TopAppBarProps> = ({
           </button>
         </div>
 
-        {/* Barcode / QR Scanner Header Feature (Immediately Left of Notification Bell) */}
+        {/* 1. HEADER ME BARCODE SCANNER FEATURE (Notification Bell ke LEFT SIDE) */}
         {onOpenBarcodeScanner && (
           <button
             type="button"
             onClick={onOpenBarcodeScanner}
             className="relative p-2.5 text-slate-300 hover:text-cyan-400 hover:bg-slate-800/80 rounded-xl transition-all duration-200 cursor-pointer group"
             title="Barcode / QR Scanner (ELT & BSR)"
+            aria-label="Barcode / QR Scanner"
           >
             <ScanBarcode className="w-5 h-5 group-hover:scale-110 transition-transform text-cyan-400" />
             <span className="sr-only">Barcode Scanner</span>

@@ -151,7 +151,7 @@ export const UserManagementPassKeyGate: React.FC<UserManagementPassKeyGateProps>
       }, 500);
     } else {
       setIsShaking(true);
-      setError('Invalid Pass Key! Please enter the 4-digit security key (9090).');
+      setError('Invalid Pass Key! Please enter the correct 4-digit security key.');
       setTimeout(() => {
         setIsShaking(false);
         setDigits(['', '', '', '']);
@@ -307,10 +307,11 @@ export const UserManagementPassKeyGate: React.FC<UserManagementPassKeyGateProps>
           )}
         </div>
 
-        {/* Hint footer */}
+        {/* Security footer */}
         <div className="mt-5 pt-3 border-t border-slate-800/60 text-center">
-          <p className="text-[11px] text-slate-500 font-mono">
-            Security Pass Key: <span className="text-cyan-400 font-bold tracking-widest">9090</span>
+          <p className="text-[11px] text-slate-500 font-mono flex items-center justify-center gap-1.5">
+            <Lock className="w-3 h-3 text-slate-400" />
+            <span>Authorized Personnel Only</span>
           </p>
         </div>
       </div>

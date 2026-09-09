@@ -63,6 +63,53 @@
         "updatedAt": { "type": "string" }
       },
       "required": ["name", "userId", "role", "status"]
+    },
+    "model_master": {
+      "title": "Model Master",
+      "description": "Stores model names mapped to material codes / model prefix for barcode scanner auto-fill",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "modelName": { "type": "string" },
+        "materialCode": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["modelName", "materialCode"]
+    },
+    "elt_records": {
+      "title": "ELT Records",
+      "description": "Stores machines currently sent to ELT awaiting BSR return",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "modelName": { "type": "string" },
+        "materialCode": { "type": "string" },
+        "serialNumber": { "type": "string" },
+        "processType": { "type": "string" },
+        "status": { "type": "string" },
+        "eltDate": { "type": "string" },
+        "eltTime": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["serialNumber", "modelName", "materialCode", "processType", "status"]
+    },
+    "bsr_records": {
+      "title": "BSR Records",
+      "description": "Stores machines returned from BSR transferred from ELT",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "modelName": { "type": "string" },
+        "materialCode": { "type": "string" },
+        "serialNumber": { "type": "string" },
+        "processType": { "type": "string" },
+        "status": { "type": "string" },
+        "originalELTDateTime": { "type": "string" },
+        "bsrReturnDateTime": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["serialNumber", "modelName", "materialCode", "processType", "status"]
     }
   },
   "firestore": {
@@ -73,6 +120,18 @@
     "/users/{uid}": {
       "schema": "users",
       "description": "User authorization profile records keyed by Firebase Auth UID"
+    },
+    "/model_master/{modelId}": {
+      "schema": "model_master",
+      "description": "Master mapping of model names to 9-char material codes"
+    },
+    "/elt_records/{recordId}": {
+      "schema": "elt_records",
+      "description": "Units dispatched to ELT"
+    },
+    "/bsr_records/{recordId}": {
+      "schema": "bsr_records",
+      "description": "Units returned from BSR"
     }
   }
 }
