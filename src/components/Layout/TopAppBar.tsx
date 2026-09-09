@@ -23,7 +23,8 @@ import {
   Square,
   Power,
   MicOff,
-  Zap
+  Zap,
+  ScanBarcode
 } from 'lucide-react';
 import { LabNotification, UserProfile } from '../../types';
 import { markNotificationAsRead, clearNotifications } from '../../services/unitStore';
@@ -43,6 +44,7 @@ interface TopAppBarProps {
   onChangeUserRole: (role: UserProfile['role']) => void;
   onToggleSidebarMobile: () => void;
   onOpenSupabaseModal?: () => void;
+  onOpenBarcodeScanner?: () => void;
 }
 
 export const TopAppBar: React.FC<TopAppBarProps> = ({
@@ -55,6 +57,7 @@ export const TopAppBar: React.FC<TopAppBarProps> = ({
   onChangeUserRole,
   onToggleSidebarMobile,
   onOpenSupabaseModal,
+  onOpenBarcodeScanner,
 }) => {
   const { user: authAccount, logout, isAdmin } = useAuth();
   const [showNotifications, setShowNotifications] = useState(false);
@@ -262,6 +265,19 @@ export const TopAppBar: React.FC<TopAppBarProps> = ({
             </span>
           </button>
         </div>
+
+        {/* Barcode / QR Scanner Header Feature (Immediately Left of Notification Bell) */}
+        {onOpenBarcodeScanner && (
+          <button
+            type="button"
+            onClick={onOpenBarcodeScanner}
+            className="relative p-2.5 text-slate-300 hover:text-cyan-400 hover:bg-slate-800/80 rounded-xl transition-all duration-200 cursor-pointer group"
+            title="Barcode / QR Scanner (ELT & BSR)"
+          >
+            <ScanBarcode className="w-5 h-5 group-hover:scale-110 transition-transform text-cyan-400" />
+            <span className="sr-only">Barcode Scanner</span>
+          </button>
+        )}
 
         {/* Notifications Button & Dropdown */}
         <div className="relative">

@@ -25,10 +25,12 @@ import {
   Building2,
   FolderArchive,
   UserCheck,
-  Users
+  Users,
+  ArrowLeftRight
 } from 'lucide-react';
 import { subscribeReportRoom, getSavedReports } from '../../services/reportRoomStore';
 import { subscribeAppVersion, getAppVersionState } from '../../services/versionService';
+import { subscribeELTRecords, getELTRecords } from '../../services/eltBsrStore';
 import { useAuth } from '../../context/AuthContext';
 import { AuthRole } from '../../types';
 
@@ -40,6 +42,7 @@ export type TabType =
   | 'pp-add-idu'
   | 'pp-add-odu'
   | 'rd-units' 
+  | 'in-out-units'
   | 'field-units' 
   | 'smog' 
   | 'reports'
@@ -77,6 +80,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [isPpDropdownOpen, setIsPpDropdownOpen] = useState(true);
   const [reportRoomCount, setReportRoomCount] = useState<number>(() => getSavedReports().length);
   const [appVersion, setAppVersion] = useState<string>(() => getAppVersionState().currentVersion);
+  const [eltCount, setEltCount] = useState<number>(() => getELTRecords().length);
 
   const effectiveRole = user?.role || userRole;
   const isRandom = effectiveRole === 'random';
@@ -88,9 +92,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
     const unsubVer = subscribeAppVersion((st) => {
       setAppVersion(st.currentVersion);
     });
+    const unsubELT = subscribeELTRecords((records) => {
+      setEltCount(records.length);
+    });
     return () => {
       unsubRoom();
       unsubVer();
+      unsubELT();
     };
   }, []);
 
@@ -118,6 +126,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: 'R&D Units',
       icon: Boxes,
       badge: null
+    },
+    {
+      id: 'in-out-units' as TabType,
+      label: 'In/Out Units',
+      icon: ArrowLeftRight,
+      badge: eltCount > 0 ? `${eltCount}` : null
     },
     {
       id: 'field-units' as TabType,

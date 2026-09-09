@@ -17,7 +17,10 @@ export type LabRealtimeEventType =
   | 'field_units_change' 
   | 'smog_units_change' 
   | 'reports_change'
-  | 'system_update';
+  | 'system_update'
+  | 'elt_records_change'
+  | 'bsr_records_change'
+  | 'models_change';
 
 const realtimeChannel = supabase.channel('llt_lab_global_realtime');
 const realtimeListeners = new Set<(event: string, payload: any) => void>();

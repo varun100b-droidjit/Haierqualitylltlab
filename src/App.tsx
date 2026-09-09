@@ -33,6 +33,8 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { LoginScreen } from './components/Auth/LoginScreen';
 import { AccessDeniedView } from './components/Auth/AccessDeniedView';
 import { UserManagementModule } from './components/Admin/UserManagementModule';
+import { InOutUnitsModule } from './components/InOutUnits/InOutUnitsModule';
+import { BarcodeScannerModal } from './components/Common/BarcodeScannerModal';
 import { FlaskConical, RefreshCw } from 'lucide-react';
 
 import { Unit, UserProfile, DynamicUnitRow } from './types';
@@ -85,6 +87,7 @@ export function MainApp() {
   const [trackedUnit, setTrackedUnit] = useState<Unit | null>(null);
   const [editedUnit, setEditedUnit] = useState<Unit | null>(null);
   const [isSupabaseModalOpen, setIsSupabaseModalOpen] = useState(false);
+  const [isBarcodeScannerOpen, setIsBarcodeScannerOpen] = useState(false);
 
   // Preselected unit for Generate Report screen
   const [reportPreselectedSerial, setReportPreselectedSerial] = useState<string>('');
@@ -318,6 +321,7 @@ export function MainApp() {
         onChangeUserRole={handleChangeUserRole}
         onToggleSidebarMobile={() => setIsOpenMobileSidebar(!isOpenMobileSidebar)}
         onOpenSupabaseModal={() => setIsSupabaseModalOpen(true)}
+        onOpenBarcodeScanner={() => setIsBarcodeScannerOpen(true)}
       />
 
       {/* Main Container with Sidebar + Content */}
@@ -395,6 +399,12 @@ export function MainApp() {
                   onDeleteUnit={handleDeleteUnit}
                   onAdvanceStage={handleAdvanceStage}
                   onReworkUnit={handleReworkUnit}
+                />
+              )}
+
+              {activeTab === 'in-out-units' && (
+                <InOutUnitsModule
+                  onOpenScanner={() => setIsBarcodeScannerOpen(true)}
                 />
               )}
 
@@ -532,6 +542,15 @@ export function MainApp() {
 
       {/* Floating Mobile Notification Toast Banner */}
       <MobileToastContainer />
+
+      {/* Real-time Mobile Barcode / QR Scanner Modal (ELT & BSR) */}
+      <BarcodeScannerModal
+        isOpen={isBarcodeScannerOpen}
+        onClose={() => setIsBarcodeScannerOpen(false)}
+        onSuccessNavigate={(tab) => {
+          setActiveTab('in-out-units');
+        }}
+      />
 
       {/* Global No Internet Connection Guard Modal */}
       <NoInternetModal />

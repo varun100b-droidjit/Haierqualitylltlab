@@ -28,6 +28,7 @@ import { isFirebaseConfigured } from '../../services/firebase';
 import { resetToDemoData } from '../../services/unitStore';
 import { LabShiftSelector } from '../Common/LabShiftSelector';
 import { SystemVersionCard } from './SystemVersionCard';
+import { ModelSheetManagementCard } from './ModelSheetManagementCard';
 import { 
   downloadAllMonsterData, 
   purgeAllSupabaseAndFirebaseData, 
@@ -434,6 +435,9 @@ export const SettingsModule: React.FC<SettingsModuleProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Model Sheet Management CardView (Excel Upload & Manual Prefix Entry) */}
+      <ModelSheetManagementCard />
 
       {/* Application Version & Update Management (Bottom of Settings) */}
       <SystemVersionCard />
