@@ -18,10 +18,12 @@ import {
   Check,
   Upload,
   SwitchCamera,
-  Image as ImageIcon
+  Image as ImageIcon,
+  User
 } from 'lucide-react';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import { findModelByPrefix, getAllModels } from '../../services/modelMasterStore';
+import { useAuth } from '../../context/AuthContext';
 import { 
   sendMachinesToELT, 
   returnMachineToBSR, 
@@ -55,6 +57,10 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
   onClose,
   onSuccessNavigate
 }) => {
+  const { user } = useAuth();
+  const operatorUserId = user?.userId || 'ADMIN01';
+  const operatorName = user?.name || 'Admin Operator';
+
   // Process Selector: Initial Screen
   const [selectedProcess, setSelectedProcess] = useState<ScannerProcess>('SEND_ELT');
 
@@ -63,6 +69,10 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
     { id: 'row-1', serialNumber: '', modelName: '', materialCode: '', prefix: '', matchStatus: 'idle' }
   ]);
   const [activeRowId, setActiveRowId] = useState<string>('row-1');
+  const activeRowIdRef = useRef<string>('row-1');
+  useEffect(() => {
+    activeRowIdRef.current = activeRowId;
+  }, [activeRowId]);
 
   // Camera & Scanner state
   const [isCameraActive, setIsCameraActive] = useState<boolean>(false);
@@ -75,6 +85,14 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
   const isScanningRef = useRef<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const scannerContainerId = 'llt-barcode-reader-viewfinder';
+
+  // Anti-freeze scan throttle & duplicate prevention refs
+  const handleBarcodeScannedRef = useRef<(rawBarcode: string) => void>(() => {});
+  const lastScannedBarcodeRef = useRef<string>('');
+  const lastScanTimeRef = useRef<number>(0);
+  const isProcessingScanRef = useRef<boolean>(false);
+  const [scanFeedbackToast, setScanFeedbackToast] = useState<{ serial: string; model: string } | null>(null);
+  const toastTimeoutRef = useRef<any>(null);
 
   const selectedProcessRef = useRef<ScannerProcess>(selectedProcess);
   useEffect(() => {
@@ -100,15 +118,26 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
   // Success Toast Banner
   const [successBanner, setSuccessBanner] = useState<string | null>(null);
 
-  // Sound feedback
+  // Sound feedback - reuse AudioContext instance to avoid hitting mobile browser limits
+  const audioCtxRef = useRef<AudioContext | null>(null);
   const playScanBeep = () => {
     try {
-      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      if (!audioCtxRef.current || audioCtxRef.current.state === 'closed') {
+        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+        if (AudioCtx) {
+          audioCtxRef.current = new AudioCtx();
+        }
+      }
+      const audioCtx = audioCtxRef.current;
+      if (!audioCtx) return;
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume().catch(() => {});
+      }
       const osc = audioCtx.createOscillator();
       const gain = audioCtx.createGain();
       osc.type = 'sine';
       osc.frequency.setValueAtTime(880, audioCtx.currentTime); // A5 note
-      gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+      gain.gain.setValueAtTime(0.12, audioCtx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.15);
       osc.connect(gain);
       gain.connect(audioCtx.destination);
@@ -118,7 +147,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
         navigator.vibrate([40, 30, 40]);
       }
     } catch {
-      // AudioContext unavailable
+      // AudioContext safe fallback
     }
   };
 
@@ -223,7 +252,9 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
             config,
             qrConfig,
             (decodedText) => {
-              handleBarcodeScanned(decodedText);
+              if (handleBarcodeScannedRef.current) {
+                handleBarcodeScannedRef.current(decodedText);
+              }
             },
             () => {
               // Frame decode error - normal while scanning
@@ -362,6 +393,10 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
   }, [isOpen]);
 
   const resetForm = () => {
+    lastScannedBarcodeRef.current = '';
+    isProcessingScanRef.current = false;
+    setScanFeedbackToast(null);
+    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
     setScannedSerial('');
     setDetectedModelName('');
     setDetectedPrefix('');
@@ -376,33 +411,61 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
       { id: initialId, serialNumber: '', modelName: '', materialCode: '', prefix: '', matchStatus: 'idle' }
     ]);
     setActiveRowId(initialId);
+    activeRowIdRef.current = initialId;
   };
 
   // Dynamically Add New Machine Box (+) for next machine scan
+  // Stacking: Newest at the top, older scans underneath (1st scan at the bottom)
   const handleAddNewRow = () => {
+    // Reset scanner lock so camera can immediately scan this new slot
+    lastScannedBarcodeRef.current = '';
+    isProcessingScanRef.current = false;
+
+    // If top row is already empty, focus on it
+    if (machineRows.length > 0 && !machineRows[0].serialNumber) {
+      setActiveRowId(machineRows[0].id);
+      activeRowIdRef.current = machineRows[0].id;
+      setBatchError(null);
+      return;
+    }
+
     const newId = `row-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     setMachineRows(prev => [
-      ...prev,
-      { id: newId, serialNumber: '', modelName: '', materialCode: '', prefix: '', matchStatus: 'idle' }
+      { id: newId, serialNumber: '', modelName: '', materialCode: '', prefix: '', matchStatus: 'idle' },
+      ...prev
     ]);
     setActiveRowId(newId);
+    activeRowIdRef.current = newId;
     setBatchError(null);
   };
 
   // Remove or clear a machine row
   const handleDeleteRow = (id: string) => {
+    lastScannedBarcodeRef.current = '';
+    isProcessingScanRef.current = false;
     setMachineRows(prev => {
       if (prev.length <= 1) {
         const freshId = `row-${Date.now()}`;
         setActiveRowId(freshId);
+        activeRowIdRef.current = freshId;
         return [{ id: freshId, serialNumber: '', modelName: '', materialCode: '', prefix: '', matchStatus: 'idle' }];
       }
       const filtered = prev.filter(r => r.id !== id);
-      if (activeRowId === id && filtered.length > 0) {
-        setActiveRowId(filtered[filtered.length - 1].id);
+      if (activeRowIdRef.current === id && filtered.length > 0) {
+        const nextTarget = filtered.find(r => !r.serialNumber) || filtered[0];
+        setActiveRowId(nextTarget.id);
+        activeRowIdRef.current = nextTarget.id;
       }
       return filtered;
     });
+  };
+
+  // Select row as active scan target and immediately unblock camera scanner for it
+  const handleSelectActiveRow = (id: string) => {
+    setActiveRowId(id);
+    activeRowIdRef.current = id;
+    lastScannedBarcodeRef.current = '';
+    isProcessingScanRef.current = false;
   };
 
   // Update Series No. in a machine row (and auto-match Model Name from Model Sheet or ELT Record)
@@ -476,6 +539,27 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
     const cleanBarcode = rawBarcode.trim().toUpperCase();
     if (!cleanBarcode) return;
 
+    const now = Date.now();
+
+    // 1. Prevent duplicate spam of the exact same barcode while machine remains in camera view
+    if (cleanBarcode === lastScannedBarcodeRef.current && now - lastScanTimeRef.current < 2500) {
+      return;
+    }
+
+    // 2. Throttle: at least 600ms between any scans to allow state and camera decode stream to settle
+    if (isProcessingScanRef.current || now - lastScanTimeRef.current < 600) {
+      return;
+    }
+
+    isProcessingScanRef.current = true;
+    lastScanTimeRef.current = now;
+    lastScannedBarcodeRef.current = cleanBarcode;
+
+    // Release scan lock after 500ms
+    setTimeout(() => {
+      isProcessingScanRef.current = false;
+    }, 500);
+
     playScanBeep();
     setSuccessBanner(null);
 
@@ -528,47 +612,56 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
         return prev;
       }
 
-      // Fill into active row if empty, or first empty row
-      let targetIndex = prev.findIndex(r => r.id === activeRowId && !r.serialNumber);
+      // Check if activeRow is empty, or find the first empty row
+      const currentActiveId = activeRowIdRef.current;
+      let targetIndex = prev.findIndex(r => r.id === currentActiveId && !r.serialNumber);
       if (targetIndex === -1) {
         targetIndex = prev.findIndex(r => !r.serialNumber);
       }
 
-      if (targetIndex !== -1) {
-        const updated = [...prev];
-        const targetId = updated[targetIndex].id;
-        updated[targetIndex] = {
-          ...updated[targetIndex],
-          serialNumber: cleanBarcode,
-          prefix,
-          materialCode,
-          modelName,
-          matchStatus,
-          originalELTDateTime,
-          error: rowError
-        };
-        setActiveRowId(targetId);
-        setBatchError(null);
-        return updated;
-      } else {
-        // All rows filled: automatically append a new machine box for this scanned unit!
-        const newRowId = `row-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-        setActiveRowId(newRowId);
-        setBatchError(null);
-        return [
-          ...prev,
-          {
-            id: newRowId,
-            serialNumber: cleanBarcode,
-            prefix,
-            materialCode,
-            modelName,
-            matchStatus,
-            originalELTDateTime,
-            error: rowError
-          }
-        ];
-      }
+      const filledRow: MachineEntryRow = {
+        id: targetIndex !== -1 ? prev[targetIndex].id : `row-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        serialNumber: cleanBarcode,
+        prefix,
+        materialCode,
+        modelName,
+        matchStatus,
+        originalELTDateTime,
+        error: rowError
+      };
+
+      // Exclude target row from existing list
+      const remainingRows = targetIndex !== -1
+        ? prev.filter((_, idx) => idx !== targetIndex)
+        : [...prev];
+
+      // Automatic next empty row for the subsequent machine scan!
+      // "Dost jab Scanner se 1st machine scan ho jaye tab automatic dusra Model Name Serial Aa jaye jisme Second Scanner ka data Capture kre"
+      // "Scanner data jo pahla Scan hoga wo niche second usme upar 3rd Uske Upar aise rahega"
+      const nextEmptyRowId = `row-${Date.now() + 1}-${Math.random().toString(36).slice(2, 6)}`;
+      const nextEmptyRow: MachineEntryRow = {
+        id: nextEmptyRowId,
+        serialNumber: '',
+        modelName: '',
+        materialCode: '',
+        prefix: '',
+        matchStatus: 'idle'
+      };
+
+      activeRowIdRef.current = nextEmptyRowId;
+      setActiveRowId(nextEmptyRowId);
+      setBatchError(null);
+
+      // Instant feedback toast over viewfinder
+      if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+      setScanFeedbackToast({ serial: cleanBarcode, model: modelName || 'Machine' });
+      toastTimeoutRef.current = setTimeout(() => {
+        setScanFeedbackToast(null);
+      }, 2200);
+
+      // Stack: Next empty box at the VERY TOP (ready to scan),
+      // newly scanned unit directly below it, and earlier scans below that (1st scan at the bottom)
+      return [nextEmptyRow, filledRow, ...remainingRows];
     });
   };
 
@@ -612,7 +705,10 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
 
     setIsSubmittingELT(true);
     try {
-      const res = await sendMachinesToELT(machinesToSubmit);
+      const res = await sendMachinesToELT(machinesToSubmit, {
+        userId: operatorUserId,
+        name: operatorName
+      });
       if (res.success) {
         setSuccessBanner(`Successfully sent ${res.addedCount} machine(s) to ELT Record.`);
         const freshId = `row-${Date.now()}`;
@@ -666,7 +762,10 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
 
     setIsSubmittingBSR(true);
     try {
-      const res = await returnMultipleMachinesToBSR(serials);
+      const res = await returnMultipleMachinesToBSR(serials, {
+        userId: operatorUserId,
+        name: operatorName
+      });
       if (res.success) {
         setSuccessBanner(`Successfully returned ${res.returnedCount} machine(s) to BSR.`);
         const freshId = `row-${Date.now()}`;
@@ -710,10 +809,14 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
               <ScanBarcode className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-base font-extrabold text-white tracking-wide flex items-center gap-2">
+              <h2 className="text-base font-extrabold text-white tracking-wide flex items-center gap-2 flex-wrap">
                 Barcode / QR Scanner
                 <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded-full bg-cyan-950 text-cyan-400 border border-cyan-800/80">
                   LLT Station
+                </span>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700 inline-flex items-center gap-1">
+                  <User className="w-2.5 h-2.5 text-cyan-400" />
+                  ID: <strong className="text-cyan-300 font-bold">{operatorUserId}</strong>
                 </span>
               </h2>
               <p className="text-[11px] text-slate-400">Mobile real-time scanner for ELT &amp; BSR tracking</p>
@@ -790,6 +893,22 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                 className="w-full min-h-[210px] sm:min-h-[240px]"
               />
 
+              {/* Instant Scan Feedback Banner over camera */}
+              {scanFeedbackToast && (
+                <div className="absolute top-2.5 inset-x-3 z-20 flex items-center justify-between p-2.5 bg-emerald-950/95 border border-emerald-500 rounded-xl shadow-xl backdrop-blur-xs text-emerald-200 text-xs animate-in slide-in-from-top-2 duration-150">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping shrink-0" />
+                    <div className="truncate">
+                      <span className="font-mono font-black text-white">{scanFeedbackToast.serial}</span>
+                      <span className="text-emerald-300 ml-1.5 font-semibold">({scanFeedbackToast.model})</span>
+                    </div>
+                  </div>
+                  <span className="text-[10px] font-extrabold bg-emerald-900 text-emerald-300 px-2 py-0.5 rounded-md shrink-0 border border-emerald-700">
+                    Next Ready 🎯
+                  </span>
+                </div>
+              )}
+
               {/* Status & User-Action Overlay when camera is paused/inactive */}
               {!isCameraActive && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center p-4 bg-slate-950/85 backdrop-blur-xs text-center z-10">
@@ -853,6 +972,26 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
               </div>
 
               <div className="flex items-center gap-1.5">
+                {/* Ready Next / Anti-Stall reset button */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    lastScannedBarcodeRef.current = '';
+                    isProcessingScanRef.current = false;
+                    setBatchError(null);
+                    if (machineRows.length > 0) {
+                      const emptyTarget = machineRows.find(r => !r.serialNumber) || machineRows[0];
+                      setActiveRowId(emptyTarget.id);
+                      activeRowIdRef.current = emptyTarget.id;
+                    }
+                  }}
+                  className="px-2 py-1 rounded-lg bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-800 text-cyan-300 text-[11px] font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+                  title="Ready for next scan / unblock scanner"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Ready Next</span>
+                </button>
+
                 {availableCameras.length > 1 && (
                   <button
                     type="button"
@@ -949,10 +1088,14 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
               <div className="space-y-3 max-h-[380px] overflow-y-auto pr-1">
                 {machineRows.map((row, index) => {
                   const isTarget = row.id === activeRowId;
+                  const filledBelow = machineRows.slice(index + 1).filter(r => r.serialNumber.trim()).length;
+                  const scanNumber = filledBelow + 1;
+                  const isFilled = Boolean(row.serialNumber.trim());
+
                   return (
                     <div
                       key={row.id}
-                      onClick={() => setActiveRowId(row.id)}
+                      onClick={() => handleSelectActiveRow(row.id)}
                       className={`p-3.5 rounded-xl border transition-all space-y-2.5 cursor-pointer ${
                         isTarget
                           ? 'bg-slate-950/90 border-cyan-500/80 ring-2 ring-cyan-500/20 shadow-lg shadow-cyan-950/40'
@@ -962,13 +1105,17 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                       {/* Row Header with Machine #, Scan Target badge, and Action (+) & Trash buttons */}
                       <div className="flex items-center justify-between text-xs">
                         <div className="flex items-center gap-2">
-                          <span className="font-extrabold text-white bg-slate-900 border border-slate-800 px-2 py-0.5 rounded-md text-[11px]">
-                            Machine #{index + 1}
+                          <span className={`font-extrabold px-2 py-0.5 rounded-md text-[11px] border ${
+                            isFilled
+                              ? 'bg-slate-900 border-slate-800 text-white'
+                              : 'bg-cyan-950/70 border-cyan-800 text-cyan-300'
+                          }`}>
+                            {isFilled ? `Machine #${scanNumber}` : `Next Machine`}
                           </span>
                           {isTarget && (
                             <span className="font-bold text-cyan-400 text-[10px] flex items-center gap-1">
                               <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping inline-block" />
-                              <span>Active Target 🎯</span>
+                              <span>{isFilled ? 'Active Target 🎯' : 'Ready for Scan 🎯'}</span>
                             </span>
                           )}
                         </div>
@@ -1113,6 +1260,10 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                   const isTarget = row.id === activeRowId;
                   const isMatched = row.matchStatus === 'matched';
                   const isNotFound = row.matchStatus === 'not_found';
+                  const filledBelow = machineRows.slice(index + 1).filter(r => r.serialNumber.trim()).length;
+                  const scanNumber = filledBelow + 1;
+                  const isFilled = Boolean(row.serialNumber.trim());
+
                   return (
                     <div
                       key={row.id}
@@ -1126,13 +1277,17 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                       {/* Row Header with Machine #, Scan Target badge, and Action (+) & Trash buttons */}
                       <div className="flex items-center justify-between text-xs">
                         <div className="flex items-center gap-2">
-                          <span className="font-extrabold text-white bg-slate-900 border border-slate-800 px-2 py-0.5 rounded-md text-[11px]">
-                            Machine #{index + 1}
+                          <span className={`font-extrabold px-2 py-0.5 rounded-md text-[11px] border ${
+                            isFilled
+                              ? 'bg-slate-900 border-slate-800 text-white'
+                              : 'bg-emerald-950/70 border-emerald-800 text-emerald-300'
+                          }`}>
+                            {isFilled ? `Machine #${scanNumber}` : `Next Machine`}
                           </span>
                           {isTarget && (
                             <span className="font-bold text-emerald-400 text-[10px] flex items-center gap-1">
                               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping inline-block" />
-                              <span>Active Target 🎯</span>
+                              <span>{isFilled ? 'Active Target 🎯' : 'Ready for Scan 🎯'}</span>
                             </span>
                           )}
                         </div>

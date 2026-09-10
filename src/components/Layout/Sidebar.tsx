@@ -31,6 +31,7 @@ import {
 import { subscribeReportRoom, getSavedReports } from '../../services/reportRoomStore';
 import { subscribeAppVersion, getAppVersionState } from '../../services/versionService';
 import { subscribeELTRecords, getELTRecords } from '../../services/eltBsrStore';
+import { subscribeSmogUnits, getSmogUnits, LeakUnitRecord } from '../Smog/SmogModule';
 import { useAuth } from '../../context/AuthContext';
 import { AuthRole } from '../../types';
 
@@ -64,6 +65,8 @@ interface SidebarProps {
   receivedUnitsCount: number;
   onOpenAddPpModal?: (initialType?: 'IDU' | 'ODU' | 'BOTH') => void;
   userRole?: AuthRole;
+  selectedSmogShift?: 'all' | 'A' | 'B' | 'C';
+  onSelectSmogShift?: (shift: 'all' | 'A' | 'B' | 'C') => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -75,12 +78,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
   receivedUnitsCount,
   onOpenAddPpModal,
   userRole = 'admin',
+  selectedSmogShift = 'all',
+  onSelectSmogShift,
 }) => {
   const { logout, user } = useAuth();
   const [isPpDropdownOpen, setIsPpDropdownOpen] = useState(true);
+  const [isSmogDropdownOpen, setIsSmogDropdownOpen] = useState(true);
   const [reportRoomCount, setReportRoomCount] = useState<number>(() => getSavedReports().length);
   const [appVersion, setAppVersion] = useState<string>(() => getAppVersionState().currentVersion);
   const [eltCount, setEltCount] = useState<number>(() => getELTRecords().length);
+  const [smogUnits, setSmogUnits] = useState<LeakUnitRecord[]>(() => getSmogUnits());
 
   const effectiveRole = user?.role || userRole;
   const isRandom = effectiveRole === 'random';
@@ -95,12 +102,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
     const unsubELT = subscribeELTRecords((records) => {
       setEltCount(records.length);
     });
+    const unsubSmog = subscribeSmogUnits((units) => {
+      setSmogUnits(units);
+    });
     return () => {
       unsubRoom();
       unsubVer();
       unsubELT();
+      unsubSmog();
     };
   }, []);
+
+  const smogCountA = smogUnits.filter(u => u.shift === 'A').length;
+  const smogCountB = smogUnits.filter(u => u.shift === 'B').length;
+  const smogCountC = smogUnits.filter(u => u.shift === 'C').length;
+  const smogCountTotal = smogUnits.length;
 
   const allMainItems = [
     {
@@ -143,7 +159,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       id: 'smog' as TabType,
       label: 'Smog Section',
       icon: Cloud,
-      badge: null
+      badge: smogCountTotal > 0 ? `${smogCountTotal}` : null
     },
     {
       id: 'reports' as TabType,
@@ -327,6 +343,118 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         >
                           <Activity className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
                           <span>Unit Testing</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              }
+
+              if (item.id === 'smog') {
+                const isSmogActive = activeTab === 'smog';
+                return (
+                  <div key={item.id} className="space-y-1">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setIsSmogDropdownOpen(!isSmogDropdownOpen);
+                        handleNavClick('smog');
+                      }}
+                      className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl font-medium text-sm transition-all duration-200 group cursor-pointer ${
+                        isSmogActive
+                          ? 'bg-gradient-to-r from-cyan-600/90 to-blue-600/90 text-white font-semibold shadow-lg shadow-cyan-950/50'
+                          : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <Icon className={`w-5 h-5 transition-transform duration-200 group-hover:scale-110 ${
+                          isSmogActive ? 'text-white' : 'text-slate-400 group-hover:text-cyan-400'
+                        }`} />
+                        <span>{item.label}</span>
+                      </div>
+
+                      <div className="flex items-center gap-1.5">
+                        <span
+                          className={`px-2 py-0.5 text-xs font-bold rounded-full ${
+                            isSmogActive
+                              ? 'bg-white/20 text-white'
+                              : 'bg-cyan-950 text-cyan-300 border border-cyan-800'
+                          }`}
+                        >
+                          {smogCountTotal > 0 ? smogCountTotal : 'SMOG'}
+                        </span>
+                        {isSmogDropdownOpen ? (
+                          <ChevronDown className="w-4 h-4 text-slate-400" />
+                        ) : (
+                          <ChevronRight className="w-4 h-4 text-slate-400" />
+                        )}
+                      </div>
+                    </button>
+
+                    {/* Smog Section Shift Menu: Shift A, Shift B, Shift C */}
+                    {isSmogDropdownOpen && (
+                      <div className="ml-4 pl-3 border-l-2 border-cyan-800/60 space-y-1 py-1">
+                        {/* 1. Shift A */}
+                        <button
+                          onClick={() => {
+                            onSelectSmogShift?.('A');
+                            handleNavClick('smog');
+                          }}
+                          className={`w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-xs font-semibold transition-all text-left cursor-pointer ${
+                            isSmogActive && selectedSmogShift === 'A'
+                              ? 'bg-cyan-950/90 text-cyan-300 border border-cyan-800/80 font-bold'
+                              : 'text-slate-300 hover:text-cyan-300 hover:bg-slate-800/80'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="w-2 h-2 rounded-full bg-cyan-400 shadow-sm shadow-cyan-400/50" />
+                            <span>Shift A</span>
+                          </div>
+                          <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800">
+                            {smogCountA}
+                          </span>
+                        </button>
+
+                        {/* 2. Shift B */}
+                        <button
+                          onClick={() => {
+                            onSelectSmogShift?.('B');
+                            handleNavClick('smog');
+                          }}
+                          className={`w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-xs font-semibold transition-all text-left cursor-pointer ${
+                            isSmogActive && selectedSmogShift === 'B'
+                              ? 'bg-amber-950/90 text-amber-300 border border-amber-800/80 font-bold'
+                              : 'text-slate-300 hover:text-amber-300 hover:bg-slate-800/80'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="w-2 h-2 rounded-full bg-amber-400 shadow-sm shadow-amber-400/50" />
+                            <span>Shift B</span>
+                          </div>
+                          <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-800">
+                            {smogCountB}
+                          </span>
+                        </button>
+
+                        {/* 3. Shift C */}
+                        <button
+                          onClick={() => {
+                            onSelectSmogShift?.('C');
+                            handleNavClick('smog');
+                          }}
+                          className={`w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-xs font-semibold transition-all text-left cursor-pointer ${
+                            isSmogActive && selectedSmogShift === 'C'
+                              ? 'bg-indigo-950/90 text-indigo-300 border border-indigo-800/80 font-bold'
+                              : 'text-slate-300 hover:text-indigo-300 hover:bg-slate-800/80'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="w-2 h-2 rounded-full bg-indigo-400 shadow-sm shadow-indigo-400/50" />
+                            <span>Shift C</span>
+                          </div>
+                          <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-indigo-950 text-indigo-300 border border-indigo-800">
+                            {smogCountC}
+                          </span>
                         </button>
                       </div>
                     )}

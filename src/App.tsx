@@ -35,7 +35,8 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { LoginScreen } from './components/Auth/LoginScreen';
 import { AccessDeniedView } from './components/Auth/AccessDeniedView';
 import { UserManagementModule } from './components/Admin/UserManagementModule';
-import { FlaskConical, RefreshCw } from 'lucide-react';
+import { SettingsPasswordModal } from './components/Settings/SettingsPasswordModal';
+import { FlaskConical, RefreshCw, Lock, Unlock } from 'lucide-react';
 
 import { Unit, UserProfile, DynamicUnitRow } from './types';
 
@@ -88,6 +89,11 @@ export function MainApp() {
   const [editedUnit, setEditedUnit] = useState<Unit | null>(null);
   const [isSupabaseModalOpen, setIsSupabaseModalOpen] = useState(false);
   const [isBarcodeScannerOpen, setIsBarcodeScannerOpen] = useState(false);
+  const [selectedSmogShift, setSelectedSmogShift] = useState<'all' | 'A' | 'B' | 'C'>('all');
+
+  // Settings Security: Protected by Password PIN (9090)
+  const [isSettingsUnlocked, setIsSettingsUnlocked] = useState(false);
+  const [isSettingsPasswordModalOpen, setIsSettingsPasswordModalOpen] = useState(false);
 
   // Preselected unit for Generate Report screen
   const [reportPreselectedSerial, setReportPreselectedSerial] = useState<string>('');
@@ -152,7 +158,7 @@ export function MainApp() {
     registerMeghaUIHandlers({
       navigateToTab: (tab) => {
         if (['dashboard', 'rd-units', 'proto-units', 'pp-units', 'field-units', 'smog', 'reports', 'report-room', 'cs-report', 'ce-report', 'export-data', 'settings', 'ai-support'].includes(tab)) {
-          setActiveTab(tab as TabType);
+          handleSelectTab(tab as TabType);
         }
       },
       openAddUnitModal: () => setIsAddModalOpen(true),
@@ -227,6 +233,23 @@ export function MainApp() {
   // Handlers
   const handleToggleTheme = () => {
     setTheme(prev => prev === 'light' ? 'dark' : 'light');
+  };
+
+  // Tab Navigation with Password Guard for Settings (PIN: 9090)
+  const handleSelectTab = (tab: TabType) => {
+    if (tab === 'settings') {
+      if (isSettingsUnlocked) {
+        setActiveTab('settings');
+      } else {
+        setIsSettingsPasswordModalOpen(true);
+      }
+      return;
+    }
+    // Lock settings again upon leaving settings
+    if (activeTab === 'settings') {
+      setIsSettingsUnlocked(false);
+    }
+    setActiveTab(tab);
   };
 
   const handleChangeUserRole = (newRole: UserProfile['role']) => {
@@ -329,14 +352,16 @@ export function MainApp() {
         {/* Responsive Left Sidebar */}
         <Sidebar
           activeTab={activeTab}
-          onSelectTab={setActiveTab}
+          onSelectTab={handleSelectTab}
           isOpenMobile={isOpenMobileSidebar}
           onCloseMobile={() => setIsOpenMobileSidebar(false)}
           liveUnitsCount={liveUnitsCount}
           receivedUnitsCount={receivedUnitsCount}
           userRole={user?.role}
+          selectedSmogShift={selectedSmogShift}
+          onSelectSmogShift={setSelectedSmogShift}
           onOpenAddPpModal={(type) => {
-            setActiveTab('pp-units');
+            handleSelectTab('pp-units');
             if (type) setAddPpInitialType(type);
             setIsAddPpModalOpen(true);
           }}
@@ -419,6 +444,8 @@ export function MainApp() {
               {activeTab === 'smog' && (
                 <SmogModule
                   currentUser={currentUser}
+                  selectedShiftFilter={selectedSmogShift}
+                  onShiftFilterChange={setSelectedSmogShift}
                   onNavigateToDashboard={() => {
                     setActiveTab('dashboard');
                   }}
@@ -467,11 +494,31 @@ export function MainApp() {
               )}
 
               {activeTab === 'settings' && (
-                <SettingsModule
-                  theme={theme}
-                  onToggleTheme={handleToggleTheme}
-                  onOpenSupabaseModal={() => setIsSupabaseModalOpen(true)}
-                />
+                isSettingsUnlocked ? (
+                  <SettingsModule
+                    theme={theme}
+                    onToggleTheme={handleToggleTheme}
+                    onOpenSupabaseModal={() => setIsSupabaseModalOpen(true)}
+                  />
+                ) : (
+                  <div className="flex flex-col items-center justify-center min-h-[420px] p-8 bg-slate-900/60 border border-slate-800 rounded-2xl text-center">
+                    <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-400 mb-4 shadow-lg shadow-amber-950/40">
+                      <Lock className="w-8 h-8" />
+                    </div>
+                    <h3 className="text-lg font-bold text-white mb-1.5">Settings Locked</h3>
+                    <p className="text-sm text-slate-400 max-w-sm mb-5 leading-relaxed">
+                      System Settings open karne ke liye authorized security password enter karein.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setIsSettingsPasswordModalOpen(true)}
+                      className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-xs font-bold shadow-lg shadow-cyan-950/50 flex items-center gap-2 cursor-pointer active:scale-95 transition-transform"
+                    >
+                      <Unlock className="w-4 h-4" />
+                      <span>Enter Password</span>
+                    </button>
+                  </div>
+                )
               )}
 
               {/* Admin User Management */}
@@ -538,6 +585,17 @@ export function MainApp() {
         isOpen={Boolean(editedUnit)}
         onClose={() => setEditedUnit(null)}
         onSave={handleSaveEditUnit}
+      />
+
+      {/* Settings Security Password Dialog (Protected) */}
+      <SettingsPasswordModal
+        isOpen={isSettingsPasswordModalOpen}
+        onClose={() => setIsSettingsPasswordModalOpen(false)}
+        onSuccess={() => {
+          setIsSettingsUnlocked(true);
+          setIsSettingsPasswordModalOpen(false);
+          setActiveTab('settings');
+        }}
       />
 
       {/* 1. Header Barcode Scanner Modal (Send ELT & Return BSR workflows) */}

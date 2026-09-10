@@ -10,6 +10,8 @@ export interface ELTRecord {
   status: 'Sent to ELT';
   eltDate: string; // e.g. "2026-09-09"
   eltTime: string; // e.g. "15:45:00"
+  scannedByUserId?: string; // User ID who scanned (e.g. "ADMIN01")
+  scannedByName?: string;   // Operator name
   createdAt: string; // ISO String
   timestamp?: number;
 }
@@ -23,6 +25,10 @@ export interface BSRRecord {
   status: 'Returned from BSR';
   originalELTDateTime: string;
   bsrReturnDateTime: string;
+  scannedByUserId?: string;  // Original ELT scanner User ID
+  scannedByName?: string;    // Original ELT scanner Name
+  returnedByUserId?: string; // BSR return operator User ID
+  returnedByName?: string;   // BSR return operator Name
   createdAt: string;
   timestamp?: number;
 }
@@ -41,6 +47,8 @@ const INITIAL_ELT_RECORDS: ELTRecord[] = [
     status: 'Sent to ELT',
     eltDate: new Date(Date.now() - 3600000 * 2).toISOString().slice(0, 10),
     eltTime: new Date(Date.now() - 3600000 * 2).toLocaleTimeString('en-GB'),
+    scannedByUserId: 'ADMIN01',
+    scannedByName: 'Admin',
     createdAt: new Date(Date.now() - 3600000 * 2).toISOString(),
     timestamp: Date.now() - 3600000 * 2
   },
@@ -53,6 +61,8 @@ const INITIAL_ELT_RECORDS: ELTRecord[] = [
     status: 'Sent to ELT',
     eltDate: new Date(Date.now() - 3600000 * 5).toISOString().slice(0, 10),
     eltTime: new Date(Date.now() - 3600000 * 5).toLocaleTimeString('en-GB'),
+    scannedByUserId: 'ADMIN01',
+    scannedByName: 'Admin',
     createdAt: new Date(Date.now() - 3600000 * 5).toISOString(),
     timestamp: Date.now() - 3600000 * 5
   }
@@ -68,6 +78,10 @@ const INITIAL_BSR_RECORDS: BSRRecord[] = [
     status: 'Returned from BSR',
     originalELTDateTime: '2026-09-08 10:30:00',
     bsrReturnDateTime: '2026-09-08 16:45:00',
+    scannedByUserId: 'ADMIN01',
+    scannedByName: 'Admin',
+    returnedByUserId: 'OPERATOR02',
+    returnedByName: 'BSR Team',
     createdAt: new Date(Date.now() - 86400000).toISOString(),
     timestamp: Date.now() - 86400000
   }
@@ -298,7 +312,8 @@ export function findInELTRecords(serialNumber: string): ELTRecord | undefined {
  *   Process Type: "ELT", Status: "Sent to ELT", Date, Time, Created Timestamp
  */
 export async function sendMachinesToELT(
-  machines: { modelName: string; materialCode: string; serialNumber: string }[]
+  machines: { modelName: string; materialCode: string; serialNumber: string }[],
+  scannedBy?: { userId?: string; name?: string }
 ): Promise<{ success: boolean; addedCount: number; duplicates: string[] }> {
   if (!machines || machines.length === 0) {
     return { success: false, addedCount: 0, duplicates: [] };
@@ -336,6 +351,8 @@ export async function sendMachinesToELT(
       status: 'Sent to ELT',
       eltDate: dateStr,
       eltTime: timeStr,
+      scannedByUserId: scannedBy?.userId || 'ADMIN01',
+      scannedByName: scannedBy?.name || 'Admin',
       createdAt: nowIso,
       timestamp
     };
@@ -376,7 +393,8 @@ export async function sendMachinesToELT(
  *    - Original ELT Date & Time, BSR Return Date & Time, Firebase Timestamp
  */
 export async function returnMachineToBSR(
-  serialNumber: string
+  serialNumber: string,
+  returnedBy?: { userId?: string; name?: string }
 ): Promise<{ success: boolean; bsrRecord?: BSRRecord; error?: string }> {
   if (!serialNumber) {
     return { success: false, error: 'Serial Number is required.' };
@@ -409,6 +427,10 @@ export async function returnMachineToBSR(
     status: 'Returned from BSR',
     originalELTDateTime,
     bsrReturnDateTime: bsrDateTime,
+    scannedByUserId: matchingELT.scannedByUserId || 'ADMIN01',
+    scannedByName: matchingELT.scannedByName || 'Admin',
+    returnedByUserId: returnedBy?.userId || 'ADMIN01',
+    returnedByName: returnedBy?.name || 'Admin',
     createdAt: nowIso,
     timestamp
   };
@@ -442,7 +464,8 @@ export async function returnMachineToBSR(
  * Return multiple machines from ELT to BSR in a single batch
  */
 export async function returnMultipleMachinesToBSR(
-  serialNumbers: string[]
+  serialNumbers: string[],
+  returnedBy?: { userId?: string; name?: string }
 ): Promise<{ success: boolean; returnedCount: number; notFound: string[]; errors: string[] }> {
   if (!serialNumbers || serialNumbers.length === 0) {
     return { success: false, returnedCount: 0, notFound: [], errors: ['No serial numbers provided'] };
@@ -484,6 +507,10 @@ export async function returnMultipleMachinesToBSR(
       status: 'Returned from BSR',
       originalELTDateTime,
       bsrReturnDateTime: bsrDateTime,
+      scannedByUserId: matchingELT.scannedByUserId || 'ADMIN01',
+      scannedByName: matchingELT.scannedByName || 'Admin',
+      returnedByUserId: returnedBy?.userId || 'ADMIN01',
+      returnedByName: returnedBy?.name || 'Admin',
       createdAt: nowIso,
       timestamp
     };

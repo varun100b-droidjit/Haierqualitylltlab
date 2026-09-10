@@ -15,7 +15,10 @@ import {
   Eye,
   Database,
   CheckCircle,
-  AlertCircle
+  AlertCircle,
+  ScanBarcode,
+  Calendar,
+  Filter
 } from 'lucide-react';
 import { UserProfile } from '../../types';
 import { 
@@ -25,6 +28,8 @@ import {
   broadcastLabRealtimeEvent,
   subscribeToLabRealtimeEvents 
 } from '../../lib/supabase';
+import { SmogBarcodeScannerModal } from './SmogBarcodeScannerModal';
+import { SmogUniqueCalendar } from './SmogUniqueCalendar';
 
 export interface LeakUnitRecord {
   id: string;
@@ -40,6 +45,9 @@ export interface LeakUnitRecord {
   time: string;            // HH:mm AM/PM
   createdAt: string;
   notes?: string;
+  productionDate?: string;
+  smogDate?: string;
+  operatorUserId?: string;
 }
 
 // Backward compatibility export alias
@@ -128,27 +136,67 @@ export function saveSmogUnits(units: LeakUnitRecord[]) {
   } catch (e) {
     console.warn(e);
   }
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('smog-units-updated'));
+  }
   if (localSmogBus) {
     try { localSmogBus.postMessage({ timestamp: Date.now() }); } catch {}
   }
   broadcastLabRealtimeEvent('smog_units_change', { timestamp: Date.now() });
 }
 
+export function subscribeSmogUnits(callback: (units: LeakUnitRecord[]) => void): () => void {
+  const handler = () => {
+    callback(getSmogUnits());
+  };
+  window.addEventListener('storage', handler);
+  window.addEventListener('smog-units-updated', handler);
+  if (localSmogBus) {
+    localSmogBus.addEventListener('message', handler);
+  }
+  return () => {
+    window.removeEventListener('storage', handler);
+    window.removeEventListener('smog-units-updated', handler);
+    if (localSmogBus) {
+      localSmogBus.removeEventListener('message', handler);
+    }
+  };
+}
+
 interface SmogModuleProps {
   currentUser?: UserProfile;
   onNavigateToDashboard?: () => void;
+  selectedShiftFilter?: 'all' | 'A' | 'B' | 'C';
+  onShiftFilterChange?: (shift: 'all' | 'A' | 'B' | 'C') => void;
 }
 
 export const SmogModule: React.FC<SmogModuleProps> = ({ 
   currentUser,
+  selectedShiftFilter = 'all',
+  onShiftFilterChange,
 }) => {
   const [leakRecords, setLeakRecords] = useState<LeakUnitRecord[]>(getSmogUnits());
   const [searchQuery, setSearchQuery] = useState('');
-  const [shiftFilter, setShiftFilter] = useState<'all' | 'A' | 'B' | 'C'>('all');
+  const [shiftFilter, setShiftFilter] = useState<'all' | 'A' | 'B' | 'C'>(selectedShiftFilter);
+  const [selectedDate, setSelectedDate] = useState<string>('');
   const [supabaseStatus, setSupabaseStatus] = useState<'connected' | 'syncing' | 'idle'>('idle');
+  const [toastNotification, setToastNotification] = useState<string | null>(null);
+
+  // Sync shiftFilter if selectedShiftFilter prop changes from Sidebar
+  useEffect(() => {
+    if (selectedShiftFilter && selectedShiftFilter !== shiftFilter) {
+      setShiftFilter(selectedShiftFilter);
+    }
+  }, [selectedShiftFilter]);
+
+  const handleSelectShiftFilter = (newShift: 'all' | 'A' | 'B' | 'C') => {
+    setShiftFilter(newShift);
+    onShiftFilterChange?.(newShift);
+  };
 
   // Add Leak Modal State
   const [isLeakModalOpen, setIsLeakModalOpen] = useState(false);
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
   
   // View Details Modal State
   const [selectedRecordForDetails, setSelectedRecordForDetails] = useState<LeakUnitRecord | null>(null);
@@ -339,7 +387,38 @@ export const SmogModule: React.FC<SmogModuleProps> = ({
     setTimeout(() => setCopiedId(null), 2000);
   };
 
-  // Filtered Records
+  // Save units scanned from SmogBarcodeScannerModal
+  const handleSaveScannedUnits = async (newRecords: LeakUnitRecord[]) => {
+    const updated = [...newRecords, ...leakRecords];
+    setLeakRecords(updated);
+    saveSmogUnits(updated);
+
+    // Auto-align view to the newly scanned units' Date & Shift
+    if (newRecords.length > 0) {
+      const savedDate = newRecords[0].smogDate || newRecords[0].date;
+      const savedShift = newRecords[0].shift;
+
+      if (selectedDate && selectedDate !== savedDate) {
+        setSelectedDate(savedDate);
+      }
+      if (shiftFilter !== 'all' && shiftFilter !== savedShift) {
+        handleSelectShiftFilter(savedShift);
+      }
+    }
+
+    // Sync each to Supabase
+    setSupabaseStatus('syncing');
+    for (const rec of newRecords) {
+      await syncLeakUnitToSupabase(rec);
+    }
+    setSupabaseStatus('connected');
+
+    const first = newRecords[0];
+    setToastNotification(`✓ Added ${newRecords.length} Leak Unit(s) to Shift ${first?.shift || ''} [Date: ${first?.smogDate || ''}]`);
+    setTimeout(() => setToastNotification(null), 3500);
+  };
+
+  // Filtered Records (includes Search, Shift, and Calendar Date)
   const filteredRecords = leakRecords.filter(record => {
     const matchSearch = searchQuery === '' ||
       record.modelName.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -348,107 +427,191 @@ export const SmogModule: React.FC<SmogModuleProps> = ({
 
     const matchShift = shiftFilter === 'all' || record.shift === shiftFilter;
 
-    return matchSearch && matchShift;
+    const matchDate = !selectedDate || 
+      record.date === selectedDate || 
+      record.smogDate === selectedDate || 
+      record.productionDate === selectedDate;
+
+    return matchSearch && matchShift && matchDate;
   });
 
   const todayStr = new Date().toISOString().split('T')[0];
-  const todayCount = leakRecords.filter(r => r.date === todayStr).length;
-  const totalSuspects = leakRecords.reduce((sum, r) => sum + r.suspectCount, 0);
-  const totalActuals = leakRecords.reduce((sum, r) => sum + r.actualCount, 0);
+  const todayCount = leakRecords.filter(r => r.date === todayStr || r.smogDate === todayStr).length;
+
+  // Date-wise active records for Dashboard calculations
+  const activeRecordsForMetrics = selectedDate
+    ? leakRecords.filter(r => r.date === selectedDate || r.smogDate === selectedDate || r.productionDate === selectedDate)
+    : leakRecords;
+
+  const displayLeakCount = activeRecordsForMetrics.length;
+  const displaySuspects = activeRecordsForMetrics.reduce((sum, r) => sum + r.suspectCount, 0);
+  const displayActuals = activeRecordsForMetrics.reduce((sum, r) => sum + r.actualCount, 0);
+
+  // Shift-wise counts for current active records (Date-filtered)
+  const countShiftA = activeRecordsForMetrics.filter(r => r.shift === 'A').length;
+  const countShiftB = activeRecordsForMetrics.filter(r => r.shift === 'B').length;
+  const countShiftC = activeRecordsForMetrics.filter(r => r.shift === 'C').length;
+
+  const suspectsShiftA = activeRecordsForMetrics.filter(r => r.shift === 'A').reduce((sum, r) => sum + r.suspectCount, 0);
+  const suspectsShiftB = activeRecordsForMetrics.filter(r => r.shift === 'B').reduce((sum, r) => sum + r.suspectCount, 0);
+  const suspectsShiftC = activeRecordsForMetrics.filter(r => r.shift === 'C').reduce((sum, r) => sum + r.suspectCount, 0);
+
+  const actualsShiftA = activeRecordsForMetrics.filter(r => r.shift === 'A').reduce((sum, r) => sum + r.actualCount, 0);
+  const actualsShiftB = activeRecordsForMetrics.filter(r => r.shift === 'B').reduce((sum, r) => sum + r.actualCount, 0);
+  const actualsShiftC = activeRecordsForMetrics.filter(r => r.shift === 'C').reduce((sum, r) => sum + r.actualCount, 0);
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-300">
-      {/* Top Banner & Main Action Controls */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 p-6 rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl relative overflow-hidden">
-        <div className="absolute top-0 right-0 -mt-8 -mr-8 w-48 h-48 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none" />
-        
-        <div className="space-y-1 z-10">
-          <div className="flex items-center gap-3">
-            <span className="p-2.5 rounded-2xl bg-cyan-950 border border-cyan-800 text-cyan-400">
-              <Cloud className="w-5 h-5" />
-            </span>
-            <div>
-              <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight flex items-center gap-2">
-                Smog - Leak Unit Management
-              </h1>
-              <div className="flex items-center gap-2 mt-0.5">
-                <span className="text-xs text-slate-400">
-                  Log & track leak units with Suspect & Actual passed verification.
-                </span>
-                <span className="inline-flex items-center gap-1 text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-400 border border-emerald-800/80">
-                  <Database className="w-3 h-3 text-emerald-400" />
-                  <span>Supabase Live Sync</span>
-                </span>
-              </div>
-            </div>
+    <div className="space-y-4 sm:space-y-5 animate-in fade-in duration-300">
+      
+      {/* TOAST NOTIFICATION */}
+      {toastNotification && (
+        <div className="fixed top-4 right-4 z-50 px-4 py-2.5 rounded-2xl bg-emerald-950 border border-emerald-500 text-emerald-300 text-xs font-mono font-bold shadow-2xl flex items-center gap-2 animate-in slide-in-from-top-2">
+          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+          <span>{toastNotification}</span>
+        </div>
+      )}
+
+      {/* COMPACT CARDVIEW (50% Height Down) */}
+      {/* Left: Calendar (Date-wise Dashboard Data) | Center: Title | Right: Scanner & Manual */}
+      <div className="py-2.5 px-3.5 sm:px-5 rounded-2xl bg-slate-900 border border-slate-800 shadow-xl relative overflow-hidden flex flex-col md:flex-row md:items-center justify-between gap-3">
+        <div className="absolute top-0 right-0 -mt-6 -mr-6 w-36 h-36 bg-cyan-500/10 rounded-full blur-2xl pointer-events-none" />
+
+        {/* LEFT: Unique Calendar Date Picker for Date-wise Dashboard Data */}
+        <div className="flex items-center gap-2 z-10">
+          <SmogUniqueCalendar
+            selectedDate={selectedDate}
+            onSelectDate={(d) => setSelectedDate(d)}
+            records={leakRecords}
+          />
+        </div>
+
+        {/* CENTER: Title & Live Sync Badge */}
+        <div className="flex items-center gap-2.5 z-10">
+          <span className="p-1.5 rounded-xl bg-cyan-950 border border-cyan-800 text-cyan-400 shrink-0">
+            <Cloud className="w-4 h-4" />
+          </span>
+          <div>
+            <h1 className="text-sm sm:text-base font-black text-white tracking-tight flex items-center gap-2">
+              <span>Smog - Leak Unit Management</span>
+              <span className="inline-flex items-center gap-1 text-[9px] font-mono font-bold px-1.5 py-0.5 rounded-full bg-emerald-950 text-emerald-400 border border-emerald-800/80">
+                <Database className="w-2.5 h-2.5 text-emerald-400" />
+                <span>Live Sync</span>
+              </span>
+            </h1>
+            <p className="text-[10px] text-slate-400 hidden sm:block">
+              Log & track leak units with Suspect verification.
+            </p>
           </div>
         </div>
 
-        {/* TOP ACTION BAR: Leak Unit Button */}
-        <div className="flex items-center gap-3 z-10">
+        {/* RIGHT: Scanner Button (Manual button removed as requested) */}
+        <div className="flex items-center gap-2 justify-end z-10">
           <button
-            onClick={handleOpenLeakModal}
-            className="flex items-center gap-2 px-6 py-3 rounded-2xl font-black text-xs text-slate-950 bg-gradient-to-r from-cyan-400 via-teal-400 to-emerald-400 hover:from-cyan-300 hover:to-emerald-300 shadow-xl shadow-cyan-950/70 transform active:scale-95 transition-all cursor-pointer"
+            type="button"
+            onClick={() => setIsScannerOpen(true)}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl font-black text-xs text-slate-950 bg-gradient-to-r from-cyan-400 via-teal-400 to-emerald-400 hover:from-cyan-300 hover:to-emerald-300 shadow-md shadow-cyan-950/60 transform active:scale-95 transition-all cursor-pointer"
+            title="Open ELT-style Barcode Scanner for Leak Units"
           >
-            <Plus className="w-4 h-4 stroke-[3]" />
-            <span>Leak Unit</span>
+            <ScanBarcode className="w-4 h-4 stroke-[2.5]" />
+            <span className="tracking-wide">Scanner</span>
           </button>
         </div>
       </div>
 
-      {/* KPI Stats Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800/90">
-          <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider block">Total Leak Units</span>
+      {/* KPI STATS CARDS (Date-Wise Suspect & Actual Verification) */}
+      <div className="grid grid-cols-2 gap-3">
+        <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800/90">
+          <span className="text-[10px] font-mono text-amber-400 uppercase tracking-wider block font-bold">
+            Total Suspect
+          </span>
           <div className="flex items-baseline gap-2 mt-1">
-            <span className="text-2xl font-black text-white font-mono">{leakRecords.length}</span>
-            <span className="text-[10px] text-cyan-400 font-bold">Records</span>
-          </div>
-        </div>
-
-        <div className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800/90">
-          <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider block">Today's Units</span>
-          <div className="flex items-baseline gap-2 mt-1">
-            <span className="text-2xl font-black text-emerald-400 font-mono">{todayCount}</span>
-            <span className="text-[10px] text-slate-400 font-mono">Logged</span>
-          </div>
-        </div>
-
-        <div className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800/90">
-          <span className="text-[10px] font-mono text-amber-400 uppercase tracking-wider block">Total Suspect</span>
-          <div className="flex items-baseline gap-2 mt-1">
-            <span className="text-2xl font-black text-amber-400 font-mono">{totalSuspects}</span>
+            <span className="text-2xl font-black text-amber-400 font-mono">{displaySuspects}</span>
             <span className="text-[10px] text-slate-400 font-mono">Sr. No.</span>
           </div>
         </div>
 
-        <div className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800/90">
-          <span className="text-[10px] font-mono text-emerald-400 uppercase tracking-wider block">Total Actual (Passed)</span>
+        <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800/90">
+          <span className="text-[10px] font-mono text-emerald-400 uppercase tracking-wider block font-bold">
+            Total Actual (Passed)
+          </span>
           <div className="flex items-baseline gap-2 mt-1">
-            <span className="text-2xl font-black text-emerald-400 font-mono">{totalActuals}</span>
+            <span className="text-2xl font-black text-emerald-400 font-mono">{displayActuals}</span>
             <span className="text-[10px] text-emerald-300/80 font-mono">Verified</span>
           </div>
         </div>
       </div>
 
-      {/* FILTER & SEARCH BAR */}
-      <div className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800/90 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-xl">
-        <div className="flex items-center gap-2 w-full sm:w-auto">
-          <label className="text-[11px] font-mono font-bold text-slate-400 uppercase tracking-wider">Shift:</label>
+      {/* SHIFT SELECTOR & SEARCH BAR */}
+      <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800/90 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-xl">
+        <div className="flex items-center gap-2 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
+          <label className="text-[11px] font-mono font-bold text-slate-400 uppercase tracking-wider shrink-0">Shift:</label>
           <div className="flex items-center gap-1.5">
-            {(['all', 'A', 'B', 'C'] as const).map((s) => (
-              <button
-                key={s}
-                onClick={() => setShiftFilter(s)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold transition-all cursor-pointer ${
-                  shiftFilter === s
-                    ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-950/50'
-                    : 'bg-slate-800 text-slate-400 hover:text-white'
-                }`}
-              >
-                {s === 'all' ? 'All Shifts' : `Shift ${s}`}
-              </button>
-            ))}
+            <button
+              onClick={() => handleSelectShiftFilter('all')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
+                shiftFilter === 'all'
+                  ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-950/50 font-black'
+                  : 'bg-slate-800 text-slate-400 hover:text-white'
+              }`}
+            >
+              <span>All Shifts</span>
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                shiftFilter === 'all' ? 'bg-slate-950/40 text-slate-950' : 'bg-slate-900 text-slate-300'
+              }`}>
+                {activeRecordsForMetrics.length}
+              </span>
+            </button>
+
+            <button
+              onClick={() => handleSelectShiftFilter('A')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
+                shiftFilter === 'A'
+                  ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-950/50 font-black'
+                  : 'bg-slate-800 text-slate-400 hover:text-white'
+              }`}
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
+              <span>Shift A</span>
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                shiftFilter === 'A' ? 'bg-slate-950/40 text-slate-950' : 'bg-cyan-950 text-cyan-300 border border-cyan-800'
+              }`}>
+                {countShiftA}
+              </span>
+            </button>
+
+            <button
+              onClick={() => handleSelectShiftFilter('B')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
+                shiftFilter === 'B'
+                  ? 'bg-amber-400 text-slate-950 shadow-md shadow-amber-950/50 font-black'
+                  : 'bg-slate-800 text-slate-400 hover:text-white'
+              }`}
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+              <span>Shift B</span>
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                shiftFilter === 'B' ? 'bg-slate-950/40 text-slate-950' : 'bg-amber-950 text-amber-300 border border-amber-800'
+              }`}>
+                {countShiftB}
+              </span>
+            </button>
+
+            <button
+              onClick={() => handleSelectShiftFilter('C')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
+                shiftFilter === 'C'
+                  ? 'bg-indigo-400 text-slate-950 shadow-md shadow-indigo-950/50 font-black'
+                  : 'bg-slate-800 text-slate-400 hover:text-white'
+              }`}
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-indigo-400" />
+              <span>Shift C</span>
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                shiftFilter === 'C' ? 'bg-slate-950/40 text-slate-950' : 'bg-indigo-950 text-indigo-300 border border-indigo-800'
+              }`}>
+                {countShiftC}
+              </span>
+            </button>
           </div>
         </div>
 
@@ -463,6 +626,96 @@ export const SmogModule: React.FC<SmogModuleProps> = ({
           />
         </div>
       </div>
+
+      {/* SHIFT-WISE QUICK BREAKDOWN (DATE & SHIFT SUMMARY) */}
+      {shiftFilter === 'all' ? (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+          {/* Shift A Card */}
+          <div 
+            onClick={() => handleSelectShiftFilter('A')}
+            className="p-3 rounded-2xl bg-gradient-to-b from-cyan-950/40 to-slate-900 border border-cyan-900/60 hover:border-cyan-500/60 transition-all cursor-pointer group shadow-md"
+          >
+            <div className="flex items-center justify-between">
+              <span className="px-2 py-0.5 rounded-md bg-cyan-950 text-cyan-300 border border-cyan-800 text-[10px] font-black font-mono">
+                SHIFT A
+              </span>
+              <span className="text-[11px] text-cyan-400 font-bold group-hover:underline">View Shift A →</span>
+            </div>
+            <div className="flex items-baseline gap-2 mt-1.5">
+              <span className="text-xl font-black font-mono text-cyan-300">{countShiftA}</span>
+              <span className="text-[11px] text-slate-400">Machines</span>
+            </div>
+            <div className="flex items-center gap-2.5 mt-1 text-[10px] font-mono text-slate-400">
+              <span>Suspect: <strong className="text-amber-400">{suspectsShiftA}</strong></span>
+              <span>Passed: <strong className="text-emerald-400">{actualsShiftA}</strong></span>
+            </div>
+          </div>
+
+          {/* Shift B Card */}
+          <div 
+            onClick={() => handleSelectShiftFilter('B')}
+            className="p-3 rounded-2xl bg-gradient-to-b from-amber-950/40 to-slate-900 border border-amber-900/60 hover:border-amber-500/60 transition-all cursor-pointer group shadow-md"
+          >
+            <div className="flex items-center justify-between">
+              <span className="px-2 py-0.5 rounded-md bg-amber-950 text-amber-300 border border-amber-800 text-[10px] font-black font-mono">
+                SHIFT B
+              </span>
+              <span className="text-[11px] text-amber-400 font-bold group-hover:underline">View Shift B →</span>
+            </div>
+            <div className="flex items-baseline gap-2 mt-1.5">
+              <span className="text-xl font-black font-mono text-amber-300">{countShiftB}</span>
+              <span className="text-[11px] text-slate-400">Machines</span>
+            </div>
+            <div className="flex items-center gap-2.5 mt-1 text-[10px] font-mono text-slate-400">
+              <span>Suspect: <strong className="text-amber-400">{suspectsShiftB}</strong></span>
+              <span>Passed: <strong className="text-emerald-400">{actualsShiftB}</strong></span>
+            </div>
+          </div>
+
+          {/* Shift C Card */}
+          <div 
+            onClick={() => handleSelectShiftFilter('C')}
+            className="p-3 rounded-2xl bg-gradient-to-b from-indigo-950/40 to-slate-900 border border-indigo-900/60 hover:border-indigo-500/60 transition-all cursor-pointer group shadow-md"
+          >
+            <div className="flex items-center justify-between">
+              <span className="px-2 py-0.5 rounded-md bg-indigo-950 text-indigo-300 border border-indigo-800 text-[10px] font-black font-mono">
+                SHIFT C
+              </span>
+              <span className="text-[11px] text-indigo-400 font-bold group-hover:underline">View Shift C →</span>
+            </div>
+            <div className="flex items-baseline gap-2 mt-1.5">
+              <span className="text-xl font-black font-mono text-indigo-300">{countShiftC}</span>
+              <span className="text-[11px] text-slate-400">Machines</span>
+            </div>
+            <div className="flex items-center gap-2.5 mt-1 text-[10px] font-mono text-slate-400">
+              <span>Suspect: <strong className="text-amber-400">{suspectsShiftC}</strong></span>
+              <span>Passed: <strong className="text-emerald-400">{actualsShiftC}</strong></span>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-center justify-between px-3.5 py-2 rounded-xl bg-slate-900/70 border border-slate-800 text-xs font-mono">
+          <div className="flex items-center gap-2 text-slate-300">
+            <span>Filtered to:</span>
+            <span className={`px-2 py-0.5 rounded-md text-xs font-black ${
+              shiftFilter === 'A' ? 'bg-cyan-950 text-cyan-300 border border-cyan-800' :
+              shiftFilter === 'B' ? 'bg-amber-950 text-amber-300 border border-amber-800' :
+              'bg-indigo-950 text-indigo-300 border border-indigo-800'
+            }`}>
+              Shift {shiftFilter}
+            </span>
+            <span className="text-slate-400">
+              {selectedDate ? `(${selectedDate})` : '(All Dates)'}
+            </span>
+          </div>
+          <button
+            onClick={() => handleSelectShiftFilter('all')}
+            className="text-[11px] text-cyan-400 hover:underline cursor-pointer font-bold"
+          >
+            Show All Shifts ↩
+          </button>
+        </div>
+      )}
 
       {/* SAVED LEAK UNITS LIST / CARDS VIEW */}
       <div className="space-y-3">
@@ -529,6 +782,22 @@ export const SmogModule: React.FC<SmogModuleProps> = ({
                     <User className="w-3.5 h-3.5 text-cyan-400" />
                     <span className="font-semibold">{record.smogPerson}</span>
                   </div>
+
+                  {/* Production Date & Smog Date Badges */}
+                  {(record.productionDate || record.smogDate) && (
+                    <div className="flex flex-wrap items-center gap-1.5 pt-1 text-[10px] font-mono">
+                      {record.productionDate && (
+                        <span className="px-2 py-0.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-400">
+                          Prod: <strong className="text-slate-200">{record.productionDate}</strong>
+                        </span>
+                      )}
+                      {record.smogDate && (
+                        <span className="px-2 py-0.5 rounded-lg bg-emerald-950/70 border border-emerald-800/80 text-emerald-400">
+                          Smog: <strong className="text-emerald-300">{record.smogDate}</strong>
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {/* SUSPECT & ACTUAL METRICS DISPLAY */}
@@ -753,6 +1022,16 @@ export const SmogModule: React.FC<SmogModuleProps> = ({
                   <p className="text-[11px] text-slate-400 font-mono">
                     Smog Person: <strong className="text-cyan-300">{selectedRecordForDetails.smogPerson}</strong> • Shift {selectedRecordForDetails.shift}
                   </p>
+                  {(selectedRecordForDetails.productionDate || selectedRecordForDetails.smogDate) && (
+                    <div className="flex items-center gap-2 pt-1 text-[10px] font-mono text-slate-400">
+                      {selectedRecordForDetails.productionDate && (
+                        <span>Prod: <strong className="text-white">{selectedRecordForDetails.productionDate}</strong></span>
+                      )}
+                      {selectedRecordForDetails.smogDate && (
+                        <span className="text-emerald-400">Smog: <strong className="text-emerald-300">{selectedRecordForDetails.smogDate}</strong></span>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
               <button
@@ -872,6 +1151,13 @@ export const SmogModule: React.FC<SmogModuleProps> = ({
           </div>
         </div>
       )}
+
+      {/* SMOG BARCODE SCANNER MODAL */}
+      <SmogBarcodeScannerModal
+        isOpen={isScannerOpen}
+        onClose={() => setIsScannerOpen(false)}
+        onSaveLeakUnits={handleSaveScannedUnits}
+      />
     </div>
   );
 };
