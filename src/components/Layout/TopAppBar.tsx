@@ -403,12 +403,18 @@ export const TopAppBar: React.FC<TopAppBarProps> = ({
               {displayName.charAt(0).toUpperCase()}
             </div>
             <div className="hidden lg:block text-left pr-1">
-              <div className="text-xs font-semibold text-slate-100 leading-none">
-                {displayName}
-              </div>
+              {displayName && displayName !== 'Lab Administrator' ? (
+                <div className="text-xs font-semibold text-slate-100 leading-none">
+                  {displayName}
+                </div>
+              ) : null}
               <div className="text-[10px] text-cyan-400 mt-0.5 leading-none flex items-center gap-1 font-mono">
-                <span>{displayUserId}</span>
-                <span>&bull;</span>
+                {displayUserId && displayUserId !== 'ADMIN01' && (
+                  <>
+                    <span>{displayUserId}</span>
+                    <span>&bull;</span>
+                  </>
+                )}
                 <span className="capitalize">{displayRole}</span>
               </div>
             </div>
@@ -419,7 +425,11 @@ export const TopAppBar: React.FC<TopAppBarProps> = ({
             <div className="absolute right-0 mt-2 w-64 bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl z-50 p-2 animate-in fade-in slide-in-from-top-2 duration-150">
               <div className="px-3 py-2.5 border-b border-slate-800 mb-1 bg-slate-950/60 rounded-xl">
                 <div className="flex items-center justify-between">
-                  <p className="text-xs font-bold text-slate-100">{displayName}</p>
+                  {displayName && displayName !== 'Lab Administrator' ? (
+                    <p className="text-xs font-bold text-slate-100">{displayName}</p>
+                  ) : (
+                    <p className="text-xs font-bold text-slate-100">Account</p>
+                  )}
                   <span className={`px-2 py-0.5 text-[9px] font-bold uppercase rounded-full border ${
                     displayRole.toLowerCase() === 'admin'
                       ? 'bg-cyan-950 text-cyan-300 border-cyan-800'
@@ -428,7 +438,9 @@ export const TopAppBar: React.FC<TopAppBarProps> = ({
                     {displayRole}
                   </span>
                 </div>
-                <p className="text-[11px] text-cyan-400 font-mono mt-0.5">User ID: <strong>{displayUserId}</strong></p>
+                {displayUserId && displayUserId !== 'ADMIN01' && (
+                  <p className="text-[11px] text-cyan-400 font-mono mt-0.5">User ID: <strong>{displayUserId}</strong></p>
+                )}
                 <div className="inline-flex items-center gap-1 px-2 py-0.5 mt-1.5 text-[10px] font-medium text-emerald-400 bg-emerald-950/60 border border-emerald-800/60 rounded-full">
                   <ShieldCheck className="w-3 h-3" /> Auth: Firebase RBAC
                 </div>

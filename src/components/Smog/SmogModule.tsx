@@ -18,7 +18,10 @@ import {
   AlertCircle,
   ScanBarcode,
   Calendar,
-  Filter
+  Filter,
+  FileText,
+  MapPin,
+  Hash
 } from 'lucide-react';
 import { UserProfile } from '../../types';
 import { 
@@ -30,6 +33,16 @@ import {
 } from '../../lib/supabase';
 import { SmogBarcodeScannerModal } from './SmogBarcodeScannerModal';
 import { SmogUniqueCalendar } from './SmogUniqueCalendar';
+import { SmogQtyFormModal } from './SmogQtyFormModal';
+import { SmogWhatsAppReportModal } from './SmogWhatsAppReportModal';
+import { subscribeSmogQtyRecords, SmogQtyRecord } from '../../services/smogQtyStore';
+import { findModelByPrefix } from '../../services/modelMasterStore';
+import { 
+  syncSmogLeakUnitToFirebase, 
+  deleteSmogLeakUnitFromFirebase, 
+  fetchSmogLeakUnitsFromFirebase, 
+  subscribeSmogLeakUnitsFromFirebase 
+} from '../../services/smogFirebaseStore';
 
 export interface LeakUnitRecord {
   id: string;
@@ -48,6 +61,8 @@ export interface LeakUnitRecord {
   productionDate?: string;
   smogDate?: string;
   operatorUserId?: string;
+  location?: string;
+  qty?: number;
 }
 
 // Backward compatibility export alias
@@ -64,66 +79,26 @@ export function getSmogUnits(): LeakUnitRecord[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY_SMOG_UNITS);
     if (!raw) {
-      const today = new Date().toISOString().split('T')[0];
-      const currentMonth = today.substring(0, 7);
-      
-      const initial: LeakUnitRecord[] = [
-        {
-          id: 'leak-101',
-          smogPerson: 'Indrajit',
-          shift: 'A',
-          modelName: 'SAC-1.5T-INV-3S',
-          serialNumbers: ['A-2026-901', 'A-2026-902', 'A-2026-903'],
-          passedSerials: ['A-2026-901', 'A-2026-902'],
-          suspectCount: 3,
-          actualCount: 2,
-          date: today,
-          month: currentMonth,
-          time: '09:30 AM',
-          createdAt: new Date().toISOString(),
-          notes: 'Evaporator coil micro-leak detected during test.'
-        },
-        {
-          id: 'leak-102',
-          smogPerson: 'Raju (ELT)',
-          shift: 'B',
-          modelName: 'H-SMOG-900 PRO',
-          serialNumbers: ['A889021-SMG', 'A889022-SMG'],
-          passedSerials: ['A889021-SMG'],
-          suspectCount: 2,
-          actualCount: 1,
-          date: today,
-          month: currentMonth,
-          time: '02:15 PM',
-          createdAt: new Date(Date.now() - 3600000).toISOString(),
-          notes: 'Joint brazing pressure test.'
-        },
-        {
-          id: 'leak-103',
-          smogPerson: 'Marcus Thorne',
-          shift: 'C',
-          modelName: 'ECO-SMOG 200',
-          serialNumbers: ['A-SMG-771'],
-          passedSerials: [],
-          suspectCount: 1,
-          actualCount: 0,
-          date: '2026-07-30',
-          month: '2026-07',
-          time: '11:45 PM',
-          createdAt: new Date(Date.now() - 86400000).toISOString(),
-          notes: 'Compressor discharge pipe leakage.'
-        }
-      ];
+      const initial: LeakUnitRecord[] = [];
       localStorage.setItem(STORAGE_KEY_SMOG_UNITS, JSON.stringify(initial));
       return initial;
     }
     const parsed = JSON.parse(raw);
-    return parsed.map((item: any) => ({
-      ...item,
-      passedSerials: item.passedSerials || [],
-      suspectCount: item.suspectCount || (item.serialNumbers ? item.serialNumbers.length : 0),
-      actualCount: item.actualCount || (item.passedSerials ? item.passedSerials.length : 0)
-    }));
+    const cleaned = (Array.isArray(parsed) ? parsed : [])
+      .filter((item: any) => {
+        return item && item.id && item.id !== 'leak-101' && item.id !== 'leak-102';
+      })
+      .map((item: any) => ({
+        ...item,
+        passedSerials: item.passedSerials || [],
+        suspectCount: item.suspectCount || (item.serialNumbers ? item.serialNumbers.length : 0),
+        actualCount: item.actualCount || (item.passedSerials ? item.passedSerials.length : 0)
+      }));
+
+    if (Array.isArray(parsed) && cleaned.length !== parsed.length) {
+      localStorage.setItem(STORAGE_KEY_SMOG_UNITS, JSON.stringify(cleaned));
+    }
+    return cleaned;
   } catch (err) {
     console.error('Failed to parse smog leak units', err);
     return [];
@@ -197,6 +172,22 @@ export const SmogModule: React.FC<SmogModuleProps> = ({
   // Add Leak Modal State
   const [isLeakModalOpen, setIsLeakModalOpen] = useState(false);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
+  const [isSmogQtyModalOpen, setIsSmogQtyModalOpen] = useState(false);
+  const [isWhatsAppReportOpen, setIsWhatsAppReportOpen] = useState(false);
+  const [whatsAppReportParams, setWhatsAppReportParams] = useState<{
+    date: string;
+    shift: 'A' | 'B' | 'C' | 'all';
+    smogQty: number;
+  } | null>(null);
+  const [smogQtyRecords, setSmogQtyRecords] = useState<SmogQtyRecord[]>([]);
+
+  // Subscribe to Smog Qty store changes
+  useEffect(() => {
+    const unsub = subscribeSmogQtyRecords((records) => {
+      setSmogQtyRecords(records);
+    });
+    return () => unsub();
+  }, []);
   
   // View Details Modal State
   const [selectedRecordForDetails, setSelectedRecordForDetails] = useState<LeakUnitRecord | null>(null);
@@ -204,7 +195,8 @@ export const SmogModule: React.FC<SmogModuleProps> = ({
   // Form State
   const [smogPerson, setSmogPerson] = useState(currentUser?.name || 'Indrajit');
   const [shift, setShift] = useState<'A' | 'B' | 'C'>('A');
-  const [modelName, setModelName] = useState('');
+  const [modelName, setModelName] = useState('SAC-1.5T-INV-3S');
+  const [locationName, setLocationName] = useState('General Location');
   const [serialNumbers, setSerialNumbers] = useState<string[]>(['']);
   const [notes, setNotes] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -216,48 +208,92 @@ export const SmogModule: React.FC<SmogModuleProps> = ({
     }
   }, [currentUser]);
 
-  // Initial load, Supabase sync, and Real-time listener
+  // Initial load, Firebase & Supabase sync, and Real-time listener
   useEffect(() => {
-    const loadFromSupabase = async () => {
+    let isMounted = true;
+
+    const loadData = async () => {
       setSupabaseStatus('syncing');
-      const remoteData = await fetchLeakUnitsFromSupabase();
-      if (remoteData && remoteData.length > 0) {
-        setLeakRecords(remoteData);
-        try { localStorage.setItem(STORAGE_KEY_SMOG_UNITS, JSON.stringify(remoteData)); } catch {}
-        setSupabaseStatus('connected');
-      } else {
-        // Sync local records to Supabase
-        const local = getSmogUnits();
-        setLeakRecords(local);
-        for (const record of local) {
-          await syncLeakUnitToSupabase(record);
+      try {
+        // 1. Fetch from Firebase Firestore first
+        const firestoreData = await fetchSmogLeakUnitsFromFirebase();
+        if (firestoreData && firestoreData.length > 0) {
+          if (isMounted) {
+            setLeakRecords(firestoreData as LeakUnitRecord[]);
+            try { localStorage.setItem(STORAGE_KEY_SMOG_UNITS, JSON.stringify(firestoreData)); } catch {}
+            setSupabaseStatus('connected');
+          }
+          return;
         }
-        setSupabaseStatus('connected');
+
+        // 2. Fallback to Supabase if Firestore has not yet been populated
+        const remoteData = await fetchLeakUnitsFromSupabase();
+        if (remoteData && remoteData.length > 0) {
+          if (isMounted) {
+            setLeakRecords(remoteData);
+            try { localStorage.setItem(STORAGE_KEY_SMOG_UNITS, JSON.stringify(remoteData)); } catch {}
+            setSupabaseStatus('connected');
+          }
+          // Seed records to Firebase Firestore
+          for (const record of remoteData) {
+            await syncSmogLeakUnitToFirebase(record);
+          }
+        } else {
+          // 3. Sync existing local records to Firebase Firestore & Supabase
+          const local = getSmogUnits();
+          if (isMounted) {
+            setLeakRecords(local);
+          }
+          for (const record of local) {
+            await syncSmogLeakUnitToFirebase(record);
+            await syncLeakUnitToSupabase(record);
+          }
+          if (isMounted) {
+            setSupabaseStatus('connected');
+          }
+        }
+      } catch (err) {
+        console.warn('Smog leak units initial sync note:', err);
+        if (isMounted) {
+          setSupabaseStatus('connected');
+        }
       }
     };
 
-    loadFromSupabase();
+    loadData();
+
+    // Attach real-time Firestore listener for multi-device sync
+    const unsubFirebase = subscribeSmogLeakUnitsFromFirebase((firestoreRecords) => {
+      if (isMounted && firestoreRecords && firestoreRecords.length > 0) {
+        setLeakRecords(firestoreRecords as LeakUnitRecord[]);
+        try { localStorage.setItem(STORAGE_KEY_SMOG_UNITS, JSON.stringify(firestoreRecords)); } catch {}
+      }
+    });
 
     // Listen to inter-tab changes
     if (localSmogBus) {
       localSmogBus.onmessage = () => {
-        setLeakRecords(getSmogUnits());
+        if (isMounted) {
+          setLeakRecords(getSmogUnits());
+        }
       };
     }
 
     // Subscribe to cross-device realtime broadcast
     const unsubscribe = subscribeToLabRealtimeEvents((event) => {
       if (event === 'smog_units_change') {
-        loadFromSupabase();
+        loadData();
       }
     });
 
     // Periodic sync (every 8s)
     const interval = setInterval(() => {
-      loadFromSupabase();
+      loadData();
     }, 8000);
 
     return () => {
+      isMounted = false;
+      unsubFirebase();
       unsubscribe();
       clearInterval(interval);
     };
@@ -314,7 +350,7 @@ export const SmogModule: React.FC<SmogModuleProps> = ({
       id: `leak-${Date.now().toString().slice(-5)}`,
       smogPerson: smogPerson.trim() || currentUser?.name || 'Indrajit',
       shift,
-      modelName: modelName.trim(),
+      modelName: modelName.trim() || 'SAC-1.5T-INV-3S',
       serialNumbers: validSerials,
       passedSerials: [],
       suspectCount: validSerials.length,
@@ -323,15 +359,18 @@ export const SmogModule: React.FC<SmogModuleProps> = ({
       month: monthStr,
       time: timeStr,
       createdAt: now.toISOString(),
-      notes: notes.trim() || undefined
+      notes: notes.trim() || undefined,
+      location: locationName.trim() || 'General Location',
+      qty: validSerials.length
     };
 
     const updated = [newRecord, ...leakRecords];
     setLeakRecords(updated);
     saveSmogUnits(updated);
 
-    // Sync to Supabase
+    // Sync to Firebase & Supabase
     setSupabaseStatus('syncing');
+    await syncSmogLeakUnitToFirebase(newRecord);
     await syncLeakUnitToSupabase(newRecord);
     setSupabaseStatus('connected');
 
@@ -346,7 +385,8 @@ export const SmogModule: React.FC<SmogModuleProps> = ({
       if (selectedRecordForDetails?.id === id) {
         setSelectedRecordForDetails(null);
       }
-      // Delete from Supabase
+      // Delete from Firebase & Supabase
+      deleteSmogLeakUnitFromFirebase(id);
       deleteLeakUnitFromSupabase(id);
     }
   };
@@ -367,7 +407,8 @@ export const SmogModule: React.FC<SmogModuleProps> = ({
         actualCount: newPassedSerials.length,
       };
 
-      // Sync updated record to Supabase
+      // Sync updated record to Firebase & Supabase
+      syncSmogLeakUnitToFirebase(updatedRecord);
       syncLeakUnitToSupabase(updatedRecord);
 
       if (selectedRecordForDetails?.id === recordId) {
@@ -406,9 +447,10 @@ export const SmogModule: React.FC<SmogModuleProps> = ({
       }
     }
 
-    // Sync each to Supabase
+    // Sync each to Firebase & Supabase
     setSupabaseStatus('syncing');
     for (const rec of newRecords) {
+      await syncSmogLeakUnitToFirebase(rec);
       await syncLeakUnitToSupabase(rec);
     }
     setSupabaseStatus('connected');
@@ -447,6 +489,27 @@ export const SmogModule: React.FC<SmogModuleProps> = ({
   const displaySuspects = activeRecordsForMetrics.reduce((sum, r) => sum + r.suspectCount, 0);
   const displayActuals = activeRecordsForMetrics.reduce((sum, r) => sum + r.actualCount, 0);
 
+  // Model Qty: Total distinct models scanned in current active records (Scanner data)
+  // "total Model ka data Scanner se pata chalega agar 2 alag alag Model Scanner hua hai to 2 Model Qty me add hoga."
+  const uniqueModelsList = Array.from(
+    new Set(
+      activeRecordsForMetrics
+        .map(r => r.modelName?.trim())
+        .filter((m): m is string => Boolean(m && m.length > 0 && m !== 'SAC-1.5T-INV-3S' && m !== 'H-SMOG-900 PRO'))
+    )
+  );
+  const modelQty = uniqueModelsList.length;
+
+  // Smog Qty: Aggregated from Form uploads for current selected Date & Shift
+  // "aur Jisme Us Date ka Smog Qty add hoga."
+  const currentSmogQty = smogQtyRecords
+    .filter(r => {
+      if (selectedDate && r.date !== selectedDate) return false;
+      if (shiftFilter !== 'all' && r.shift !== shiftFilter) return false;
+      return true;
+    })
+    .reduce((sum, r) => sum + (Number(r.smogQty) || 0), 0);
+
   // Shift-wise counts for current active records (Date-filtered)
   const countShiftA = activeRecordsForMetrics.filter(r => r.shift === 'A').length;
   const countShiftB = activeRecordsForMetrics.filter(r => r.shift === 'B').length;
@@ -472,8 +535,8 @@ export const SmogModule: React.FC<SmogModuleProps> = ({
       )}
 
       {/* COMPACT CARDVIEW (50% Height Down) */}
-      {/* Left: Calendar (Date-wise Dashboard Data) | Center: Title | Right: Scanner & Manual */}
-      <div className="py-2.5 px-3.5 sm:px-5 rounded-2xl bg-slate-900 border border-slate-800 shadow-xl relative overflow-hidden flex flex-col md:flex-row md:items-center justify-between gap-3">
+      {/* Left: Calendar (Date-wise Dashboard Data) | Center: Title | Right: Form & Scanner */}
+      <div className="py-2.5 px-3.5 sm:px-5 rounded-2xl bg-slate-900 border border-slate-800 shadow-xl relative flex flex-col md:flex-row md:items-center justify-between gap-3">
         <div className="absolute top-0 right-0 -mt-6 -mr-6 w-36 h-36 bg-cyan-500/10 rounded-full blur-2xl pointer-events-none" />
 
         {/* LEFT: Unique Calendar Date Picker for Date-wise Dashboard Data */}
@@ -504,12 +567,24 @@ export const SmogModule: React.FC<SmogModuleProps> = ({
           </div>
         </div>
 
-        {/* RIGHT: Scanner Button (Manual button removed as requested) */}
-        <div className="flex items-center gap-2 justify-end z-10">
+        {/* RIGHT: Scanner & Form Buttons */}
+        <div className="flex items-center gap-2 justify-end z-10 flex-wrap">
+          {/* Form Button (Opens Smog Qty Entry PopUp) */}
+          <button
+            type="button"
+            onClick={() => setIsSmogQtyModalOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl font-black text-xs text-purple-200 bg-purple-950/80 border border-purple-700/70 hover:bg-purple-900/90 hover:text-white shadow-md shadow-purple-950/50 transform active:scale-95 transition-all cursor-pointer"
+            title="Open Form to Upload Smog Qty"
+          >
+            <FileText className="w-4 h-4 text-purple-400 stroke-[2.5]" />
+            <span className="tracking-wide">Form</span>
+          </button>
+
+          {/* Scanner Button */}
           <button
             type="button"
             onClick={() => setIsScannerOpen(true)}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl font-black text-xs text-slate-950 bg-gradient-to-r from-cyan-400 via-teal-400 to-emerald-400 hover:from-cyan-300 hover:to-emerald-300 shadow-md shadow-cyan-950/60 transform active:scale-95 transition-all cursor-pointer"
+            className="flex items-center gap-2 px-3.5 py-2 rounded-xl font-black text-xs text-slate-950 bg-gradient-to-r from-cyan-400 via-teal-400 to-emerald-400 hover:from-cyan-300 hover:to-emerald-300 shadow-md shadow-cyan-950/60 transform active:scale-95 transition-all cursor-pointer"
             title="Open ELT-style Barcode Scanner for Leak Units"
           >
             <ScanBarcode className="w-4 h-4 stroke-[2.5]" />
@@ -518,25 +593,78 @@ export const SmogModule: React.FC<SmogModuleProps> = ({
         </div>
       </div>
 
-      {/* KPI STATS CARDS (Date-Wise Suspect & Actual Verification) */}
-      <div className="grid grid-cols-2 gap-3">
-        <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800/90">
-          <span className="text-[10px] font-mono text-amber-400 uppercase tracking-wider block font-bold">
-            Total Suspect
-          </span>
-          <div className="flex items-baseline gap-2 mt-1">
-            <span className="text-2xl font-black text-amber-400 font-mono">{displaySuspects}</span>
-            <span className="text-[10px] text-slate-400 font-mono">Sr. No.</span>
+      {/* KPI STATS CARDS */}
+      <div className="space-y-3">
+        {/* ROW 1: Date-Wise Suspect & Actual Verification */}
+        <div className="grid grid-cols-2 gap-3">
+          <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800/90">
+            <span className="text-[10px] font-mono text-amber-400 uppercase tracking-wider block font-bold">
+              Total Suspect
+            </span>
+            <div className="flex items-baseline gap-2 mt-1">
+              <span className="text-2xl font-black text-amber-400 font-mono">{displaySuspects}</span>
+              <span className="text-[10px] text-slate-400 font-mono">Sr. No.</span>
+            </div>
+          </div>
+
+          <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800/90">
+            <span className="text-[10px] font-mono text-emerald-400 uppercase tracking-wider block font-bold">
+              Total Leak
+            </span>
+            <div className="flex items-baseline gap-2 mt-1">
+              <span className="text-2xl font-black text-emerald-400 font-mono">{displayActuals}</span>
+              <span className="text-[10px] text-emerald-300/80 font-mono">Verified</span>
+            </div>
           </div>
         </div>
 
-        <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800/90">
-          <span className="text-[10px] font-mono text-emerald-400 uppercase tracking-wider block font-bold">
-            Total Actual (Passed)
-          </span>
-          <div className="flex items-baseline gap-2 mt-1">
-            <span className="text-2xl font-black text-emerald-400 font-mono">{displayActuals}</span>
-            <span className="text-[10px] text-emerald-300/80 font-mono">Verified</span>
+        {/* ROW 2: Model Qty & Smog Qty (Directly below Total Suspect) */}
+        <div className="grid grid-cols-2 gap-3">
+          {/* Model Qty Card */}
+          <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800/90 shadow-sm">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-mono text-cyan-400 uppercase tracking-wider block font-bold">
+                Model Qty
+              </span>
+              <Layers className="w-3.5 h-3.5 text-cyan-400/80" />
+            </div>
+            <div className="flex items-baseline gap-2 mt-1">
+              <span className="text-2xl font-black text-cyan-300 font-mono">{modelQty}</span>
+              <span className="text-[10px] text-slate-400 font-mono">
+                {modelQty === 1 ? 'Model' : 'Models'} Scanned
+              </span>
+            </div>
+            <div className="mt-1.5 text-[9px] text-slate-400 font-mono flex items-center justify-between">
+              <span>Scanner Data</span>
+              <span className="text-cyan-400 font-semibold">{modelQty} Unique</span>
+            </div>
+          </div>
+
+          {/* Smog Qty Card */}
+          <div 
+            onClick={() => setIsSmogQtyModalOpen(true)}
+            className="p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800/90 shadow-sm hover:border-purple-500/50 transition-all cursor-pointer group"
+            title="Click to open Form and upload Smog Qty for this date"
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-mono text-purple-400 uppercase tracking-wider block font-bold">
+                Smog Qty
+              </span>
+              <div className="flex items-center gap-1">
+                <span className="text-[9px] text-purple-400/90 font-mono group-hover:underline">Upload +</span>
+                <Cloud className="w-3.5 h-3.5 text-purple-400/80" />
+              </div>
+            </div>
+            <div className="flex items-baseline gap-2 mt-1">
+              <span className="text-2xl font-black text-purple-300 font-mono">{currentSmogQty}</span>
+              <span className="text-[10px] text-slate-400 font-mono">
+                {selectedDate ? selectedDate : 'Total'}
+              </span>
+            </div>
+            <div className="mt-1.5 text-[9px] text-slate-500 font-mono flex items-center justify-between">
+              <span>Shift: {shiftFilter === 'all' ? 'All' : shiftFilter}</span>
+              <span className="text-purple-400 font-bold group-hover:underline">Open Form →</span>
+            </div>
           </div>
         </div>
       </div>
@@ -627,73 +755,8 @@ export const SmogModule: React.FC<SmogModuleProps> = ({
         </div>
       </div>
 
-      {/* SHIFT-WISE QUICK BREAKDOWN (DATE & SHIFT SUMMARY) */}
-      {shiftFilter === 'all' ? (
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-          {/* Shift A Card */}
-          <div 
-            onClick={() => handleSelectShiftFilter('A')}
-            className="p-3 rounded-2xl bg-gradient-to-b from-cyan-950/40 to-slate-900 border border-cyan-900/60 hover:border-cyan-500/60 transition-all cursor-pointer group shadow-md"
-          >
-            <div className="flex items-center justify-between">
-              <span className="px-2 py-0.5 rounded-md bg-cyan-950 text-cyan-300 border border-cyan-800 text-[10px] font-black font-mono">
-                SHIFT A
-              </span>
-              <span className="text-[11px] text-cyan-400 font-bold group-hover:underline">View Shift A →</span>
-            </div>
-            <div className="flex items-baseline gap-2 mt-1.5">
-              <span className="text-xl font-black font-mono text-cyan-300">{countShiftA}</span>
-              <span className="text-[11px] text-slate-400">Machines</span>
-            </div>
-            <div className="flex items-center gap-2.5 mt-1 text-[10px] font-mono text-slate-400">
-              <span>Suspect: <strong className="text-amber-400">{suspectsShiftA}</strong></span>
-              <span>Passed: <strong className="text-emerald-400">{actualsShiftA}</strong></span>
-            </div>
-          </div>
-
-          {/* Shift B Card */}
-          <div 
-            onClick={() => handleSelectShiftFilter('B')}
-            className="p-3 rounded-2xl bg-gradient-to-b from-amber-950/40 to-slate-900 border border-amber-900/60 hover:border-amber-500/60 transition-all cursor-pointer group shadow-md"
-          >
-            <div className="flex items-center justify-between">
-              <span className="px-2 py-0.5 rounded-md bg-amber-950 text-amber-300 border border-amber-800 text-[10px] font-black font-mono">
-                SHIFT B
-              </span>
-              <span className="text-[11px] text-amber-400 font-bold group-hover:underline">View Shift B →</span>
-            </div>
-            <div className="flex items-baseline gap-2 mt-1.5">
-              <span className="text-xl font-black font-mono text-amber-300">{countShiftB}</span>
-              <span className="text-[11px] text-slate-400">Machines</span>
-            </div>
-            <div className="flex items-center gap-2.5 mt-1 text-[10px] font-mono text-slate-400">
-              <span>Suspect: <strong className="text-amber-400">{suspectsShiftB}</strong></span>
-              <span>Passed: <strong className="text-emerald-400">{actualsShiftB}</strong></span>
-            </div>
-          </div>
-
-          {/* Shift C Card */}
-          <div 
-            onClick={() => handleSelectShiftFilter('C')}
-            className="p-3 rounded-2xl bg-gradient-to-b from-indigo-950/40 to-slate-900 border border-indigo-900/60 hover:border-indigo-500/60 transition-all cursor-pointer group shadow-md"
-          >
-            <div className="flex items-center justify-between">
-              <span className="px-2 py-0.5 rounded-md bg-indigo-950 text-indigo-300 border border-indigo-800 text-[10px] font-black font-mono">
-                SHIFT C
-              </span>
-              <span className="text-[11px] text-indigo-400 font-bold group-hover:underline">View Shift C →</span>
-            </div>
-            <div className="flex items-baseline gap-2 mt-1.5">
-              <span className="text-xl font-black font-mono text-indigo-300">{countShiftC}</span>
-              <span className="text-[11px] text-slate-400">Machines</span>
-            </div>
-            <div className="flex items-center gap-2.5 mt-1 text-[10px] font-mono text-slate-400">
-              <span>Suspect: <strong className="text-amber-400">{suspectsShiftC}</strong></span>
-              <span>Passed: <strong className="text-emerald-400">{actualsShiftC}</strong></span>
-            </div>
-          </div>
-        </div>
-      ) : (
+      {/* ACTIVE SHIFT FILTER TAG (Cards from photo removed as requested) */}
+      {shiftFilter !== 'all' && (
         <div className="flex items-center justify-between px-3.5 py-2 rounded-xl bg-slate-900/70 border border-slate-800 text-xs font-mono">
           <div className="flex items-center gap-2 text-slate-300">
             <span>Filtered to:</span>
@@ -772,16 +835,84 @@ export const SmogModule: React.FC<SmogModuleProps> = ({
                   </button>
                 </div>
 
-                {/* Model Name & Smog Person */}
+                {/* 3-Column Table: Header (Model Name | Location | Leak Qty) & Data Row (Model | Location Name | Leak Qty) */}
                 <div className="space-y-1">
-                  <span className="text-[10px] font-mono text-slate-500 uppercase tracking-wider block">Model Name</span>
-                  <h4 className="text-base font-extrabold text-white tracking-tight">
-                    {record.modelName}
-                  </h4>
-                  <div className="flex items-center gap-1.5 text-xs text-slate-300 pt-1">
-                    <User className="w-3.5 h-3.5 text-cyan-400" />
-                    <span className="font-semibold">{record.smogPerson}</span>
-                  </div>
+                  {(() => {
+                    const resolvedModel = (() => {
+                      if (record.serialNumbers && record.serialNumbers.length > 0) {
+                        for (const sn of record.serialNumbers) {
+                          if (sn) {
+                            const found = findModelByPrefix(sn);
+                            if (found?.modelName) return found.modelName;
+                          }
+                        }
+                      }
+                      if (record.modelName && 
+                          record.modelName.trim() && 
+                          record.modelName !== 'General Location' && 
+                          record.modelName !== 'General Smog Unit' &&
+                          record.modelName !== record.location) {
+                        return record.modelName;
+                      }
+                      return 'SAC-1.5T-INV-3S';
+                    })();
+
+                    const resolvedLocation = (() => {
+                      if (record.location && record.location.trim()) {
+                        return record.location.trim();
+                      }
+                      if (record.modelName && (
+                        record.modelName.toLowerCase().includes('line') ||
+                        record.modelName.toLowerCase().includes('bed') ||
+                        record.modelName.toLowerCase().includes('station') ||
+                        record.modelName === 'General Location'
+                      )) {
+                        return record.modelName;
+                      }
+                      return 'General Location';
+                    })();
+
+                    const resolvedLeakQty = record.qty ?? record.suspectCount ?? (record.serialNumbers?.length || 1);
+
+                    return (
+                      <div className="rounded-xl border border-slate-800 bg-slate-950/80 overflow-hidden shadow-inner">
+                        {/* Header Row: Model Name | Location | Leak Qty */}
+                        <div className="grid grid-cols-12 gap-1 px-3 py-1.5 bg-slate-900/90 border-b border-slate-800 text-[10px] sm:text-[11px] font-mono font-bold text-slate-400">
+                          <div className="col-span-5 text-left truncate">Model Name</div>
+                          <div className="col-span-4 text-center truncate">Location</div>
+                          <div className="col-span-3 text-right truncate">Leak Qty</div>
+                        </div>
+
+                        {/* Data Row: Model Value | Location Value | Leak Qty Value */}
+                        <div className="grid grid-cols-12 gap-1 px-3 py-2 items-center bg-slate-950/60">
+                          <div 
+                            className="col-span-5 text-left text-xs font-black text-white tracking-tight truncate" 
+                            title={resolvedModel}
+                          >
+                            {resolvedModel}
+                          </div>
+                          <div 
+                            className="col-span-4 text-center text-xs font-bold text-slate-200 tracking-tight truncate" 
+                            title={resolvedLocation}
+                          >
+                            {resolvedLocation}
+                          </div>
+                          <div className="col-span-3 text-right text-xs font-mono font-black text-cyan-400">
+                            {resolvedLeakQty}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {record.smogPerson && 
+                   !record.smogPerson.includes('Lab Administrator') && 
+                   !record.smogPerson.includes('ADMIN01') && (
+                    <div className="flex items-center gap-1.5 text-xs text-slate-300 pt-0.5">
+                      <User className="w-3.5 h-3.5 text-cyan-400" />
+                      <span className="font-semibold">{record.smogPerson}</span>
+                    </div>
+                  )}
 
                   {/* Production Date & Smog Date Badges */}
                   {(record.productionDate || record.smogDate) && (
@@ -910,26 +1041,42 @@ export const SmogModule: React.FC<SmogModuleProps> = ({
                 </div>
               </div>
 
-              {/* 3. MODEL NAME */}
-              <div>
-                <label className="block text-slate-300 font-bold mb-1">
-                  3. Model Name *
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={modelName}
-                  onChange={(e) => setModelName(e.target.value)}
-                  placeholder="e.g. SAC-1.5T-INVERTER"
-                  className="w-full px-3 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white font-mono font-bold focus:outline-none focus:border-cyan-400"
-                />
+              {/* 3. MODEL NAME & LOCATION NAME (2-Column Grid) */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-300 font-bold mb-1">
+                    3. Model Name *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={modelName}
+                    onChange={(e) => setModelName(e.target.value)}
+                    placeholder="e.g. SAC-1.5T-INV-3S"
+                    className="w-full px-3 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white font-mono font-bold focus:outline-none focus:border-cyan-400"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 font-bold mb-1">
+                    4. Location Name *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={locationName}
+                    onChange={(e) => setLocationName(e.target.value)}
+                    placeholder="e.g. Line 1, Test Bed 3"
+                    className="w-full px-3 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white font-mono font-bold focus:outline-none focus:border-cyan-400"
+                  />
+                </div>
               </div>
 
-              {/* 4. DYNAMIC SERIAL NUMBER (SR. NO.) LIST WITH (+) BUTTON */}
+              {/* 5. DYNAMIC SERIAL NUMBER (SR. NO.) LIST WITH (+) BUTTON */}
               <div>
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="text-slate-300 font-bold">
-                    4. Serial Numbers (Sr. No.) *
+                    5. Serial Numbers (Sr. No.) *
                   </label>
                   <button
                     type="button"
@@ -1016,11 +1163,22 @@ export const SmogModule: React.FC<SmogModuleProps> = ({
                   <Eye className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-base font-extrabold text-white">
-                    {selectedRecordForDetails.modelName}
-                  </h3>
-                  <p className="text-[11px] text-slate-400 font-mono">
-                    Smog Person: <strong className="text-cyan-300">{selectedRecordForDetails.smogPerson}</strong> • Shift {selectedRecordForDetails.shift}
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-extrabold text-white">
+                      {selectedRecordForDetails.modelName && 
+                       selectedRecordForDetails.modelName !== 'General Location' && 
+                       selectedRecordForDetails.modelName !== 'General Smog Unit'
+                        ? selectedRecordForDetails.modelName
+                        : 'SAC-1.5T-INV-3S'}
+                    </h3>
+                    <span className="px-2 py-0.5 rounded-md bg-cyan-950 border border-cyan-800 text-[10px] font-mono font-bold text-cyan-300">
+                      Leak Qty: {selectedRecordForDetails.qty ?? selectedRecordForDetails.suspectCount ?? (selectedRecordForDetails.serialNumbers?.length || 1)}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-300 font-mono mt-0.5 flex items-center gap-2">
+                    <span>Loc: <strong className="text-white">{selectedRecordForDetails.location || 'General Location'}</strong></span>
+                    <span className="text-slate-500">•</span>
+                    <span>Shift {selectedRecordForDetails.shift}</span>
                   </p>
                   {(selectedRecordForDetails.productionDate || selectedRecordForDetails.smogDate) && (
                     <div className="flex items-center gap-2 pt-1 text-[10px] font-mono text-slate-400">
@@ -1092,23 +1250,43 @@ export const SmogModule: React.FC<SmogModuleProps> = ({
               <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
                 {selectedRecordForDetails.serialNumbers.map((srNo, idx) => {
                   const isPassed = selectedRecordForDetails.passedSerials?.includes(srNo);
+                  const matchedModel = findModelByPrefix(srNo)?.modelName || 
+                    (selectedRecordForDetails.modelName && 
+                     selectedRecordForDetails.modelName !== 'General Location' && 
+                     selectedRecordForDetails.modelName !== 'General Smog Unit'
+                      ? selectedRecordForDetails.modelName
+                      : 'SAC-1.5T-INV-3S');
+
                   return (
                     <div
                       key={idx}
-                      className={`p-3 rounded-2xl border transition-all flex items-center justify-between ${
+                      className={`p-3 rounded-2xl border transition-all flex items-center justify-between gap-3 ${
                         isPassed
                           ? 'bg-emerald-950/40 border-emerald-800/80 text-emerald-200'
                           : 'bg-slate-950 border-slate-800 text-slate-300'
                       }`}
                     >
-                      <div className="flex items-center gap-2.5">
-                        <span className="text-xs font-mono font-bold text-slate-500">#{idx + 1}</span>
-                        <span className="text-sm font-mono font-extrabold text-white">{srNo}</span>
+                      <div className="flex items-start gap-2.5 min-w-0">
+                        <span className="text-xs font-mono font-bold text-slate-500 mt-0.5">#{idx + 1}</span>
+                        <div className="min-w-0">
+                          {/* Model Name (Above Sr. No. as requested) */}
+                          <div className="text-[11px] font-mono font-extrabold text-cyan-400 truncate flex items-center gap-1">
+                            <Layers className="w-3 h-3 text-cyan-400 shrink-0" />
+                            <span>{matchedModel}</span>
+                          </div>
+                          {/* Sr. No. (Where the orange line was drawn in photo) */}
+                          <div className="text-sm font-mono font-extrabold text-white flex items-center gap-1.5 mt-0.5">
+                            <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider font-bold">
+                              Sr. No:
+                            </span>
+                            <span className="text-slate-100">{srNo}</span>
+                          </div>
+                        </div>
                       </div>
 
                       <button
                         onClick={() => handleTogglePassSerial(selectedRecordForDetails.id, srNo)}
-                        className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold flex items-center gap-1.5 cursor-pointer transition-all ${
+                        className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold flex items-center gap-1.5 cursor-pointer transition-all shrink-0 ${
                           isPassed
                             ? 'bg-emerald-500 text-slate-950 hover:bg-emerald-400 shadow-md shadow-emerald-950/60'
                             : 'bg-slate-800 text-slate-300 hover:bg-emerald-900 hover:text-emerald-300 border border-slate-700'
@@ -1158,6 +1336,45 @@ export const SmogModule: React.FC<SmogModuleProps> = ({
         onClose={() => setIsScannerOpen(false)}
         onSaveLeakUnits={handleSaveScannedUnits}
       />
+
+      {/* SMOG QTY ENTRY POPUP MODAL */}
+      <SmogQtyFormModal
+        isOpen={isSmogQtyModalOpen}
+        onClose={() => setIsSmogQtyModalOpen(false)}
+        defaultDate={selectedDate || new Date().toISOString().split('T')[0]}
+        defaultShift={shiftFilter !== 'all' ? shiftFilter : 'A'}
+        onSaved={(saved) => {
+          setToastNotification(`Smog Qty (${saved.smogQty}) successfully uploaded for ${saved.date} (Shift ${saved.shift})`);
+          setTimeout(() => setToastNotification(null), 4000);
+        }}
+        onOpenWhatsAppShare={(data) => {
+          setWhatsAppReportParams({
+            date: data.date,
+            shift: data.shift,
+            smogQty: data.smogQty
+          });
+          setIsWhatsAppReportOpen(true);
+        }}
+      />
+
+      {/* SMOG WHATSAPP REPORT MODAL */}
+      {isWhatsAppReportOpen && (
+        <SmogWhatsAppReportModal
+          isOpen={isWhatsAppReportOpen}
+          onClose={() => setIsWhatsAppReportOpen(false)}
+          productionDate={(() => {
+            try {
+              return localStorage.getItem('smog_scanner_production_date') || (whatsAppReportParams?.date || selectedDate || new Date().toISOString().split('T')[0]);
+            } catch {
+              return whatsAppReportParams?.date || selectedDate || new Date().toISOString().split('T')[0];
+            }
+          })()}
+          smogDate={whatsAppReportParams?.date || selectedDate || new Date().toISOString().split('T')[0]}
+          shift={whatsAppReportParams?.shift || (shiftFilter === 'all' ? 'A' : shiftFilter)}
+          smogQty={whatsAppReportParams?.smogQty ?? (currentSmogQty || 0)}
+          records={leakRecords}
+        />
+      )}
     </div>
   );
 };

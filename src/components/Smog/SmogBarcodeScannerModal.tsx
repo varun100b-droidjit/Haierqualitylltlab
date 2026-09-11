@@ -16,7 +16,9 @@ import {
   Image as ImageIcon,
   Layers,
   Sparkles,
-  RefreshCw
+  RefreshCw,
+  MapPin,
+  Hash
 } from 'lucide-react';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import { findModelByPrefix, getAllModels } from '../../services/modelMasterStore';
@@ -54,6 +56,12 @@ export function getNextDayISO(dateStr: string): string {
   }
 }
 
+const STORAGE_KEY_PROD_DATE = 'smog_scanner_production_date';
+const STORAGE_KEY_SMOG_DATE = 'smog_scanner_smog_date';
+const STORAGE_KEY_SHIFT = 'smog_scanner_shift';
+const STORAGE_KEY_LEAK_LOCATION = 'smog_scanner_leak_location';
+const STORAGE_KEY_LEAK_QTY = 'smog_scanner_leak_qty';
+
 export const SmogBarcodeScannerModal: React.FC<SmogBarcodeScannerModalProps> = ({
   isOpen,
   onClose,
@@ -63,14 +71,84 @@ export const SmogBarcodeScannerModal: React.FC<SmogBarcodeScannerModalProps> = (
   const operatorUserId = user?.userId || 'ADMIN01';
   const operatorName = user?.name || 'Admin Operator';
 
-  // Initial date: today
-  const todayStr = new Date().toISOString().split('T')[0];
+  // Persistent Date & Shift Setup - stays locked across day changes until manually edited
+  const [shift, setShift] = useState<'A' | 'B' | 'C'>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_SHIFT);
+      if (saved === 'A' || saved === 'B' || saved === 'C') return saved;
+    } catch {}
+    return 'A';
+  });
 
-  // Form setup state
-  const [shift, setShift] = useState<'A' | 'B' | 'C'>('A');
-  const [productionDate, setProductionDate] = useState<string>(todayStr);
-  const [smogDate, setSmogDate] = useState<string>(getNextDayISO(todayStr));
-  const [isSmogDateManuallyEdited, setIsSmogDateManuallyEdited] = useState(false);
+  const [productionDate, setProductionDate] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_PROD_DATE);
+      if (saved && saved.trim()) return saved.trim();
+    } catch {}
+    return new Date().toISOString().split('T')[0];
+  });
+
+  const [smogDate, setSmogDate] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_SMOG_DATE);
+      if (saved && saved.trim()) return saved.trim();
+    } catch {}
+    const today = new Date().toISOString().split('T')[0];
+    return getNextDayISO(today);
+  });
+
+  // Leak Unit Location & Qty - Required to open scanner
+  const [leakLocation, setLeakLocation] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_LEAK_LOCATION);
+      if (saved && saved.trim()) return saved.trim();
+    } catch {}
+    return '';
+  });
+  const [leakQty, setLeakQty] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_LEAK_QTY);
+      if (saved && saved.trim()) return saved.trim();
+    } catch {}
+    return '1';
+  });
+  const [locationError, setLocationError] = useState<boolean>(false);
+  const locationInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Re-sync persistent dates, location and qty whenever scanner modal is opened
+  useEffect(() => {
+    if (isOpen) {
+      try {
+        const savedProd = localStorage.getItem(STORAGE_KEY_PROD_DATE);
+        if (savedProd && savedProd.trim()) {
+          setProductionDate(savedProd.trim());
+        }
+        const savedSmog = localStorage.getItem(STORAGE_KEY_SMOG_DATE);
+        if (savedSmog && savedSmog.trim()) {
+          setSmogDate(savedSmog.trim());
+        }
+        const savedShift = localStorage.getItem(STORAGE_KEY_SHIFT);
+        if (savedShift === 'A' || savedShift === 'B' || savedShift === 'C') {
+          setShift(savedShift);
+        }
+        const savedLoc = localStorage.getItem(STORAGE_KEY_LEAK_LOCATION);
+        if (savedLoc && savedLoc.trim()) {
+          setLeakLocation(savedLoc.trim());
+        }
+        const savedQty = localStorage.getItem(STORAGE_KEY_LEAK_QTY);
+        if (savedQty && savedQty.trim()) {
+          setLeakQty(savedQty.trim());
+        }
+      } catch {}
+    }
+  }, [isOpen]);
+
+  const handleLeakQtyChange = (val: string) => {
+    setLeakQty(val);
+    try {
+      localStorage.setItem(STORAGE_KEY_LEAK_QTY, val);
+    } catch {}
+  };
 
   // Scanned list
   const [scannedMachines, setScannedMachines] = useState<ScannedMachineItem[]>([]);
@@ -130,18 +208,39 @@ export const SmogBarcodeScannerModal: React.FC<SmogBarcodeScannerModalProps> = (
     }
   };
 
-  // Synchronize Smog Date when Production Date changes
+  // Synchronize and persist Production Date - stays locked and does not auto-change across days
   const handleProductionDateChange = (newProdDate: string) => {
-    setProductionDate(newProdDate);
-    if (!isSmogDateManuallyEdited) {
-      setSmogDate(getNextDayISO(newProdDate));
-    }
+    const trimmed = newProdDate.trim();
+    setProductionDate(trimmed);
+    try {
+      localStorage.setItem(STORAGE_KEY_PROD_DATE, trimmed);
+    } catch {}
   };
 
-  // Handle Manual Smog Date change
+  // Synchronize and persist Smog Date - stays locked until operator manually changes it
   const handleSmogDateChange = (newSmogDate: string) => {
-    setSmogDate(newSmogDate);
-    setIsSmogDateManuallyEdited(true);
+    const trimmed = newSmogDate.trim();
+    setSmogDate(trimmed);
+    try {
+      localStorage.setItem(STORAGE_KEY_SMOG_DATE, trimmed);
+    } catch {}
+  };
+
+  // Synchronize and persist Shift
+  const handleShiftChange = (newShift: 'A' | 'B' | 'C') => {
+    setShift(newShift);
+    try {
+      localStorage.setItem(STORAGE_KEY_SHIFT, newShift);
+    } catch {}
+  };
+
+  // Synchronize and persist Leak Unit Location
+  const handleLeakLocationChange = (newLoc: string) => {
+    setLeakLocation(newLoc);
+    setLocationError(false);
+    try {
+      localStorage.setItem(STORAGE_KEY_LEAK_LOCATION, newLoc);
+    } catch {}
   };
 
   // Add a scanned machine item
@@ -250,6 +349,14 @@ export const SmogBarcodeScannerModal: React.FC<SmogBarcodeScannerModalProps> = (
 
   // Start Camera with Multi-Tier Fallback and Fresh Instance per Attempt
   const startCamera = async (targetCameraId?: string) => {
+    if (!leakLocation.trim()) {
+      setLocationError(true);
+      if (locationInputRef.current) {
+        locationInputRef.current.focus();
+      }
+      return;
+    }
+
     if (isStartingRef.current) return;
     isStartingRef.current = true;
     setCameraError(null);
@@ -431,32 +538,17 @@ export const SmogBarcodeScannerModal: React.FC<SmogBarcodeScannerModalProps> = (
     }
   };
 
-  // Robust Camera start / stop on open with polling until DOM container mounted
+  // Clean up camera on modal close
   useEffect(() => {
-    let timer: any = null;
-    let pollCount = 0;
-
-    const checkAndStart = () => {
-      const el = document.getElementById(scannerContainerId);
-      if (el) {
-        startCamera();
-      } else if (pollCount < 10) {
-        pollCount++;
-        timer = setTimeout(checkAndStart, 100);
-      }
-    };
-
-    if (isOpen) {
-      timer = setTimeout(checkAndStart, 200);
-    } else {
+    if (!isOpen) {
       stopCamera();
       setScannedMachines([]);
       setManualSerialInput('');
       setManualModelInput('');
+      setLocationError(false);
     }
 
     return () => {
-      if (timer) clearTimeout(timer);
       stopCamera();
     };
   }, [isOpen]);
@@ -476,26 +568,31 @@ export const SmogBarcodeScannerModal: React.FC<SmogBarcodeScannerModalProps> = (
     const now = new Date();
     const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
+    const parsedQty = parseInt(leakQty, 10);
+    const validQty = (!isNaN(parsedQty) && parsedQty > 0) ? parsedQty : 1;
+
     // Each scanned unit becomes a LeakUnitRecord
     // This ensures: Total Leak Units increases by scannedMachines.length
-    // And Total Suspect increases by scannedMachines.length
+    // And Total Suspect increases by quantity
     const newRecords: LeakUnitRecord[] = scannedMachines.map((machine, idx) => ({
       id: `leak-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
-      smogPerson: `${operatorName} (${operatorUserId})`,
+      smogPerson: (operatorName && operatorName !== 'Lab Administrator' && operatorUserId !== 'ADMIN01') ? `${operatorName} (${operatorUserId})` : '',
       shift: shift,
-      modelName: machine.modelName || 'General Smog Unit',
+      modelName: machine.modelName || 'SAC-1.5T-INV-3S',
       serialNumbers: [machine.serialNumber],
       passedSerials: [], // Initially 0 passed
-      suspectCount: 1,   // Adds 1 suspect per unit
+      suspectCount: validQty,   // Sets Qty entered by user
       actualCount: 0,
       date: smogDate,    // Categorized under Smog Date
       month: smogDate.substring(0, 7),
       time: timeStr,
       createdAt: now.toISOString(),
-      notes: `Scanned via Smog Barcode Scanner [Prod: ${productionDate} | Smog: ${smogDate} | Shift: ${shift}]`,
+      notes: `Scanned via Smog Barcode Scanner [Prod: ${productionDate} | Smog: ${smogDate} | Shift: ${shift}${leakLocation.trim() ? ` | Loc: ${leakLocation.trim()}` : ''} | Qty: ${validQty}]`,
       productionDate,
       smogDate,
-      operatorUserId
+      operatorUserId,
+      location: leakLocation.trim() || 'General Location',
+      qty: validQty
     }));
 
     onSaveLeakUnits(newRecords);
@@ -518,18 +615,9 @@ export const SmogBarcodeScannerModal: React.FC<SmogBarcodeScannerModalProps> = (
               <ScanBarcode className="w-5 h-5" />
             </span>
             <div>
-              <h2 className="text-base sm:text-lg font-black text-white flex items-center gap-2">
-                <span>Smog Leak Unit Scanner</span>
-                <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-cyan-950 text-cyan-300 border border-cyan-800">
-                  ELT Engine
-                </span>
+              <h2 className="text-base sm:text-lg font-black text-white">
+                Smog Leak Unit Scanner
               </h2>
-              <div className="flex items-center gap-2 text-xs text-slate-400">
-                <span className="flex items-center gap-1 font-mono text-[11px] text-cyan-300">
-                  <User className="w-3 h-3 text-cyan-400" />
-                  Operator: {operatorUserId} ({operatorName})
-                </span>
-              </div>
             </div>
           </div>
 
@@ -558,7 +646,7 @@ export const SmogBarcodeScannerModal: React.FC<SmogBarcodeScannerModalProps> = (
                     <button
                       key={s}
                       type="button"
-                      onClick={() => setShift(s)}
+                      onClick={() => handleShiftChange(s)}
                       className={`px-3 py-1 rounded-lg text-xs font-black font-mono transition-all cursor-pointer ${
                         shift === s
                           ? s === 'A'
@@ -594,6 +682,7 @@ export const SmogBarcodeScannerModal: React.FC<SmogBarcodeScannerModalProps> = (
                     <Calendar className="w-2.5 h-2.5 text-cyan-400" />
                     <span>Prod Date</span>
                   </span>
+                  <span className="text-[9px] text-cyan-400 font-mono font-bold">Locked</span>
                 </div>
                 <input
                   type="date"
@@ -610,9 +699,7 @@ export const SmogBarcodeScannerModal: React.FC<SmogBarcodeScannerModalProps> = (
                     <Calendar className="w-2.5 h-2.5 text-emerald-400" />
                     <span>Smog Date</span>
                   </span>
-                  <span className="text-[9px] text-slate-400 font-normal">
-                    {isSmogDateManuallyEdited ? '(Manual)' : '(+1d Auto)'}
-                  </span>
+                  <span className="text-[9px] text-emerald-400 font-mono font-bold">Locked</span>
                 </div>
                 <input
                   type="date"
@@ -623,24 +710,69 @@ export const SmogBarcodeScannerModal: React.FC<SmogBarcodeScannerModalProps> = (
               </div>
             </div>
 
-            {isSmogDateManuallyEdited && (
-              <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono px-0.5">
-                <span>Auto Smog Date: {getNextDayISO(productionDate)}</span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSmogDate(getNextDayISO(productionDate));
-                    setIsSmogDateManuallyEdited(false);
-                  }}
-                  className="text-cyan-400 hover:underline cursor-pointer"
-                >
-                  ↩ Reset to +1 Day
-                </button>
+            {/* LOCATION NAME & QTY (LEFT & RIGHT IN ONE LINE) */}
+            <div className={`p-2.5 rounded-xl bg-slate-900/90 border transition-all ${
+              locationError && !leakLocation.trim()
+                ? 'border-rose-500/80 ring-1 ring-rose-500/30'
+                : 'border-slate-800 focus-within:border-cyan-500/80'
+            }`}>
+              <div className="flex items-center gap-2">
+                {/* Left: Location Name Input */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider mb-1">
+                    <span className="flex items-center gap-1 text-cyan-400 font-mono">
+                      <MapPin className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                      <span className="truncate">Location Name</span>
+                    </span>
+                    {leakLocation.trim() && (
+                      <span className="text-[9px] font-mono text-emerald-400 font-bold flex items-center gap-1 shrink-0">
+                        <CheckCircle2 className="w-3 h-3 text-emerald-400" /> Ready
+                      </span>
+                    )}
+                  </div>
+                  <input
+                    ref={locationInputRef}
+                    type="text"
+                    value={leakLocation}
+                    onChange={(e) => handleLeakLocationChange(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        startCamera();
+                      }
+                    }}
+                    placeholder="Enter Location Name (e.g. Line 1, Test Bed)..."
+                    className="w-full bg-slate-950 border border-slate-800 focus:border-cyan-500 rounded-lg px-3 py-1.5 text-xs font-mono font-bold text-white placeholder:text-slate-500 focus:outline-none transition-colors"
+                  />
+                </div>
+
+                {/* Right: Qty Input */}
+                <div className="w-24 sm:w-28 shrink-0">
+                  <div className="text-[10px] font-bold uppercase tracking-wider mb-1 text-cyan-400 font-mono flex items-center gap-1">
+                    <Hash className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                    <span>Qty</span>
+                  </div>
+                  <input
+                    type="number"
+                    min="1"
+                    value={leakQty}
+                    onChange={(e) => handleLeakQtyChange(e.target.value)}
+                    placeholder="1"
+                    className="w-full bg-slate-950 border border-slate-800 focus:border-cyan-500 rounded-lg px-3 py-1.5 text-xs font-mono font-bold text-white text-center placeholder:text-slate-500 focus:outline-none transition-colors"
+                  />
+                </div>
               </div>
-            )}
+
+              {locationError && !leakLocation.trim() && (
+                <p className="text-[10px] text-rose-400 font-mono mt-1.5 flex items-center gap-1">
+                  <AlertCircle className="w-3 h-3 shrink-0" />
+                  Scanner open karne ke liye Location Name fill karein.
+                </p>
+              )}
+            </div>
           </div>
 
-          {/* SECTION 2: LIVE CAMERA SCANNER (Same 2 Same ELT Scanner) */}
+          {/* SECTION 2: LIVE CAMERA SCANNER */}
           <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800 space-y-3 shadow-inner">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
@@ -649,7 +781,7 @@ export const SmogBarcodeScannerModal: React.FC<SmogBarcodeScannerModalProps> = (
               </span>
 
               <div className="flex items-center gap-1.5">
-                {availableCameras.length > 1 && (
+                {isCameraActive && availableCameras.length > 1 && (
                   <button
                     type="button"
                     onClick={switchCamera}
@@ -661,43 +793,16 @@ export const SmogBarcodeScannerModal: React.FC<SmogBarcodeScannerModalProps> = (
                   </button>
                 )}
 
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 text-[11px] border border-slate-800 flex items-center gap-1 cursor-pointer"
-                  title="Snap / Upload Photo of barcode"
-                >
-                  <Upload className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Snap Photo</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (isCameraActive) {
-                      stopCamera();
-                    } else {
-                      startCamera();
-                    }
-                  }}
-                  className={`px-3 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 cursor-pointer transition-all ${
-                    isCameraActive
-                      ? 'bg-rose-950/80 text-rose-300 border border-rose-800'
-                      : 'bg-cyan-950 text-cyan-300 border border-cyan-800 shadow-md shadow-cyan-950'
-                  }`}
-                >
-                  {isCameraActive ? (
-                    <>
-                      <CameraOff className="w-3.5 h-3.5" />
-                      <span>Pause Cam</span>
-                    </>
-                  ) : (
-                    <>
-                      <Camera className="w-3.5 h-3.5" />
-                      <span>Start Cam</span>
-                    </>
-                  )}
-                </button>
+                {isCameraActive && (
+                  <button
+                    type="button"
+                    onClick={stopCamera}
+                    className="px-2.5 py-1 rounded-lg bg-rose-950/80 hover:bg-rose-900 text-rose-300 border border-rose-800 text-[11px] font-bold flex items-center gap-1 cursor-pointer transition-all"
+                  >
+                    <CameraOff className="w-3.5 h-3.5" />
+                    <span>Stop Camera</span>
+                  </button>
+                )}
               </div>
             </div>
 
@@ -726,41 +831,27 @@ export const SmogBarcodeScannerModal: React.FC<SmogBarcodeScannerModalProps> = (
               {/* User gesture overlay when camera is paused or standby */}
               {!isCameraActive && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center p-4 bg-slate-950/90 backdrop-blur-xs text-center z-10">
-                  {isFileScanning ? (
-                    <div className="flex flex-col items-center gap-2 text-cyan-400">
-                      <RefreshCw className="w-7 h-7 animate-spin" />
-                      <span className="text-xs font-semibold">Decoding barcode from photo...</span>
-                    </div>
-                  ) : (
-                    <>
-                      <div className="w-12 h-12 rounded-2xl bg-cyan-950/90 border border-cyan-800 flex items-center justify-center text-cyan-400 mb-2 shadow-lg shadow-cyan-950/50">
-                        <Camera className="w-6 h-6" />
-                      </div>
-                      <p className="text-xs font-bold text-slate-200 mb-1">
-                        {cameraError ? 'Camera Standby / Permission' : 'Live Camera Ready'}
-                      </p>
-                      <p className="text-[11px] text-slate-400 max-w-xs mb-3 leading-relaxed">
-                        Tap below to start camera scanner, snap a photo, or scan using barcode gun.
-                      </p>
-                      <div className="flex flex-wrap items-center justify-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => startCamera()}
-                          className="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-teal-400 hover:from-cyan-400 hover:to-teal-300 text-slate-950 text-xs font-black shadow-lg shadow-cyan-950/50 flex items-center gap-1.5 cursor-pointer active:scale-95 transition-transform"
-                        >
-                          <Camera className="w-3.5 h-3.5" />
-                          <span>Activate Camera</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => fileInputRef.current?.click()}
-                          className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-1.5 cursor-pointer border border-slate-700 active:scale-95 transition-transform"
-                        >
-                          <Upload className="w-3.5 h-3.5 text-cyan-400" />
-                          <span>Snap Photo</span>
-                        </button>
-                      </div>
-                    </>
+                  <div className="w-12 h-12 rounded-2xl bg-cyan-950/90 border border-cyan-800 flex items-center justify-center text-cyan-400 mb-3 shadow-lg shadow-cyan-950/50">
+                    <Camera className="w-6 h-6" />
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => startCamera()}
+                    className={`px-5 py-2.5 rounded-xl text-xs font-black shadow-lg flex items-center gap-2 cursor-pointer active:scale-95 transition-all ${
+                      !leakLocation.trim()
+                        ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700'
+                        : 'bg-gradient-to-r from-cyan-500 to-teal-400 hover:from-cyan-400 hover:to-teal-300 text-slate-950 shadow-cyan-950/50'
+                    }`}
+                  >
+                    <Camera className="w-4 h-4" />
+                    <span>Activate Camera</span>
+                  </button>
+
+                  {!leakLocation.trim() && (
+                    <p className="text-[10px] text-amber-400 font-mono mt-2">
+                      Enter Leak Unit Location above to activate scanner
+                    </p>
                   )}
                 </div>
               )}

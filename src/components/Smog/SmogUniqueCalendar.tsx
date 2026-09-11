@@ -215,138 +215,183 @@ export const SmogUniqueCalendar: React.FC<SmogUniqueCalendarProps> = ({
         </div>
       </div>
 
-      {/* UNIQUE CALENDAR POPUP MODAL / DROPDOWN */}
+      {/* UNIQUE CALENDAR POPUP MODAL (Clean Full Backdrop - No Clipping, No Overlapping) */}
       {isOpen && (
-        <div className="absolute top-full left-0 mt-2 z-50 w-72 sm:w-80 bg-slate-900 border border-cyan-500/30 rounded-2xl p-4 shadow-2xl backdrop-blur-xl animate-in fade-in zoom-in-95 duration-150">
-          
-          {/* Header: Month & Year Navigator */}
-          <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-            <button
-              type="button"
-              onClick={handlePrevMonth}
-              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </button>
-            <div className="flex items-center gap-1.5 font-extrabold text-sm text-white tracking-wide">
-              <span>{monthNames[viewMonth]}</span>
-              <span className="text-cyan-400 font-mono">{viewYear}</span>
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-150"
+          onClick={() => setIsOpen(false)}
+        >
+          <div 
+            className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-3xl p-4 sm:p-5 shadow-2xl relative overflow-hidden flex flex-col gap-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Top Glow Accent */}
+            <div className="absolute top-0 right-0 -mt-6 -mr-6 w-32 h-32 bg-cyan-500/10 rounded-full blur-2xl pointer-events-none" />
+
+            {/* Header: Title & Close Button */}
+            <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-cyan-950/80 border border-cyan-800/80 flex items-center justify-center text-cyan-400">
+                  <CalendarIcon className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-extrabold text-white">Select Date</h3>
+                  <p className="text-[10px] font-mono text-slate-400">Filter Smog Dashboard by Date</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsOpen(false)}
+                className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                title="Close Calendar"
+              >
+                <X className="w-5 h-5" />
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={handleNextMonth}
-              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
-            >
-              <ChevronRight className="w-4 h-4" />
-            </button>
-          </div>
 
-          {/* Quick Presets Bar */}
-          <div className="flex items-center justify-between gap-1.5 py-2.5 border-b border-slate-800/80">
-            <button
-              type="button"
-              onClick={() => {
-                onSelectDate(todayISO);
-                setIsOpen(false);
-              }}
-              className="flex-1 py-1 rounded-lg bg-slate-950 border border-slate-800 hover:border-cyan-500 text-[10px] font-mono font-bold text-cyan-300 text-center transition-colors cursor-pointer"
-            >
-              Today
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                onSelectDate(yesterdayISO);
-                setIsOpen(false);
-              }}
-              className="flex-1 py-1 rounded-lg bg-slate-950 border border-slate-800 hover:border-cyan-500 text-[10px] font-mono font-bold text-amber-300 text-center transition-colors cursor-pointer"
-            >
-              Yesterday
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                onSelectDate('');
-                setIsOpen(false);
-              }}
-              className="flex-1 py-1 rounded-lg bg-slate-950 border border-slate-800 hover:border-slate-700 text-[10px] font-mono font-bold text-slate-400 text-center transition-colors cursor-pointer"
-            >
-              All Dates
-            </button>
-          </div>
+            {/* Month & Year Navigator */}
+            <div className="flex items-center justify-between px-2 py-1.5 rounded-xl bg-slate-950 border border-slate-800/80">
+              <button
+                type="button"
+                onClick={handlePrevMonth}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                title="Previous Month"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <div className="flex items-center gap-1.5 font-black text-sm text-white tracking-wide">
+                <span>{monthNames[viewMonth]}</span>
+                <span className="text-cyan-400 font-mono">{viewYear}</span>
+              </div>
+              <button
+                type="button"
+                onClick={handleNextMonth}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                title="Next Month"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
 
-          {/* Weekday Labels (Su, Mo, Tu, We, Th, Fr, Sa) */}
-          <div className="grid grid-cols-7 gap-1 pt-3 pb-1 text-center text-[10px] font-mono font-black text-slate-500 uppercase tracking-wider">
-            <span>Su</span>
-            <span>Mo</span>
-            <span>Tu</span>
-            <span>We</span>
-            <span>Th</span>
-            <span>Fr</span>
-            <span>Sa</span>
-          </div>
+            {/* Quick Presets Bar */}
+            <div className="flex items-center justify-between gap-1.5 py-1">
+              <button
+                type="button"
+                onClick={() => {
+                  onSelectDate(todayISO);
+                  setIsOpen(false);
+                }}
+                className={`flex-1 py-1.5 rounded-xl text-xs font-mono font-bold text-center transition-all cursor-pointer border ${
+                  selectedDate === todayISO
+                    ? 'bg-cyan-500 text-slate-950 border-cyan-400 font-black shadow-md shadow-cyan-950'
+                    : 'bg-slate-950 border-slate-800 hover:border-cyan-500/60 text-cyan-300'
+                }`}
+              >
+                Today
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onSelectDate(yesterdayISO);
+                  setIsOpen(false);
+                }}
+                className={`flex-1 py-1.5 rounded-xl text-xs font-mono font-bold text-center transition-all cursor-pointer border ${
+                  selectedDate === yesterdayISO
+                    ? 'bg-amber-400 text-slate-950 border-amber-300 font-black shadow-md shadow-amber-950'
+                    : 'bg-slate-950 border-slate-800 hover:border-amber-500/60 text-amber-300'
+                }`}
+              >
+                Yesterday
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onSelectDate('');
+                  setIsOpen(false);
+                }}
+                className={`flex-1 py-1.5 rounded-xl text-xs font-mono font-bold text-center transition-all cursor-pointer border ${
+                  !selectedDate
+                    ? 'bg-slate-200 text-slate-950 border-white font-black shadow-md'
+                    : 'bg-slate-950 border-slate-800 hover:border-slate-700 text-slate-400'
+                }`}
+              >
+                All Dates
+              </button>
+            </div>
 
-          {/* Month Days Grid */}
-          <div className="grid grid-cols-7 gap-1">
-            {/* Empty prefix cells before 1st day of month */}
-            {Array.from({ length: firstDayOfWeek }).map((_, i) => (
-              <div key={`empty-${i}`} className="h-8" />
-            ))}
+            {/* Weekday Labels (Su, Mo, Tu, We, Th, Fr, Sa) */}
+            <div className="grid grid-cols-7 gap-1 pt-1 pb-0.5 text-center text-[11px] font-mono font-black text-slate-500 uppercase tracking-wider">
+              <span>Su</span>
+              <span>Mo</span>
+              <span>Tu</span>
+              <span>We</span>
+              <span>Th</span>
+              <span>Fr</span>
+              <span>Sa</span>
+            </div>
 
-            {/* Days of the month */}
-            {Array.from({ length: daysInMonth }).map((_, i) => {
-              const dayNum = i + 1;
-              const mStr = String(viewMonth + 1).padStart(2, '0');
-              const dStr = String(dayNum).padStart(2, '0');
-              const cellISO = `${viewYear}-${mStr}-${dStr}`;
+            {/* Month Days Grid */}
+            <div className="grid grid-cols-7 gap-1.5">
+              {/* Empty prefix cells before 1st day of month */}
+              {Array.from({ length: firstDayOfWeek }).map((_, i) => (
+                <div key={`empty-${i}`} className="h-9" />
+              ))}
 
-              const isSelected = selectedDate === cellISO;
-              const isToday = cellISO === todayISO;
-              const recordCount = recordCountMap[cellISO] || 0;
+              {/* Days of the month */}
+              {Array.from({ length: daysInMonth }).map((_, i) => {
+                const dayNum = i + 1;
+                const mStr = String(viewMonth + 1).padStart(2, '0');
+                const dStr = String(dayNum).padStart(2, '0');
+                const cellISO = `${viewYear}-${mStr}-${dStr}`;
 
-              return (
-                <button
-                  key={dayNum}
-                  type="button"
-                  onClick={() => handleSelectDay(dayNum)}
-                  className={`h-8 rounded-xl font-mono text-xs font-bold relative flex flex-col items-center justify-center transition-all cursor-pointer ${
-                    isSelected
-                      ? 'bg-cyan-400 text-slate-950 font-black shadow-md shadow-cyan-500/40 scale-105 z-10'
-                      : isToday
-                      ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-500/60 hover:bg-emerald-900'
-                      : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-                  }`}
-                  title={`${cellISO}${recordCount ? ` (${recordCount} Suspect Units)` : ''}`}
-                >
-                  <span>{dayNum}</span>
+                const isSelected = selectedDate === cellISO;
+                const isToday = cellISO === todayISO;
+                const recordCount = recordCountMap[cellISO] || 0;
 
-                  {/* Indicator Dot if records exist on this day */}
-                  {recordCount > 0 && (
-                    <span 
-                      className={`w-1.5 h-1.5 rounded-full absolute bottom-1 ${
-                        isSelected ? 'bg-slate-950' : 'bg-cyan-400 ring-1 ring-cyan-300 shadow-[0_0_6px_#22d3ee]'
-                      }`} 
-                    />
-                  )}
-                </button>
-              );
-            })}
-          </div>
+                return (
+                  <button
+                    key={dayNum}
+                    type="button"
+                    onClick={() => handleSelectDay(dayNum)}
+                    className={`h-9 rounded-xl font-mono text-xs font-bold relative flex flex-col items-center justify-center transition-all cursor-pointer border ${
+                      isSelected
+                        ? 'bg-cyan-400 text-slate-950 border-cyan-300 font-black shadow-lg shadow-cyan-500/50 scale-105 z-10'
+                        : isToday
+                        ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/60 hover:bg-emerald-900'
+                        : 'bg-slate-950/60 border-slate-800/80 text-slate-300 hover:border-slate-700 hover:bg-slate-800 hover:text-white'
+                    }`}
+                    title={`${cellISO}${recordCount ? ` (${recordCount} Suspect Units)` : ''}`}
+                  >
+                    <span>{dayNum}</span>
 
-          {/* Footer Note */}
-          <div className="mt-3 pt-2.5 border-t border-slate-800 flex items-center justify-between text-[10px] font-mono text-slate-400">
-            <span className="flex items-center gap-1.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
-              <span>Days with Smog units</span>
-            </span>
+                    {/* Indicator Dot if records exist on this day */}
+                    {recordCount > 0 && (
+                      <span 
+                        className={`w-1.5 h-1.5 rounded-full absolute bottom-1 ${
+                          isSelected ? 'bg-slate-950' : 'bg-cyan-400 ring-1 ring-cyan-300 shadow-[0_0_6px_#22d3ee]'
+                        }`} 
+                      />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
 
-            <button
-              type="button"
-              onClick={() => setIsOpen(false)}
-              className="px-2 py-0.5 rounded text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer font-bold"
-            >
-              Close
-            </button>
+            {/* Footer Note */}
+            <div className="mt-1 pt-2 border-t border-slate-800 flex items-center justify-between text-[11px] font-mono text-slate-400">
+              <span className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-cyan-400 shadow-[0_0_6px_#22d3ee]" />
+                <span>Cyan dot: Days with data</span>
+              </span>
+
+              <button
+                type="button"
+                onClick={() => setIsOpen(false)}
+                className="px-3 py-1 rounded-xl text-xs bg-slate-800 hover:bg-slate-700 text-white font-bold transition-colors cursor-pointer"
+              >
+                Done
+              </button>
+            </div>
           </div>
         </div>
       )}
