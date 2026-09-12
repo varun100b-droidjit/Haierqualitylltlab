@@ -347,6 +347,8 @@ export const AddPpUnitDialog: React.FC<AddPpUnitDialogProps> = ({
       rpm: val(rpm),
       remarks: val(remarks),
       status: targetStatus,
+      entrySource: 'unit_testing',
+      isModelOnly: false,
     });
 
     onSuccess(targetStatus);

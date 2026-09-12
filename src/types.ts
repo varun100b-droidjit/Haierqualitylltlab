@@ -239,6 +239,8 @@ export interface PpUnit {
   remarks?: string;
   observations?: ObservationNote[];
   status: 'live' | 'finished' | 'stopped';
+  entrySource?: 'model_list' | 'unit_testing';
+  isModelOnly?: boolean;
   createdAt: string; // Formatted date time e.g., '2026-07-30 14:30'
   updatedAt: string;
 }

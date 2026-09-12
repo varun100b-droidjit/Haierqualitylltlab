@@ -121,6 +121,8 @@ export const ModelRegistrationScreen: React.FC<ModelRegistrationScreenProps> = (
       partsInfo: {},
       photos: {},
       status: 'live',
+      entrySource: 'model_list',
+      isModelOnly: true,
       observations: [{ id: `obs-${Date.now()}`, text: `Model ${nameTrimmed} registered with Version ${formattedVer}.`, timestamp: new Date().toISOString() }],
     });
 

@@ -504,6 +504,18 @@ export function updatePpUnitQuantity(id: string, newQty: number): void {
   }
 }
 
+export function isModelListEntry(u: PpUnit): boolean {
+  if (!u) return false;
+  if (u.isModelOnly === true || u.entrySource === 'model_list') return true;
+  if (u.entrySource === 'unit_testing') return false;
+  if (u.testPurpose && u.testPurpose.toLowerCase().includes('model registration')) return true;
+  return false;
+}
+
+export function isUnitTestingEntry(u: PpUnit): boolean {
+  return !isModelListEntry(u);
+}
+
 export interface MatchedPairResult {
   id: string;
   commonKey: string;
@@ -517,18 +529,29 @@ export interface MatchedPairResult {
   status: 'Fully Matched' | 'Partially Matched' | 'IDU Available but ODU Not Available' | 'ODU Available but IDU Not Available' | 'Unmatched Models';
   iduItem?: PpUnit;
   oduItem?: PpUnit;
+  // Unit Testing match status
+  isPending: boolean;
+  testingStatus: 'live' | 'stopped' | 'finished' | null;
+  matchedTestingUnits: PpUnit[];
 }
 
-export function getIduOduMatchingPairs(units: PpUnit[]): MatchedPairResult[] {
+export function getIduOduMatchingPairs(units?: PpUnit[]): MatchedPairResult[] {
+  const allUnits = units && units.length > 0 ? units : ppUnitsCache;
+  const modelUnits = allUnits.filter(isModelListEntry);
+  const testingUnits = allUnits.filter(isUnitTestingEntry);
+
+  // If models are registered, use models for pairing; otherwise fallback to all units
+  const unitsToMatch = modelUnits.length > 0 ? modelUnits : allUnits;
+
   const iduMap: { [key: string]: { modelName: string; totalQty: number; item?: PpUnit } } = {};
   const oduMap: { [key: string]: { modelName: string; totalQty: number; item?: PpUnit } } = {};
 
-  units.forEach(u => {
+  unitsToMatch.forEach(u => {
     const isIdu = u.unitType === 'IDU' || Boolean(u.iduSerialNumber && !u.oduSerialNumber) || u.modelName.toUpperCase().includes('HSI') || u.modelName.toUpperCase().includes('IDU');
     const isOdu = u.unitType === 'ODU' || Boolean(u.oduSerialNumber && !u.iduSerialNumber) || u.modelName.toUpperCase().includes('HSO') || u.modelName.toUpperCase().includes('ODU');
 
     const key = extractNumbersKey(u.modelName);
-    const qty = typeof u.quantity === 'number' ? u.quantity : 1;
+    const qty = typeof u.quantity === 'number' ? Math.max(1, u.quantity) : 1;
 
     if (isIdu && !isOdu) {
       if (!iduMap[key]) {
@@ -577,6 +600,32 @@ export function getIduOduMatchingPairs(units: PpUnit[]): MatchedPairResult[] {
       status = 'ODU Available but IDU Not Available';
     }
 
+    // Match against Unit Testing units (Live, Stopped, Finished)
+    // "Unit Testing ke Live, Stop, Finished ab enme jo Set model Match kr raha hai BOTH se wo thik hai. Jo Match nhi kr raha wo Dashboard me Pending me Qty daal dena. Aur haat Jo model Pending hai Wo Both me Us model Cardview ka outer line Red kr dena"
+    const matchedTesting = testingUnits.filter(tu => {
+      if (!tu.modelName) return false;
+      const tName = tu.modelName.trim().toLowerCase();
+      const iduN = iduData.modelName.trim().toLowerCase();
+      const oduN = oduData.modelName.trim().toLowerCase();
+      const tuKey = extractNumbersKey(tu.modelName);
+
+      // Exact model match
+      if (iduN !== 'n/a (no idu model)' && (tName === iduN || tName.includes(iduN) || iduN.includes(tName))) return true;
+      if (oduN !== 'n/a (no odu model)' && (tName === oduN || tName.includes(oduN) || oduN.includes(tName))) return true;
+      // Common number key match
+      if (key && tuKey && key === tuKey) return true;
+      // Serial match if available
+      if (iduData.item?.iduSerialNumber && tu.iduSerialNumber && iduData.item.iduSerialNumber === tu.iduSerialNumber) return true;
+      if (oduData.item?.oduSerialNumber && tu.oduSerialNumber && oduData.item.oduSerialNumber === tu.oduSerialNumber) return true;
+
+      return false;
+    });
+
+    const isPending = matchedTesting.length === 0;
+    const activeTestUnit = matchedTesting.find(tu => tu.status === 'live') ||
+                           matchedTesting.find(tu => tu.status === 'stopped') ||
+                           matchedTesting.find(tu => tu.status === 'finished') || null;
+
     results.push({
       id: `match-${key}`,
       commonKey: key,
@@ -590,6 +639,9 @@ export function getIduOduMatchingPairs(units: PpUnit[]): MatchedPairResult[] {
       status,
       iduItem: iduData.item,
       oduItem: oduData.item,
+      isPending,
+      testingStatus: activeTestUnit?.status || null,
+      matchedTestingUnits: matchedTesting,
     });
   });
 
@@ -604,64 +656,86 @@ export function getIduOduMatchingPairs(units: PpUnit[]): MatchedPairResult[] {
   return results.sort((a, b) => priorityOrder[a.status] - priorityOrder[b.status]);
 }
 
-export function calculatePpUnitMetrics(units: PpUnit[]) {
+export interface PpUnitDashboardMetrics {
+  iduQty: number;      // machines under Model List IDU
+  oduQty: number;      // machines under Model List ODU
+  bothQty: number;     // matched sets under Model List BOTH formed by IDU+ODU matching
+  liveQty: number;     // units in Unit Testing with status === 'live'
+  stoppedQty: number;  // units in Unit Testing with status === 'stopped'
+  finishedQty: number; // units in Unit Testing with status === 'finished'
+  pendingQty: number;  // BOTH sets that do NOT match any unit in Unit Testing (Live/Stop/Finished)
+  pendingModels: MatchedPairResult[];
+  matchedModels: MatchedPairResult[];
+  bothPairs: MatchedPairResult[];
+}
+
+export function calculatePpUnitMetrics(units?: PpUnit[]): PpUnitDashboardMetrics {
+  const allUnits = units && units.length > 0 ? units : ppUnitsCache;
+  const modelUnits = allUnits.filter(isModelListEntry);
+  const testingUnits = allUnits.filter(isUnitTestingEntry);
+
+  const effectiveModels = modelUnits.length > 0 ? modelUnits : allUnits;
+
+  // 1. IDU Qty: Total machine quantity under Model List IDU
   let iduQty = 0;
+  effectiveModels.forEach(u => {
+    const isIdu = u.unitType === 'IDU' || Boolean(u.iduSerialNumber && !u.oduSerialNumber) || u.modelName.toUpperCase().includes('HSI') || u.modelName.toUpperCase().includes('IDU');
+    const isOdu = u.unitType === 'ODU' || Boolean(u.oduSerialNumber && !u.iduSerialNumber) || u.modelName.toUpperCase().includes('HSO') || u.modelName.toUpperCase().includes('ODU');
+    if (isIdu && !isOdu) {
+      iduQty += (typeof u.quantity === 'number' ? Math.max(1, u.quantity) : 1);
+    } else if (u.unitType === 'BOTH') {
+      iduQty += (typeof u.quantity === 'number' ? Math.max(1, u.quantity) : 1);
+    }
+  });
+
+  // 2. ODU Qty: Total machine quantity under Model List ODU
   let oduQty = 0;
+  effectiveModels.forEach(u => {
+    const isIdu = u.unitType === 'IDU' || Boolean(u.iduSerialNumber && !u.oduSerialNumber) || u.modelName.toUpperCase().includes('HSI') || u.modelName.toUpperCase().includes('IDU');
+    const isOdu = u.unitType === 'ODU' || Boolean(u.oduSerialNumber && !u.iduSerialNumber) || u.modelName.toUpperCase().includes('HSO') || u.modelName.toUpperCase().includes('ODU');
+    if (isOdu && !isIdu) {
+      oduQty += (typeof u.quantity === 'number' ? Math.max(1, u.quantity) : 1);
+    } else if (u.unitType === 'BOTH') {
+      oduQty += (typeof u.quantity === 'number' ? Math.max(1, u.quantity) : 1);
+    }
+  });
+
+  // 3. BOTH Qty: Total sets formed by IDU+ODU matching
+  const bothPairs = getIduOduMatchingPairs(allUnits);
   let bothQty = 0;
-
-  const iduNumberKeys: { [key: string]: number } = {};
-  const oduNumberKeys: { [key: string]: number } = {};
-
-  units.forEach(u => {
-    const hasIduSerial = Boolean(u.iduSerialNumber && u.iduSerialNumber.trim() !== '');
-    const hasOduSerial = Boolean(u.oduSerialNumber && u.oduSerialNumber.trim() !== '');
-
-    const isExplicitBoth = u.unitType === 'BOTH' || (hasIduSerial && hasOduSerial);
-    const isExplicitIdu = u.unitType === 'IDU' || (hasIduSerial && !hasOduSerial);
-    const isExplicitOdu = u.unitType === 'ODU' || (hasOduSerial && !hasIduSerial);
-
-    if (isExplicitBoth) {
-      bothQty++;
-      iduQty++;
-      oduQty++;
-    } else if (isExplicitIdu) {
-      iduQty++;
-      const key = extractNumbersKey(u.modelName);
-      if (key) {
-        iduNumberKeys[key] = (iduNumberKeys[key] || 0) + 1;
-      }
-    } else if (isExplicitOdu) {
-      oduQty++;
-      const key = extractNumbersKey(u.modelName);
-      if (key) {
-        oduNumberKeys[key] = (oduNumberKeys[key] || 0) + 1;
-      }
-    } else {
-      const lower = u.modelName.toLowerCase();
-      if (lower.includes('idu')) {
-        iduQty++;
-        const key = extractNumbersKey(u.modelName);
-        if (key) iduNumberKeys[key] = (iduNumberKeys[key] || 0) + 1;
-      } else if (lower.includes('odu')) {
-        oduQty++;
-        const key = extractNumbersKey(u.modelName);
-        if (key) oduNumberKeys[key] = (oduNumberKeys[key] || 0) + 1;
-      } else {
-        bothQty++;
-        iduQty++;
-        oduQty++;
-      }
+  bothPairs.forEach(pair => {
+    if (pair.matchedQty > 0) {
+      bothQty += pair.matchedQty;
     }
   });
+  if (bothQty === 0 && effectiveModels.some(u => u.unitType === 'BOTH')) {
+    bothQty = effectiveModels.filter(u => u.unitType === 'BOTH').reduce((acc, u) => acc + (u.quantity || 1), 0);
+  }
 
-  Object.keys(iduNumberKeys).forEach(key => {
-    if (oduNumberKeys[key]) {
-      const matches = Math.min(iduNumberKeys[key], oduNumberKeys[key]);
-      bothQty += matches;
-    }
-  });
+  // 4. Unit Testing Live, Stopped, Finished quantities
+  const effectiveTesting = testingUnits.length > 0 ? testingUnits : (modelUnits.length === 0 ? allUnits : []);
+  const liveQty = effectiveTesting.filter(u => u.status === 'live').length;
+  const stoppedQty = effectiveTesting.filter(u => u.status === 'stopped').length;
+  const finishedQty = effectiveTesting.filter(u => u.status === 'finished').length;
 
-  return { iduQty, oduQty, bothQty };
+  // 5. Pending Qty:
+  // "menu ke PP Unit ke Model list me jo BOTH hai usme jitni bhi machine set wo match krega Unit Testing ke Live, Stop, Finished ab enme jo Set model Match kr raha hai BOTH se wo thik hai. Jo Match nhi kr raha wo Dashboard me Pending me Qty daal dena."
+  const pendingModels = bothPairs.filter(p => p.isPending);
+  const matchedModels = bothPairs.filter(p => !p.isPending);
+  const pendingQty = pendingModels.length;
+
+  return {
+    iduQty,
+    oduQty,
+    bothQty,
+    liveQty,
+    stoppedQty,
+    finishedQty,
+    pendingQty,
+    pendingModels,
+    matchedModels,
+    bothPairs,
+  };
 }
 
 export function getAllPpUnits(): PpUnit[] {

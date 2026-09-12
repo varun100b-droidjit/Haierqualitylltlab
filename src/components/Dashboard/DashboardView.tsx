@@ -25,7 +25,8 @@ import {
   Filter,
   Play,
   PauseCircle,
-  Power
+  Power,
+  Box
 } from 'lucide-react';
 import { Unit, ActivityLog, LabNotification, ProtoUnit, FieldUnit, PpUnit } from '../../types';
 import { getActiveLabShift, LAB_SHIFTS } from '../../services/shiftStore';
@@ -238,22 +239,23 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       };
     } else if (activeSection === 'pp') {
       const filtered = filterListByYearMonth(ppUnits, ['createdAt', 'updatedAt'], selectedYear, selectedMonth) as PpUnit[];
+      const ppCalc = calculatePpUnitMetrics(filtered);
       const total = filtered.length;
-      const live = filtered.filter(u => u.status === 'live').length;
-      const finished = filtered.filter(u => u.status === 'finished').length;
-      const { bothQty } = calculatePpUnitMetrics(filtered);
-      const stop = Math.max(0, bothQty - finished);
+      const live = ppCalc.liveQty;
+      const finished = ppCalc.finishedQty;
+      const stop = ppCalc.stoppedQty;
+      const pending = ppCalc.pendingQty;
 
       const monthly = months.map(m => {
         const mList = filterListByYearMonth(ppUnits, ['createdAt', 'updatedAt'], selectedYear, m) as PpUnit[];
-        const mFinished = mList.filter(u => u.status === 'finished').length;
-        const { bothQty: mBoth } = calculatePpUnitMetrics(mList);
+        const mCalc = calculatePpUnitMetrics(mList);
         return {
           month: m,
           Total: mList.length,
-          Live: mList.filter(u => u.status === 'live').length,
-          Finished: mFinished,
-          Stop: Math.max(0, mBoth - mFinished),
+          Live: mCalc.liveQty,
+          Finished: mCalc.finishedQty,
+          Stop: mCalc.stoppedQty,
+          Pending: mCalc.pendingQty,
         };
       });
 
@@ -269,6 +271,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         stop,
         live,
         finished,
+        pending,
         onNavigate: onNavigateToPpUnits,
         monthly
       };
@@ -767,118 +770,169 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
       {/* SECTION SPECIFIC ANALYSIS DASHBOARD PANEL */}
       <div className="p-6 rounded-3xl bg-slate-900/95 border border-slate-800 shadow-2xl space-y-6 animate-in fade-in zoom-in-95 duration-200">
-        {/* If PP Unit: 6 Cards (Pending, Live Units, Finished Units, Both Qty, IDU Qty, ODU Qty) */}
+        {/* If PP Unit: 7 Cards (Pending, Live Units, Stop Units, Finished Units, Both Qty, IDU Qty, ODU Qty) */}
         {/* If Other Sections: 4 Cards (Total Units, Stop/Overdue Units, Live Units, Finished Units) */}
         {activeSection === 'pp' ? (
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-3.5">
-            {/* Card 1: Pending */}
-            <div className="p-3.5 sm:p-4 rounded-xl bg-gradient-to-br from-slate-900/90 via-slate-950 to-slate-950 border border-rose-500/30 hover:border-rose-400 shadow-[0_4px_15px_rgba(244,63,94,0.1)] hover:shadow-[0_0_20px_rgba(244,63,94,0.2)] flex flex-col justify-between relative overflow-hidden group transition-all duration-300 hover:-translate-y-0.5">
-              <div className="absolute top-0 right-0 w-20 h-20 bg-rose-500/10 rounded-full blur-xl group-hover:bg-rose-500/20 transition-all pointer-events-none" />
-              <div className="z-10">
-                <span className="text-xs font-extrabold text-white tracking-wide block truncate">Pending</span>
-                <span className="text-[10px] font-mono text-rose-400/80 block truncate">Model Pending</span>
-              </div>
-              <div className="z-10 mt-3 flex items-center justify-between gap-2">
-                <div className="text-3xl sm:text-4xl font-black text-white font-mono tracking-tight drop-shadow-[0_2px_8px_rgba(244,63,94,0.3)]">
-                  {displayedMetrics.stop}
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3 sm:gap-3.5">
+              {/* Card 1: Pending */}
+              <div className="p-3.5 sm:p-4 rounded-xl bg-gradient-to-br from-slate-900/90 via-slate-950 to-slate-950 border-2 border-rose-500/50 hover:border-rose-400 shadow-[0_4px_15px_rgba(244,63,94,0.15)] hover:shadow-[0_0_20px_rgba(244,63,94,0.25)] flex flex-col justify-between relative overflow-hidden group transition-all duration-300 hover:-translate-y-0.5">
+                <div className="absolute top-0 right-0 w-20 h-20 bg-rose-500/15 rounded-full blur-xl group-hover:bg-rose-500/25 transition-all pointer-events-none" />
+                <div className="z-10">
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="text-xs font-extrabold text-white tracking-wide block truncate">Pending</span>
+                    <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
+                  </div>
+                  <span className="text-[10px] font-mono text-rose-400/80 block truncate">Unmatched Sets</span>
                 </div>
-                <CircularProgressRing
-                  percentage={displayedMetrics.total > 0 ? (displayedMetrics.stop / displayedMetrics.total) * 100 : 0}
-                  colorClass="text-rose-400"
-                  strokeColor="#f43f5e"
-                  glowColor="rgba(244,63,94,0.6)"
-                  icon={OctagonAlert}
-                  size={40}
-                />
-              </div>
-            </div>
-
-            {/* Card 2: Live Units */}
-            <div className="p-3.5 sm:p-4 rounded-xl bg-gradient-to-br from-slate-900/90 via-slate-950 to-slate-950 border border-amber-500/30 hover:border-amber-400 shadow-[0_4px_15px_rgba(245,158,11,0.1)] hover:shadow-[0_0_20px_rgba(245,158,11,0.2)] flex flex-col justify-between relative overflow-hidden group transition-all duration-300 hover:-translate-y-0.5">
-              <div className="absolute top-0 right-0 w-20 h-20 bg-amber-500/10 rounded-full blur-xl group-hover:bg-amber-500/20 transition-all pointer-events-none" />
-              <div className="z-10">
-                <span className="text-xs font-extrabold text-white tracking-wide block truncate">Live Units</span>
-                <span className="text-[10px] font-mono text-amber-400/80 block truncate">
-                  {selectedMonth === 'All' ? 'In Testing' : `${selectedMonth} Live`}
-                </span>
-              </div>
-              <div className="z-10 mt-3 flex items-center justify-between gap-2">
-                <div className="text-3xl sm:text-4xl font-black text-white font-mono tracking-tight drop-shadow-[0_2px_8px_rgba(245,158,11,0.3)]">
-                  {displayedMetrics.live}
+                <div className="z-10 mt-3 flex items-center justify-between gap-2">
+                  <div className="text-2xl sm:text-3xl font-black text-rose-400 font-mono tracking-tight drop-shadow-[0_2px_8px_rgba(244,63,94,0.4)]">
+                    {ppMetrics.pendingQty}
+                  </div>
+                  <CircularProgressRing
+                    percentage={ppMetrics.bothQty > 0 ? (ppMetrics.pendingQty / ppMetrics.bothQty) * 100 : 0}
+                    colorClass="text-rose-400"
+                    strokeColor="#f43f5e"
+                    glowColor="rgba(244,63,94,0.6)"
+                    icon={OctagonAlert}
+                    size={38}
+                  />
                 </div>
-                <CircularProgressRing
-                  percentage={displayedMetrics.total > 0 ? (displayedMetrics.live / displayedMetrics.total) * 100 : 0}
-                  colorClass="text-amber-400"
-                  strokeColor="#f59e0b"
-                  glowColor="rgba(245,158,11,0.6)"
-                  icon={Flame}
-                  size={40}
-                />
               </div>
-            </div>
 
-            {/* Card 3: Finished Units */}
-            <div className="p-3.5 sm:p-4 rounded-xl bg-gradient-to-br from-slate-900/90 via-slate-950 to-slate-950 border border-emerald-500/30 hover:border-emerald-400 shadow-[0_4px_15px_rgba(16,185,129,0.1)] hover:shadow-[0_0_20px_rgba(16,185,129,0.2)] flex flex-col justify-between relative overflow-hidden group transition-all duration-300 hover:-translate-y-0.5">
-              <div className="absolute top-0 right-0 w-20 h-20 bg-emerald-500/10 rounded-full blur-xl group-hover:bg-emerald-500/20 transition-all pointer-events-none" />
-              <div className="z-10">
-                <span className="text-xs font-extrabold text-white tracking-wide block truncate">Finished Units</span>
-                <span className="text-[10px] font-mono text-emerald-400/80 block truncate">
-                  {selectedMonth === 'All' ? 'Validated' : `${selectedMonth} Validated`}
-                </span>
-              </div>
-              <div className="z-10 mt-3 flex items-center justify-between gap-2">
-                <div className="text-3xl sm:text-4xl font-black text-white font-mono tracking-tight drop-shadow-[0_2px_8px_rgba(16,185,129,0.3)]">
-                  {displayedMetrics.finished}
+              {/* Card 2: Live Units */}
+              <div className="p-3.5 sm:p-4 rounded-xl bg-gradient-to-br from-slate-900/90 via-slate-950 to-slate-950 border border-amber-500/30 hover:border-amber-400 shadow-[0_4px_15px_rgba(245,158,11,0.1)] hover:shadow-[0_0_20px_rgba(245,158,11,0.2)] flex flex-col justify-between relative overflow-hidden group transition-all duration-300 hover:-translate-y-0.5">
+                <div className="absolute top-0 right-0 w-20 h-20 bg-amber-500/10 rounded-full blur-xl group-hover:bg-amber-500/20 transition-all pointer-events-none" />
+                <div className="z-10">
+                  <span className="text-xs font-extrabold text-white tracking-wide block truncate">Live Units</span>
+                  <span className="text-[10px] font-mono text-amber-400/80 block truncate">Unit Testing Live</span>
                 </div>
-                <CircularProgressRing
-                  percentage={displayedMetrics.total > 0 ? (displayedMetrics.finished / displayedMetrics.total) * 100 : 0}
-                  colorClass="text-emerald-400"
-                  strokeColor="#10b981"
-                  glowColor="rgba(16,185,129,0.6)"
-                  icon={CheckCircle2}
-                  size={40}
-                />
+                <div className="z-10 mt-3 flex items-center justify-between gap-2">
+                  <div className="text-2xl sm:text-3xl font-black text-amber-400 font-mono tracking-tight drop-shadow-[0_2px_8px_rgba(245,158,11,0.3)]">
+                    {ppMetrics.liveQty}
+                  </div>
+                  <CircularProgressRing
+                    percentage={sectionAnalysis.total > 0 ? (ppMetrics.liveQty / sectionAnalysis.total) * 100 : 0}
+                    colorClass="text-amber-400"
+                    strokeColor="#f59e0b"
+                    glowColor="rgba(245,158,11,0.6)"
+                    icon={Flame}
+                    size={38}
+                  />
+                </div>
+              </div>
+
+              {/* Card 3: Stop Units */}
+              <div className="p-3.5 sm:p-4 rounded-xl bg-gradient-to-br from-slate-900/90 via-slate-950 to-slate-950 border border-orange-500/30 hover:border-orange-400 shadow-[0_4px_15px_rgba(249,115,22,0.1)] hover:shadow-[0_0_20px_rgba(249,115,22,0.2)] flex flex-col justify-between relative overflow-hidden group transition-all duration-300 hover:-translate-y-0.5">
+                <div className="absolute top-0 right-0 w-20 h-20 bg-orange-500/10 rounded-full blur-xl group-hover:bg-orange-500/20 transition-all pointer-events-none" />
+                <div className="z-10">
+                  <span className="text-xs font-extrabold text-white tracking-wide block truncate">Stop Units</span>
+                  <span className="text-[10px] font-mono text-orange-400/80 block truncate">Testing Stopped</span>
+                </div>
+                <div className="z-10 mt-3 flex items-center justify-between gap-2">
+                  <div className="text-2xl sm:text-3xl font-black text-orange-400 font-mono tracking-tight drop-shadow-[0_2px_8px_rgba(249,115,22,0.3)]">
+                    {ppMetrics.stoppedQty}
+                  </div>
+                  <CircularProgressRing
+                    percentage={sectionAnalysis.total > 0 ? (ppMetrics.stoppedQty / sectionAnalysis.total) * 100 : 0}
+                    colorClass="text-orange-400"
+                    strokeColor="#f97316"
+                    glowColor="rgba(249,115,22,0.6)"
+                    icon={PauseCircle}
+                    size={38}
+                  />
+                </div>
+              </div>
+
+              {/* Card 4: Finished Units */}
+              <div className="p-3.5 sm:p-4 rounded-xl bg-gradient-to-br from-slate-900/90 via-slate-950 to-slate-950 border border-emerald-500/30 hover:border-emerald-400 shadow-[0_4px_15px_rgba(16,185,129,0.1)] hover:shadow-[0_0_20px_rgba(16,185,129,0.2)] flex flex-col justify-between relative overflow-hidden group transition-all duration-300 hover:-translate-y-0.5">
+                <div className="absolute top-0 right-0 w-20 h-20 bg-emerald-500/10 rounded-full blur-xl group-hover:bg-emerald-500/20 transition-all pointer-events-none" />
+                <div className="z-10">
+                  <span className="text-xs font-extrabold text-white tracking-wide block truncate">Finished Units</span>
+                  <span className="text-[10px] font-mono text-emerald-400/80 block truncate">Testing Validated</span>
+                </div>
+                <div className="z-10 mt-3 flex items-center justify-between gap-2">
+                  <div className="text-2xl sm:text-3xl font-black text-emerald-400 font-mono tracking-tight drop-shadow-[0_2px_8px_rgba(16,185,129,0.3)]">
+                    {ppMetrics.finishedQty}
+                  </div>
+                  <CircularProgressRing
+                    percentage={sectionAnalysis.total > 0 ? (ppMetrics.finishedQty / sectionAnalysis.total) * 100 : 0}
+                    colorClass="text-emerald-400"
+                    strokeColor="#10b981"
+                    glowColor="rgba(16,185,129,0.6)"
+                    icon={CheckCircle2}
+                    size={38}
+                  />
+                </div>
+              </div>
+
+              {/* Card 5: Both Qty */}
+              <div className="p-3.5 sm:p-4 rounded-xl bg-gradient-to-br from-slate-900/90 via-slate-950 to-slate-950 border border-cyan-500/30 hover:border-cyan-400 shadow-[0_4px_15px_rgba(6,182,212,0.1)] flex flex-col justify-between relative overflow-hidden group transition-all duration-300 hover:-translate-y-0.5">
+                <div className="absolute top-0 right-0 w-20 h-20 bg-cyan-500/10 rounded-full blur-xl pointer-events-none" />
+                <div className="z-10">
+                  <span className="text-xs font-extrabold text-white tracking-wide block truncate">Both Qty</span>
+                  <span className="text-[10px] font-mono text-cyan-400/80 block truncate">Model List Sets</span>
+                </div>
+                <div className="z-10 mt-3 flex items-center justify-between gap-2">
+                  <div className="text-2xl sm:text-3xl font-black text-cyan-300 font-mono tracking-tight">{ppMetrics.bothQty}</div>
+                  <div className="w-9 h-9 rounded-xl bg-cyan-950/80 border border-cyan-800 flex items-center justify-center text-cyan-300 shadow-md"><Layers className="w-4 h-4" /></div>
+                </div>
+              </div>
+
+              {/* Card 6: IDU Qty */}
+              <div className="p-3.5 sm:p-4 rounded-xl bg-gradient-to-br from-slate-900/90 via-slate-950 to-slate-950 border border-indigo-500/30 hover:border-indigo-400 shadow-[0_4px_15px_rgba(99,102,241,0.1)] flex flex-col justify-between relative overflow-hidden group transition-all duration-300 hover:-translate-y-0.5">
+                <div className="absolute top-0 right-0 w-20 h-20 bg-indigo-500/10 rounded-full blur-xl pointer-events-none" />
+                <div className="z-10">
+                  <span className="text-xs font-extrabold text-white tracking-wide block truncate">IDU Qty</span>
+                  <span className="text-[10px] font-mono text-indigo-400/80 block truncate">Model List IDU</span>
+                </div>
+                <div className="z-10 mt-3 flex items-center justify-between gap-2">
+                  <div className="text-2xl sm:text-3xl font-black text-indigo-300 font-mono tracking-tight">{ppMetrics.iduQty}</div>
+                  <div className="w-9 h-9 rounded-xl bg-indigo-950/80 border border-indigo-800 flex items-center justify-center text-indigo-300 shadow-md"><Cpu className="w-4 h-4" /></div>
+                </div>
+              </div>
+
+              {/* Card 7: ODU Qty */}
+              <div className="p-3.5 sm:p-4 rounded-xl bg-gradient-to-br from-slate-900/90 via-slate-950 to-slate-950 border border-blue-500/30 hover:border-blue-400 shadow-[0_4px_15px_rgba(59,130,246,0.1)] flex flex-col justify-between relative overflow-hidden group transition-all duration-300 hover:-translate-y-0.5">
+                <div className="absolute top-0 right-0 w-20 h-20 bg-blue-500/10 rounded-full blur-xl pointer-events-none" />
+                <div className="z-10">
+                  <span className="text-xs font-extrabold text-white tracking-wide block truncate">ODU Qty</span>
+                  <span className="text-[10px] font-mono text-blue-400/80 block truncate">Model List ODU</span>
+                </div>
+                <div className="z-10 mt-3 flex items-center justify-between gap-2">
+                  <div className="text-2xl sm:text-3xl font-black text-blue-300 font-mono tracking-tight">{ppMetrics.oduQty}</div>
+                  <div className="w-9 h-9 rounded-xl bg-blue-950/80 border border-blue-800 flex items-center justify-center text-blue-300 shadow-md"><Box className="w-4 h-4" /></div>
+                </div>
               </div>
             </div>
 
-            {/* Card 4: Both Qty */}
-            <div className="p-3.5 sm:p-4 rounded-xl bg-gradient-to-br from-slate-900/90 via-slate-950 to-slate-950 border border-cyan-500/30 hover:border-cyan-400 shadow-[0_4px_15px_rgba(6,182,212,0.1)] flex flex-col justify-between relative overflow-hidden group transition-all duration-300 hover:-translate-y-0.5">
-              <div className="absolute top-0 right-0 w-20 h-20 bg-cyan-500/10 rounded-full blur-xl pointer-events-none" />
-              <div className="z-10">
-                <span className="text-xs font-extrabold text-white tracking-wide block truncate">Both Qty</span>
-                <span className="text-[10px] font-mono text-cyan-400/80 block truncate">Matched Sets</span>
+            {/* Quick Informational Notice for Pending Models */}
+            {ppMetrics.pendingQty > 0 && (
+              <div className="p-3.5 rounded-2xl bg-gradient-to-r from-rose-950/60 via-slate-900 to-slate-900 border border-rose-500/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-lg">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-xl bg-rose-900/80 border border-rose-600 flex items-center justify-center text-rose-300 shrink-0 shadow-sm">
+                    <OctagonAlert className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="text-xs font-bold text-rose-200 block">
+                      {ppMetrics.pendingQty} BOTH Model Set{ppMetrics.pendingQty > 1 ? 's' : ''} Pending Testing
+                    </span>
+                    <span className="text-[11px] text-slate-400 block">
+                      These sets are registered under Model List (BOTH) but have not started testing yet. Highlighted with a Red outline in PP Unit &gt; Model List.
+                    </span>
+                  </div>
+                </div>
+                {onNavigateToPpUnits && (
+                  <button
+                    onClick={onNavigateToPpUnits}
+                    className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-colors shrink-0 cursor-pointer shadow-md shadow-rose-950/50"
+                  >
+                    <span>View in Model List</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
-              <div className="z-10 mt-3 flex items-center justify-between gap-2">
-                <div className="text-3xl sm:text-4xl font-black text-cyan-300 font-mono tracking-tight">{ppMetrics.bothQty}</div>
-                <div className="w-10 h-10 rounded-xl bg-cyan-950/80 border border-cyan-800 flex items-center justify-center text-cyan-300 shadow-md"><Cpu className="w-5 h-5" /></div>
-              </div>
-            </div>
-
-            {/* Card 5: IDU Qty */}
-            <div className="p-3.5 sm:p-4 rounded-xl bg-gradient-to-br from-slate-900/90 via-slate-950 to-slate-950 border border-indigo-500/30 hover:border-indigo-400 shadow-[0_4px_15px_rgba(99,102,241,0.1)] flex flex-col justify-between relative overflow-hidden group transition-all duration-300 hover:-translate-y-0.5">
-              <div className="absolute top-0 right-0 w-20 h-20 bg-indigo-500/10 rounded-full blur-xl pointer-events-none" />
-              <div className="z-10">
-                <span className="text-xs font-extrabold text-white tracking-wide block truncate">IDU Qty</span>
-                <span className="text-[10px] font-mono text-indigo-400/80 block truncate">Indoor Models</span>
-              </div>
-              <div className="z-10 mt-3 flex items-center justify-between gap-2">
-                <div className="text-3xl sm:text-4xl font-black text-indigo-300 font-mono tracking-tight">{ppMetrics.iduQty}</div>
-                <div className="w-10 h-10 rounded-xl bg-indigo-950/80 border border-indigo-800 flex items-center justify-center text-indigo-300 shadow-md"><Cpu className="w-5 h-5" /></div>
-              </div>
-            </div>
-
-            {/* Card 6: ODU Qty */}
-            <div className="p-3.5 sm:p-4 rounded-xl bg-gradient-to-br from-slate-900/90 via-slate-950 to-slate-950 border border-blue-500/30 hover:border-blue-400 shadow-[0_4px_15px_rgba(59,130,246,0.1)] flex flex-col justify-between relative overflow-hidden group transition-all duration-300 hover:-translate-y-0.5">
-              <div className="absolute top-0 right-0 w-20 h-20 bg-blue-500/10 rounded-full blur-xl pointer-events-none" />
-              <div className="z-10">
-                <span className="text-xs font-extrabold text-white tracking-wide block truncate">ODU Qty</span>
-                <span className="text-[10px] font-mono text-blue-400/80 block truncate">Outdoor Models</span>
-              </div>
-              <div className="z-10 mt-3 flex items-center justify-between gap-2">
-                <div className="text-3xl sm:text-4xl font-black text-blue-300 font-mono tracking-tight">{ppMetrics.oduQty}</div>
-                <div className="w-10 h-10 rounded-xl bg-blue-950/80 border border-blue-800 flex items-center justify-center text-blue-300 shadow-md"><Cpu className="w-5 h-5" /></div>
-              </div>
-            </div>
+            )}
           </div>
         ) : (
           /* Standard 4 Cards for non-PP sections (Proto, Field, R&D, SMOG) */
