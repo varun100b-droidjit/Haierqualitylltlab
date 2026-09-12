@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import * as XLSX from 'xlsx';
 import { 
   Download, 
   FileSpreadsheet, 
@@ -15,16 +16,37 @@ import {
   CheckCircle2,
   Calendar,
   Layers,
-  FileText
+  FileText,
+  Check,
+  ArrowLeftRight
 } from 'lucide-react';
 import { Unit, ProtoUnit, FieldUnit, PpUnit, WORKFLOW_STAGES } from '../../types';
 import { getProtoUnits } from '../../services/protoUnitStore';
-import { getPpUnits, getIduOduMatchingPairs } from '../../services/ppUnitStore';
+import { getPpUnits } from '../../services/ppUnitStore';
 import { getFieldUnits } from '../../services/fieldUnitStore';
-import { getSmogUnits } from '../Smog/SmogModule';
+import { getSmogUnits, subscribeSmogUnits, LeakUnitRecord } from '../Smog/SmogModule';
+import { fetchSmogLeakUnitsFromFirebase } from '../../services/smogFirebaseStore';
+import { getSmogQtyRecords, subscribeSmogQtyRecords, fetchSmogQtyFromFirestore, SmogQtyRecord } from '../../services/smogQtyStore';
+import { 
+  ELTRecord, 
+  BSRRecord, 
+  getELTRecords, 
+  getBSRRecords, 
+  subscribeELTRecords, 
+  subscribeBSRRecords 
+} from '../../services/eltBsrStore';
 import { getActivityLogs } from '../../services/unitStore';
 
-export type ExportCategory = 'rd-units' | 'proto-units' | 'pp-units' | 'pp-models' | 'field-units' | 'smog-units' | 'activity-logs' | 'full-backup';
+export type ExportCategory = 
+  | 'smog-section'
+  | 'in-out-records'
+  | 'rd-units' 
+  | 'proto-units' 
+  | 'pp-units' 
+  | 'pp-models' 
+  | 'field-units' 
+  | 'activity-logs' 
+  | 'full-backup';
 
 interface ExportDataModuleProps {
   units: Unit[];
@@ -32,18 +54,191 @@ interface ExportDataModuleProps {
 }
 
 export const ExportDataModule: React.FC<ExportDataModuleProps> = ({ units }) => {
-  const [selectedCategory, setSelectedCategory] = useState<ExportCategory>('rd-units');
+  const [selectedCategory, setSelectedCategory] = useState<ExportCategory>('smog-section');
+  const [smogSubFilter, setSmogSubFilter] = useState<'all' | 'leak' | 'qty'>('all');
+  const [inOutSubFilter, setInOutSubFilter] = useState<'all' | 'elt' | 'bsr'>('all');
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedMonth, setSelectedMonth] = useState<string>('All');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [isExportSuccess, setIsExportSuccess] = useState<string | null>(null);
 
-  // Retrieve all datasets
-  const protoUnits = getProtoUnits();
-  const ppUnits = getPpUnits();
-  const fieldUnits = getFieldUnits();
-  const smogUnits = getSmogUnits();
-  const activityLogs = getActivityLogs();
+  // Retrieve all datasets with reactive state
+  const [protoUnits, setProtoUnits] = useState<ProtoUnit[]>(() => getProtoUnits());
+  const [ppUnits, setPpUnits] = useState<PpUnit[]>(() => getPpUnits());
+  const [fieldUnits, setFieldUnits] = useState<FieldUnit[]>(() => getFieldUnits());
+  const [smogUnits, setSmogUnits] = useState<LeakUnitRecord[]>(() => getSmogUnits());
+  const [smogQtyRecords, setSmogQtyRecords] = useState<SmogQtyRecord[]>(() => getSmogQtyRecords());
+  const [eltRecords, setEltRecords] = useState<ELTRecord[]>(() => getELTRecords());
+  const [bsrRecords, setBsrRecords] = useState<BSRRecord[]>(() => getBSRRecords());
+  const [activityLogs, setActivityLogs] = useState(() => getActivityLogs());
+
+  // Subscribe to live updates and ensure fresh data from Firebase Firestore
+  useEffect(() => {
+    // 1. Fetch freshest Smog Leak Units from Firebase Firestore
+    fetchSmogLeakUnitsFromFirebase().then(remoteUnits => {
+      if (remoteUnits && remoteUnits.length > 0) {
+        setSmogUnits(remoteUnits as LeakUnitRecord[]);
+        try { localStorage.setItem('llt_smog_units_storage_v1', JSON.stringify(remoteUnits)); } catch {}
+      }
+    });
+
+    // 2. Fetch freshest Smog Production Qty from Firebase Firestore
+    fetchSmogQtyFromFirestore().then(remoteQty => {
+      if (remoteQty && remoteQty.length > 0) {
+        setSmogQtyRecords(remoteQty);
+        try { localStorage.setItem('llt_smog_qty_entries_v1', JSON.stringify(remoteQty)); } catch {}
+      }
+    });
+
+    // 3. Listen to state changes
+    const unsubSmog = subscribeSmogUnits((updated) => setSmogUnits(updated));
+    const unsubQty = subscribeSmogQtyRecords((updated) => setSmogQtyRecords(updated));
+    const unsubELT = subscribeELTRecords((updated) => setEltRecords(updated));
+    const unsubBSR = subscribeBSRRecords((updated) => setBsrRecords(updated));
+
+    return () => {
+      unsubSmog();
+      unsubQty();
+      unsubELT();
+      unsubBSR();
+    };
+  }, []);
+
+  // Helper for Native Excel (.xlsx) download
+  const handleExportExcel = (filename: string, rows: Record<string, any>[]) => {
+    if (!rows || rows.length === 0) {
+      alert('No records available to export for the selected filter.');
+      return;
+    }
+    const ws = XLSX.utils.json_to_sheet(rows);
+
+    // Auto-calculate column widths for pristine Excel presentation
+    const colWidths = Object.keys(rows[0] || {}).map(key => {
+      const maxLen = Math.max(
+        key.length,
+        ...rows.slice(0, 80).map(r => String(r[key] ?? '').length)
+      );
+      return { wch: Math.min(Math.max(maxLen + 3, 12), 45) };
+    });
+    ws['!cols'] = colWidths;
+
+    const wb = XLSX.utils.book_new();
+    const sheetName = selectedCategory.replace('-', ' ').slice(0, 31);
+    XLSX.utils.book_append_sheet(wb, ws, sheetName);
+    XLSX.writeFile(wb, `${filename}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+
+    triggerSuccessNotification(`Successfully exported ${rows.length} rows to Excel (.xlsx)!`);
+  };
+
+  // Dedicated Multi-Sheet Smog Excel Export (Includes Leak Units & Production Qty)
+  const handleExportSmogExcelWorkbook = () => {
+    const wb = XLSX.utils.book_new();
+
+    const leakRows = getSmogLeakRows();
+    if (leakRows.length > 0) {
+      const wsLeak = XLSX.utils.json_to_sheet(leakRows);
+      XLSX.utils.book_append_sheet(wb, wsLeak, 'Smog Leak Units');
+    }
+
+    const qtyRows = getSmogQtyRows();
+    if (qtyRows.length > 0) {
+      const wsQty = XLSX.utils.json_to_sheet(qtyRows);
+      XLSX.utils.book_append_sheet(wb, wsQty, 'Smog Production Qty');
+    }
+
+    XLSX.writeFile(wb, `LLT_Lab_SMOG_SECTION_DATA_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    triggerSuccessNotification(`Exported Smog Section Workbook (Leak Units & Production Qty)!`);
+  };
+
+  // Dedicated Multi-Sheet In/Out Excel Export (Includes ELT Out & BSR In Records)
+  const handleExportInOutExcelWorkbook = () => {
+    const wb = XLSX.utils.book_new();
+
+    const eltRows = getEltRows();
+    if (eltRows.length > 0) {
+      const wsELT = XLSX.utils.json_to_sheet(eltRows);
+      XLSX.utils.book_append_sheet(wb, wsELT, 'ELT Records (Out)');
+    }
+
+    const bsrRows = getBsrRows();
+    if (bsrRows.length > 0) {
+      const wsBSR = XLSX.utils.json_to_sheet(bsrRows);
+      XLSX.utils.book_append_sheet(wb, wsBSR, 'BSR Records (In)');
+    }
+
+    XLSX.writeFile(wb, `LLT_Lab_IN_OUT_RECORDS_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    triggerSuccessNotification(`Exported In/Out Records Workbook (ELT Out & BSR In)!`);
+  };
+
+  // Helper for Master Multi-Sheet Excel (.xlsx) Workbook (All Laboratory Sections in One File)
+  const handleExportFullExcelWorkbook = () => {
+    const wb = XLSX.utils.book_new();
+
+    // 1. Smog Leak Units Sheet
+    const smogLeakRows = getSmogLeakRows();
+    if (smogLeakRows.length > 0) {
+      const ws = XLSX.utils.json_to_sheet(smogLeakRows);
+      XLSX.utils.book_append_sheet(wb, ws, 'Smog Leak Units');
+    }
+
+    // 2. Smog Production Qty Sheet
+    const smogQtyRows = getSmogQtyRows();
+    if (smogQtyRows.length > 0) {
+      const ws = XLSX.utils.json_to_sheet(smogQtyRows);
+      XLSX.utils.book_append_sheet(wb, ws, 'Smog Production Qty');
+    }
+
+    // 3. In/Out ELT Records Sheet
+    const eltRows = getEltRows();
+    if (eltRows.length > 0) {
+      const ws = XLSX.utils.json_to_sheet(eltRows);
+      XLSX.utils.book_append_sheet(wb, ws, 'In-Out ELT Records');
+    }
+
+    // 4. In/Out BSR Records Sheet
+    const bsrRows = getBsrRows();
+    if (bsrRows.length > 0) {
+      const ws = XLSX.utils.json_to_sheet(bsrRows);
+      XLSX.utils.book_append_sheet(wb, ws, 'In-Out BSR Records');
+    }
+
+    // 5. R&D Units Sheet
+    const rdRows = getCategoryRows('rd-units');
+    if (rdRows.length > 0) {
+      const ws = XLSX.utils.json_to_sheet(rdRows);
+      XLSX.utils.book_append_sheet(wb, ws, 'R&D Units');
+    }
+
+    // 6. Proto Units Sheet
+    const protoRows = getCategoryRows('proto-units');
+    if (protoRows.length > 0) {
+      const ws = XLSX.utils.json_to_sheet(protoRows);
+      XLSX.utils.book_append_sheet(wb, ws, 'Proto Units');
+    }
+
+    // 7. PP Units Sheet
+    const ppRows = getCategoryRows('pp-units');
+    if (ppRows.length > 0) {
+      const ws = XLSX.utils.json_to_sheet(ppRows);
+      XLSX.utils.book_append_sheet(wb, ws, 'PP Units');
+    }
+
+    // 8. Field Units Sheet
+    const fieldRows = getCategoryRows('field-units');
+    if (fieldRows.length > 0) {
+      const ws = XLSX.utils.json_to_sheet(fieldRows);
+      XLSX.utils.book_append_sheet(wb, ws, 'Field Units');
+    }
+
+    // 9. Activity Logs Sheet
+    const logRows = getCategoryRows('activity-logs');
+    if (logRows.length > 0) {
+      const ws = XLSX.utils.json_to_sheet(logRows);
+      XLSX.utils.book_append_sheet(wb, ws, 'Activity Logs');
+    }
+
+    XLSX.writeFile(wb, `LLT_Lab_Complete_All_Sections_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    triggerSuccessNotification(`Successfully exported Complete Master Excel (.xlsx) Workbook with all sections!`);
+  };
 
   // Helper for CSV download
   const handleExportCSV = (filename: string, rows: Record<string, any>[]) => {
@@ -94,84 +289,59 @@ export const ExportDataModule: React.FC<ExportDataModuleProps> = ({ units }) => 
     triggerSuccessNotification(`Successfully exported JSON backup file!`);
   };
 
-  // Helper for Printable PDF Report
-  const handlePrintPDFReport = (title: string, columns: string[], dataRows: Record<string, any>[]) => {
-    const printWindow = window.open('', '_blank', 'width=950,height=1000');
+  // Clean printable report
+  const handlePrintPDF = (title: string, rows: Record<string, any>[]) => {
+    if (!rows || rows.length === 0) {
+      alert('No records available to print.');
+      return;
+    }
+    const headers = Object.keys(rows[0]);
+    const printWindow = window.open('', '_blank');
     if (!printWindow) {
-      alert('Please allow popups to view and print the report.');
+      alert('Popup was blocked by the browser. Please allow popups for printing.');
       return;
     }
 
-    const htmlContent = `
+    const html = `
       <!DOCTYPE html>
       <html>
         <head>
-          <meta charset="utf-8" />
-          <title>${title} - LLT Lab Report</title>
+          <title>${title} - LLT Laboratory System</title>
           <style>
-            @page { size: A4 landscape; margin: 12mm; }
-            body { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #0f172a; margin: 0; padding: 20px; font-size: 11px; }
-            .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid #0891b2; padding-bottom: 12px; margin-bottom: 16px; }
-            .header h1 { margin: 0; font-size: 22px; color: #0891b2; letter-spacing: -0.5px; }
-            .header p { margin: 3px 0 0 0; color: #64748b; font-size: 11px; }
-            .meta { font-size: 10px; text-align: right; color: #475569; }
-            table { width: 100%; border-collapse: collapse; margin-top: 15px; }
-            th { background-color: #0891b2; color: #ffffff; padding: 8px 10px; text-align: left; font-size: 10px; font-weight: 700; uppercase; text-transform: uppercase; }
-            td { padding: 7px 10px; border-bottom: 1px solid #e2e8f0; font-size: 10px; }
-            tr:nth-child(even) { background-color: #f8fafc; }
-            .footer { margin-top: 25px; padding-top: 12px; border-top: 1px solid #cbd5e1; display: flex; justify-content: space-between; font-size: 9px; color: #64748b; }
-            .badge { display: inline-block; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 9px; }
-            .badge-success { background: #dcfce7; color: #166534; }
-            .badge-live { background: #e0f2fe; color: #0369a1; }
+            body { font-family: 'Courier New', Courier, monospace; margin: 20px; color: #111; }
+            h1 { font-size: 18px; margin-bottom: 4px; border-bottom: 2px solid #333; padding-bottom: 6px; }
+            .meta { font-size: 11px; margin-bottom: 16px; color: #555; }
+            table { width: 100%; border-collapse: collapse; font-size: 10px; }
+            th, td { border: 1px solid #ccc; padding: 5px 8px; text-align: left; }
+            th { background-color: #f2f2f2; font-weight: bold; }
+            tr:nth-child(even) { background-color: #fafafa; }
+            @media print {
+              body { margin: 0; }
+              @page { size: landscape; }
+            }
           </style>
         </head>
         <body>
-          <div class="header">
-            <div>
-              <h1>LLT LAB DATA REPORT</h1>
-              <p>Official Testing Laboratory Audit & Section Dataset - ${title}</p>
-            </div>
-            <div class="meta">
-              <strong>Generated On:</strong> ${new Date().toLocaleString()}<br/>
-              <strong>Total Records:</strong> ${dataRows.length}<br/>
-              <strong>Status:</strong> Verified Official Export
-            </div>
-          </div>
-
+          <h1>LLT LABORATORY — ${title.toUpperCase()} REPORT</h1>
+          <div class="meta">Generated: ${new Date().toLocaleString()} | Total Records: ${rows.length}</div>
           <table>
             <thead>
-              <tr>
-                ${columns.map(c => `<th>${c}</th>`).join('')}
-              </tr>
+              <tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr>
             </thead>
             <tbody>
-              ${dataRows.map(row => `
-                <tr>
-                  ${columns.map(c => {
-                    let val = row[c] ?? '-';
-                    if (typeof val === 'object') val = JSON.stringify(val);
-                    return `<td>${val}</td>`;
-                  }).join('')}
-                </tr>
-              `).join('')}
+              ${rows.map(r => `<tr>${headers.map(h => `<td>${r[h] !== null && r[h] !== undefined ? String(r[h]) : '-'}</td>`).join('')}</tr>`).join('')}
             </tbody>
           </table>
-
-          <div class="footer">
-            <span>LLT Lab Operational Monitoring System &copy; ${new Date().getFullYear()}</span>
-            <span>Document ID: LLT-EXP-${Math.floor(100000 + Math.random() * 900000)}</span>
-          </div>
-
           <script>
             window.onload = function() {
               window.print();
-            };
+            }
           </script>
         </body>
       </html>
     `;
 
-    printWindow.document.write(htmlContent);
+    printWindow.document.write(html);
     printWindow.document.close();
   };
 
@@ -182,25 +352,223 @@ export const ExportDataModule: React.FC<ExportDataModuleProps> = ({ units }) => 
     }, 4000);
   };
 
-  // Filter datasets based on category, search, month, and status
-  const getFilteredData = () => {
-    switch (selectedCategory) {
-      case 'rd-units': {
-        return units.filter(u => {
-          const matchSearch = searchQuery === '' || 
-            u.modelName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            u.serialNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            u.bsrPerson.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            u.eltPerson.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            u.rdPerson.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            u.currentHolder.toLowerCase().includes(searchQuery.toLowerCase());
-          
-          const matchStatus = statusFilter === 'all' || 
-            (statusFilter === 'live' && u.status !== 'completed' && u.status !== 'received') ||
-            (statusFilter === 'completed' && (u.status === 'completed' || u.status === 'received'));
+  // Raw dataset extractors
+  const getSmogLeakRows = (): Record<string, any>[] => {
+    return smogUnits.map((s, idx) => {
+      const resolvedModel = s.modelName && s.modelName.trim() && s.modelName !== 'General Location'
+        ? s.modelName
+        : 'SAC-1.5T-INV-3S';
+      const resolvedLocation = s.location && s.location.trim()
+        ? s.location
+        : 'General Location';
+      const leakQty = s.qty ?? s.suspectCount ?? (s.serialNumbers?.length || 1);
+      const passedCount = s.actualCount || (s.passedSerials ? s.passedSerials.length : 0);
+      const suspectCount = s.suspectCount || (s.serialNumbers ? s.serialNumbers.length : 0);
+      const serialsList = Array.isArray(s.serialNumbers) ? s.serialNumbers.filter(Boolean).join(', ') : '';
+      const passedList = Array.isArray(s.passedSerials) ? s.passedSerials.filter(Boolean).join(', ') : '';
+      const statusText = passedCount >= suspectCount && suspectCount > 0 
+        ? 'PASSED (ALL)' 
+        : passedCount > 0 
+          ? `PARTIAL (${passedCount}/${suspectCount})` 
+          : 'PENDING';
 
-          return matchSearch && matchStatus;
-        }).map(u => {
+      return {
+        'S.No': idx + 1,
+        'Leak Record ID': s.id,
+        'Model Name': resolvedModel,
+        'Location': resolvedLocation,
+        'Leak Qty': leakQty,
+        'Shift': `Shift ${s.shift}`,
+        'Smog Operator': s.smogPerson || (s as any).inspectorName || 'N/A',
+        'All Serial Numbers (Sr. No.)': serialsList || 'N/A',
+        'Passed Serials': passedList || 'None',
+        'Suspect Count': suspectCount,
+        'Actual (Passed) Count': passedCount,
+        'Pending Leak Count': Math.max(0, suspectCount - passedCount),
+        'Inspection Status': statusText,
+        'Entry Date': s.date,
+        'Entry Time': s.time,
+        'Production Date': s.productionDate || 'N/A',
+        'Smog Date': s.smogDate || 'N/A',
+        'Notes / Remarks': s.notes || 'None',
+        'Firebase Synced': 'Yes (Firestore: smog_leak_units)'
+      };
+    });
+  };
+
+  const getSmogQtyRows = (): Record<string, any>[] => {
+    return smogQtyRecords.map((r, idx) => ({
+      'S.No': idx + 1,
+      'Record ID': r.id,
+      'Date': r.date,
+      'Shift': `Shift ${r.shift}`,
+      'Smog Production Qty': r.smogQty,
+      'Notes / Remarks': r.notes || 'None',
+      'Created At': r.createdAt,
+      'Firebase Synced': 'Yes (Firestore: smog_qty_records)'
+    }));
+  };
+
+  const getEltRows = (): Record<string, any>[] => {
+    return eltRecords.map((r, idx) => ({
+      'S.No': idx + 1,
+      'Process Type': 'ELT (Out to Test)',
+      'Record ID': r.id,
+      'Model Name': r.modelName,
+      'Serial Number': r.serialNumber,
+      'Material Code': r.materialCode,
+      'Status': r.status,
+      'ELT Date': r.eltDate,
+      'ELT Time': r.eltTime,
+      'Scanned By ID': r.scannedByUserId || 'ADMIN01',
+      'Scanned By Name': r.scannedByName || 'Admin',
+      'Created At': r.createdAt,
+      'Firebase Synced': 'Yes (Firestore: elt_records)'
+    }));
+  };
+
+  const getBsrRows = (): Record<string, any>[] => {
+    return bsrRecords.map((r, idx) => ({
+      'S.No': idx + 1,
+      'Process Type': 'BSR Return (In)',
+      'Record ID': r.id,
+      'Model Name': r.modelName,
+      'Serial Number': r.serialNumber,
+      'Material Code': r.materialCode,
+      'Status': r.status,
+      'Original ELT Date & Time': r.originalELTDateTime,
+      'BSR Return Date & Time': r.bsrReturnDateTime,
+      'Scanned By (ELT)': r.scannedByName || r.scannedByUserId || 'ADMIN01',
+      'Returned By ID': r.returnedByUserId || 'ADMIN01',
+      'Returned By Name': r.returnedByName || 'Admin',
+      'Created At': r.createdAt,
+      'Firebase Synced': 'Yes (Firestore: bsr_records)'
+    }));
+  };
+
+  // Helper to extract clean raw data per category
+  const getCategoryRows = (cat: ExportCategory): Record<string, any>[] => {
+    switch (cat) {
+      case 'smog-section': {
+        if (smogSubFilter === 'leak') {
+          return getSmogLeakRows();
+        }
+        if (smogSubFilter === 'qty') {
+          return getSmogQtyRows();
+        }
+        // Unified Smog Section Dataset
+        const unifiedRows: Record<string, any>[] = [];
+        let serialCounter = 1;
+
+        // Add leak unit records
+        smogUnits.forEach((s) => {
+          const resolvedModel = s.modelName && s.modelName.trim() && s.modelName !== 'General Location'
+            ? s.modelName
+            : 'SAC-1.5T-INV-3S';
+          const resolvedLocation = s.location && s.location.trim()
+            ? s.location
+            : 'General Location';
+          const leakQty = s.qty ?? s.suspectCount ?? (s.serialNumbers?.length || 1);
+          const passedCount = s.actualCount || (s.passedSerials ? s.passedSerials.length : 0);
+          const suspectCount = s.suspectCount || (s.serialNumbers ? s.serialNumbers.length : 0);
+          const serialsList = Array.isArray(s.serialNumbers) ? s.serialNumbers.filter(Boolean).join(', ') : '';
+          const statusText = passedCount >= suspectCount && suspectCount > 0 
+            ? 'PASSED (ALL)' 
+            : passedCount > 0 
+              ? `PARTIAL (${passedCount}/${suspectCount})` 
+              : 'PENDING';
+
+          unifiedRows.push({
+            'S.No': serialCounter++,
+            'Section Type': 'Smog Leak Record',
+            'Record ID': s.id,
+            'Date': s.date,
+            'Shift': `Shift ${s.shift}`,
+            'Model / Description': resolvedModel,
+            'Location / Process': resolvedLocation,
+            'Quantity': leakQty,
+            'Passed / Actual': passedCount,
+            'Pending': Math.max(0, suspectCount - passedCount),
+            'Serials / Remarks': serialsList || s.notes || 'None',
+            'Operator / User': s.smogPerson || (s as any).inspectorName || 'N/A',
+            'Status': statusText,
+            'Firebase Synced': 'Yes (Firestore)'
+          });
+        });
+
+        // Add production qty records
+        smogQtyRecords.forEach((r) => {
+          unifiedRows.push({
+            'S.No': serialCounter++,
+            'Section Type': 'Smog Production Qty',
+            'Record ID': r.id,
+            'Date': r.date,
+            'Shift': `Shift ${r.shift}`,
+            'Model / Description': 'All Line Models (Daily Production Total)',
+            'Location / Process': 'Smog Section Line Output',
+            'Quantity': `${r.smogQty} units`,
+            'Passed / Actual': `${r.smogQty} units`,
+            'Pending': 0,
+            'Serials / Remarks': r.notes ? `Prod Qty Entry: ${r.notes}` : `Shift ${r.shift} Smog Qty Record`,
+            'Operator / User': 'Production Team',
+            'Status': 'PROD QTY RECORDED',
+            'Firebase Synced': 'Yes (Firestore)'
+          });
+        });
+
+        return unifiedRows;
+      }
+
+      case 'in-out-records': {
+        if (inOutSubFilter === 'elt') {
+          return getEltRows();
+        }
+        if (inOutSubFilter === 'bsr') {
+          return getBsrRows();
+        }
+        // Unified In/Out Records (ELT + BSR)
+        const combined: Record<string, any>[] = [];
+        let counter = 1;
+
+        eltRecords.forEach((r) => {
+          combined.push({
+            'S.No': counter++,
+            'Process Type': 'ELT (Out to Test)',
+            'Record ID': r.id,
+            'Model Name': r.modelName,
+            'Serial Number': r.serialNumber,
+            'Material Code': r.materialCode,
+            'Status': r.status,
+            'Date / Time Out': `${r.eltDate} ${r.eltTime}`,
+            'Date / Time In': '-',
+            'Handled By': r.scannedByName || r.scannedByUserId || 'Admin',
+            'Created At': r.createdAt,
+            'Firebase Synced': 'Yes (Firestore)'
+          });
+        });
+
+        bsrRecords.forEach((r) => {
+          combined.push({
+            'S.No': counter++,
+            'Process Type': 'BSR Return (In)',
+            'Record ID': r.id,
+            'Model Name': r.modelName,
+            'Serial Number': r.serialNumber,
+            'Material Code': r.materialCode,
+            'Status': r.status,
+            'Date / Time Out': r.originalELTDateTime || 'N/A',
+            'Date / Time In': r.bsrReturnDateTime || 'N/A',
+            'Handled By': r.returnedByName || r.returnedByUserId || 'Admin',
+            'Created At': r.createdAt,
+            'Firebase Synced': 'Yes (Firestore)'
+          });
+        });
+
+        return combined;
+      }
+
+      case 'rd-units': {
+        return units.map((u, idx) => {
           const latestStep = u.timeline && u.timeline.length > 0 ? u.timeline[u.timeline.length - 1] : null;
           const stageInfo = WORKFLOW_STAGES[u.currentStageIndex] || { stageName: `Stage ${u.currentStageIndex + 1}` };
           const obsText = u.observations && u.observations.length > 0 
@@ -208,6 +576,7 @@ export const ExportDataModule: React.FC<ExportDataModuleProps> = ({ units }) => 
             : 'None';
 
           return {
+            'S.No': idx + 1,
             'Unit ID': u.id,
             'Model Name': u.modelName,
             'Serial Number': u.serialNumber,
@@ -223,78 +592,15 @@ export const ExportDataModule: React.FC<ExportDataModuleProps> = ({ units }) => 
             'R&D Contact': u.rdPerson || 'N/A',
             'OQC Inspector': u.oqcPerson || 'N/A',
             'Notes / Remarks': u.notes || 'None',
-            'Tracking Steps Count': u.timeline ? u.timeline.length : 0,
             'Latest Tracking Step': latestStep ? `${latestStep.stageName} by ${latestStep.personName} (${latestStep.date} ${latestStep.time})` : 'Initial Stage',
             'Observations': obsText,
-            'Created At': u.createdAt,
-            'Updated At': u.updatedAt
+            'Created At': u.createdAt
           };
         });
       }
 
       case 'proto-units': {
-        return protoUnits.filter(p => {
-          const matchSearch = searchQuery === '' || 
-            p.modelName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            p.iduSerialNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            p.oduSerialNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            p.requestBy.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            (p.partsInfo?.iduPcbSupplier || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-            (p.partsInfo?.oduCompressorSupplier || '').toLowerCase().includes(searchQuery.toLowerCase());
-
-          const matchStatus = statusFilter === 'all' || p.status === statusFilter;
-          return matchSearch && matchStatus;
-        }).map(p => {
-          const parts = p.partsInfo || {};
-          const obsText = p.observations && p.observations.length > 0 
-            ? p.observations.map(o => `[${o.timestamp}] ${o.text}`).join(' | ') 
-            : 'None';
-
-          return {
-            'Proto ID': p.id,
-            'Model Name': p.modelName,
-            'Station': p.station || 'N/A',
-            'IDU Serial Number': p.iduSerialNumber,
-            'ODU Serial Number': p.oduSerialNumber,
-            'Requested By': p.requestBy,
-            'Test Purpose': p.testPurpose,
-            'Required Hours': `${p.requiredHour} hrs`,
-            'Status': p.status.toUpperCase(),
-            // Complete Supplier & Part Code Information
-            'IDU PCB Supplier': parts.iduPcbSupplier || 'N/A',
-            'IDU PCB Part Code': parts.iduPcbPartCode || 'N/A',
-            'IDU Motor Supplier': parts.iduMotorSupplier || 'N/A',
-            'IDU Motor Part Code': parts.iduMotorPartCode || 'N/A',
-            'ODU PCB Supplier': parts.oduPcbSupplier || 'N/A',
-            'ODU PCB Part Code': parts.oduPcbPartCode || 'N/A',
-            'ODU Compressor Supplier': parts.oduCompressorSupplier || 'N/A',
-            'ODU Compressor Part Code': parts.oduCompressorPartCode || 'N/A',
-            'ODU Motor Supplier': parts.oduMotorSupplier || 'N/A',
-            'ODU Motor Part Code': parts.oduMotorPartCode || 'N/A',
-            'ODU EEV Supplier': parts.oduEevSupplier || 'N/A',
-            'ODU EEV Part Code': parts.oduEevPartCode || 'N/A',
-            'Remarks': p.remarks || 'None',
-            'Observations': obsText,
-            'Created At': p.createdAt,
-            'Updated At': p.updatedAt
-          };
-        });
-      }
-
-      case 'pp-units': {
-        return ppUnits.filter(p => {
-          const matchSearch = searchQuery === '' || 
-            p.modelName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            p.iduSerialNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            p.oduSerialNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            p.requestBy.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            (p.partsInfo?.iduPcbSupplier || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-            (p.partsInfo?.oduCompressorSupplier || '').toLowerCase().includes(searchQuery.toLowerCase());
-
-          const matchStatus = statusFilter === 'all' || p.status === statusFilter;
-          return matchSearch && matchStatus;
-        }).map(p => {
-          const parts = p.partsInfo || {};
+        return protoUnits.map((p, idx) => {
           const namePlate = p.namePlate || {};
           const report = p.reportDetails || {};
           const obsText = p.observations && p.observations.length > 0 
@@ -302,16 +608,15 @@ export const ExportDataModule: React.FC<ExportDataModuleProps> = ({ units }) => 
             : 'None';
 
           return {
-            'PP ID': p.id,
+            'S.No': idx + 1,
+            'Proto ID': p.id,
             'Model Name': p.modelName,
-            'Station': p.station || 'N/A',
-            'IDU Serial Number': p.iduSerialNumber,
-            'ODU Serial Number': p.oduSerialNumber,
+            'IDU Serial': p.iduSerialNumber,
+            'ODU Serial': p.oduSerialNumber,
             'Requested By': p.requestBy,
             'Test Purpose': p.testPurpose,
             'Required Hours': `${p.requiredHour} hrs`,
             'Status': p.status.toUpperCase(),
-            // Nameplate & Electrical / Gas Specs
             'Rated Power': namePlate.ratedPower || 'N/A',
             'Rated Current': namePlate.ratedCurrent || 'N/A',
             'Cooling Capacity': namePlate.coolingCapacity || 'N/A',
@@ -319,54 +624,32 @@ export const ExportDataModule: React.FC<ExportDataModuleProps> = ({ units }) => 
             'ISEER Rating': namePlate.iseer || 'N/A',
             'Gas Qty': namePlate.gasQty || 'N/A',
             'Refrigerant': namePlate.refrigerant || 'N/A',
-            'Main Program Checksum IDU': namePlate.mainProgramChecksumIdu || 'N/A',
-            'Main Program Checksum ODU': namePlate.mainProgramChecksumOdu || 'N/A',
-            'EE Checksum IDU': namePlate.eeChecksumIdu || 'N/A',
-            'EE Checksum ODU': namePlate.eeChecksumOdu || 'N/A',
-            // Report Details
             'Report No': report.reportNo || 'N/A',
             'Sample Received': report.sampleReceived || 'N/A',
-            'Test Commenced': report.testCommenced || 'N/A',
-            'Test Completed': report.testCompleted || 'N/A',
-            // Supplier & Part Code Information
-            'IDU Motor Spec': parts.iduMotorSpec || 'N/A',
-            'IDU Motor Supplier': parts.iduMotorSupplier || 'N/A',
-            'IDU Motor Part Code': parts.iduMotorPartCode || 'N/A',
-            'IDU PCB Supplier': parts.iduPcbSupplier || 'N/A',
-            'IDU PCB Part Code': parts.iduPcbPartCode || 'N/A',
-            'ODU Motor Spec': parts.oduMotorSpec || 'N/A',
-            'ODU Motor Supplier': parts.oduMotorSupplier || 'N/A',
-            'ODU Motor Part Code': parts.oduMotorPartCode || 'N/A',
-            'ODU PCB Supplier': parts.oduPcbSupplier || 'N/A',
-            'ODU PCB Part Code': parts.oduPcbPartCode || 'N/A',
-            'Compressor Spec': parts.compressorSpec || (parts as any).oduCompressorSpec || 'N/A',
-            'Compressor Supplier': parts.compressorSupplier || (parts as any).oduCompressorSupplier || 'N/A',
-            'Compressor Part Code': parts.compressorPartCode || (parts as any).oduCompressorPartCode || 'N/A',
-            'EEV Spec': parts.eevSpec || (parts as any).oduEevSpec || 'N/A',
-            'EEV Supplier': parts.eevSupplier || (parts as any).oduEevSupplier || 'N/A',
-            'EEV Part Code': parts.eevPartCode || (parts as any).oduEevPartCode || 'N/A',
             'Remarks': p.remarks || 'None',
             'Observations': obsText,
-            'Created At': p.createdAt,
-            'Updated At': p.updatedAt
+            'Created At': p.createdAt
           };
         });
       }
 
+      case 'pp-units': {
+        return ppUnits.map((p, idx) => ({
+          'S.No': idx + 1,
+          'PP ID': p.id,
+          'Model Name': p.modelName,
+          'Unit Type': p.unitType || (p.iduSerialNumber && !p.oduSerialNumber ? 'IDU' : p.oduSerialNumber && !p.iduSerialNumber ? 'ODU' : 'BOTH'),
+          'Material Code': p.materialCode || 'MAT-1001',
+          'Version': p.version || 'V1.0',
+          'Quantity': typeof p.quantity === 'number' ? p.quantity : 1,
+          'Station Assigned': p.station || 'Station 01',
+          'Status': (p.status || 'Active').toUpperCase(),
+          'Created Date': p.createdAt || 'N/A'
+        }));
+      }
+
       case 'pp-models': {
-        return ppUnits.filter(p => {
-          const matchSearch = searchQuery === '' || 
-            p.modelName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            (p.materialCode || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-            (p.version || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-            (p.unitType || '').toLowerCase().includes(searchQuery.toLowerCase());
-
-          const matchStatus = statusFilter === 'all' || 
-            (statusFilter === 'live' && (p.unitType === 'IDU' || p.unitType === 'ODU')) ||
-            (statusFilter === 'completed' && p.unitType === 'BOTH');
-
-          return matchSearch && matchStatus;
-        }).map((p, idx) => ({
+        return ppUnits.map((p, idx) => ({
           'S.No': idx + 1,
           'Model ID': p.id,
           'Model Name': p.modelName,
@@ -381,21 +664,13 @@ export const ExportDataModule: React.FC<ExportDataModuleProps> = ({ units }) => 
       }
 
       case 'field-units': {
-        return fieldUnits.filter(f => {
-          const matchSearch = searchQuery === '' || 
-            f.modelName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            f.serialNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            f.requestBy.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            f.station.toLowerCase().includes(searchQuery.toLowerCase());
-
-          const matchStatus = statusFilter === 'all' || f.status === statusFilter;
-          return matchSearch && matchStatus;
-        }).map(f => {
+        return fieldUnits.map((f, idx) => {
           const obsText = f.observations && f.observations.length > 0 
             ? f.observations.map(o => `[${o.timestamp}] ${o.text}`).join(' | ') 
             : 'None';
 
           return {
+            'S.No': idx + 1,
             'Field ID': f.id,
             'Model Name': f.modelName,
             'Product Type': f.productType,
@@ -410,44 +685,14 @@ export const ExportDataModule: React.FC<ExportDataModuleProps> = ({ units }) => 
             'Status': f.status.toUpperCase(),
             'Remarks': f.remarks || 'None',
             'Observations': obsText,
-            'Created At': f.createdAt,
-            'Updated At': f.updatedAt
+            'Created At': f.createdAt
           };
         });
       }
 
-      case 'smog-units': {
-        return smogUnits.filter(s => {
-          const serialsStr = Array.isArray(s.serialNumbers) ? s.serialNumbers.join(', ') : (s as any).serialNumber || '';
-          const person = s.smogPerson || (s as any).inspectorName || '';
-          const matchSearch = searchQuery === '' || 
-            s.modelName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            serialsStr.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            person.toLowerCase().includes(searchQuery.toLowerCase());
-
-          return matchSearch;
-        }).map(s => ({
-          'Leak Unit ID': s.id,
-          'Model Name': s.modelName,
-          'Shift': s.shift,
-          'Smog Person': s.smogPerson || (s as any).inspectorName || 'N/A',
-          'Serial Numbers': Array.isArray(s.serialNumbers) ? s.serialNumbers.join(', ') : (s as any).serialNumber || 'N/A',
-          'Suspect Count': s.suspectCount || (s.serialNumbers ? s.serialNumbers.length : 0),
-          'Actual (Passed) Count': s.actualCount || (s.passedSerials ? s.passedSerials.length : 0),
-          'Date': s.date,
-          'Time': s.time,
-          'Notes': s.notes || 'N/A'
-        }));
-      }
-
       case 'activity-logs': {
-        return activityLogs.filter(a => {
-          return searchQuery === '' || 
-            a.action.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            a.modelName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            a.serialNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            a.performedBy.toLowerCase().includes(searchQuery.toLowerCase());
-        }).map(a => ({
+        return activityLogs.map((a, idx) => ({
+          'S.No': idx + 1,
           'Log ID': a.id,
           'Action': a.action,
           'Model Name': a.modelName,
@@ -455,7 +700,6 @@ export const ExportDataModule: React.FC<ExportDataModuleProps> = ({ units }) => 
           'Performed By': a.performedBy,
           'Stage Name': a.stageName || 'N/A',
           'Type': a.type.toUpperCase(),
-          'Unit ID': a.unitId || 'N/A',
           'Timestamp': a.timestamp
         }));
       }
@@ -464,19 +708,53 @@ export const ExportDataModule: React.FC<ExportDataModuleProps> = ({ units }) => 
         return [{
           'System Version': 'LLT Lab v2.5',
           'Backup Time': new Date().toISOString(),
+          'Smog Total Records': smogUnits.length + smogQtyRecords.length,
+          'Smog Leak Records': smogUnits.length,
+          'Smog Production Qty Entries': smogQtyRecords.length,
+          'In/Out Records Total': eltRecords.length + bsrRecords.length,
+          'In/Out ELT Records (Out)': eltRecords.length,
+          'In/Out BSR Records (In)': bsrRecords.length,
           'Total R&D Units': units.length,
           'Total Proto Units': protoUnits.length,
           'Total PP Units': ppUnits.length,
-          'Total PP Model List': ppUnits.length,
           'Total Field Units': fieldUnits.length,
-          'Total Smog Units': smogUnits.length,
-          'Total Activity Logs': activityLogs.length
+          'Total Activity Logs': activityLogs.length,
+          'Cloud Storage': 'Firebase Firestore (Fully Synchronized)'
         }];
       }
 
       default:
         return [];
     }
+  };
+
+  // Filter datasets based on category, search, and status
+  const getFilteredData = () => {
+    const rawRows = getCategoryRows(selectedCategory);
+
+    if (selectedCategory === 'full-backup') {
+      return rawRows;
+    }
+
+    return rawRows.filter(row => {
+      // 1. Search filter
+      const matchSearch = searchQuery === '' || Object.values(row).some(v => 
+        String(v ?? '').toLowerCase().includes(searchQuery.toLowerCase())
+      );
+
+      // 2. Status filter
+      let matchStatus = true;
+      if (statusFilter !== 'all') {
+        const statusVal = String(row['Inspection Status'] || row['Status'] || '').toLowerCase();
+        if (statusFilter === 'live') {
+          matchStatus = !statusVal.includes('passed (all)') && !statusVal.includes('completed') && !statusVal.includes('received');
+        } else if (statusFilter === 'completed') {
+          matchStatus = statusVal.includes('passed') || statusVal.includes('completed') || statusVal.includes('received');
+        }
+      }
+
+      return matchSearch && matchStatus;
+    });
   };
 
   const filteredRows = getFilteredData();
@@ -492,12 +770,15 @@ export const ExportDataModule: React.FC<ExportDataModuleProps> = ({ units }) => 
         exportedAt: new Date().toISOString(),
         system: 'LLT Lab Operational System',
         data: {
+          smogLeakUnits: smogUnits,
+          smogProductionQty: smogQtyRecords,
+          inOutEltRecords: eltRecords,
+          inOutBsrRecords: bsrRecords,
           rdUnits: units,
           protoUnits,
           ppUnits,
           ppModelList: ppUnits,
           fieldUnits,
-          smogUnits,
           activityLogs
         }
       };
@@ -507,62 +788,108 @@ export const ExportDataModule: React.FC<ExportDataModuleProps> = ({ units }) => 
     }
   };
 
+  const handleExecuteExportExcel = () => {
+    if (selectedCategory === 'full-backup') {
+      handleExportFullExcelWorkbook();
+    } else if (selectedCategory === 'smog-section') {
+      if (smogSubFilter === 'all') {
+        handleExportSmogExcelWorkbook();
+      } else {
+        handleExportExcel(`LLT_Lab_SMOG_${smogSubFilter.toUpperCase()}`, filteredRows);
+      }
+    } else if (selectedCategory === 'in-out-records') {
+      if (inOutSubFilter === 'all') {
+        handleExportInOutExcelWorkbook();
+      } else {
+        handleExportExcel(`LLT_Lab_IN_OUT_${inOutSubFilter.toUpperCase()}`, filteredRows);
+      }
+    } else {
+      handleExportExcel(`LLT_Lab_${selectedCategory.toUpperCase()}`, filteredRows);
+    }
+  };
+
   const handleExecutePrintReport = () => {
     if (filteredRows.length === 0) {
       alert('No records to print in the report.');
       return;
     }
-    handlePrintPDFReport(`LLT Lab ${selectedCategory.toUpperCase()} Report`, columnsList, filteredRows);
+    handlePrintPDF(selectedCategory.replace('-', ' '), filteredRows);
   };
 
+  const totalSmogCount = smogUnits.length + smogQtyRecords.length;
+  const totalInOutCount = eltRecords.length + bsrRecords.length;
+
   return (
-    <div className="space-y-6 animate-in fade-in duration-300 pb-12">
+    <div className="space-y-6 animate-in fade-in duration-200">
+      
       {/* Top Banner */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-5 rounded-2xl bg-gradient-to-r from-slate-900 via-slate-900 to-cyan-950/60 border border-slate-800 shadow-xl relative overflow-hidden">
         <div className="flex items-center gap-3.5 relative z-10">
-          <div className="p-3 rounded-2xl bg-cyan-950/80 border border-cyan-500/40 text-cyan-400 shadow-lg shadow-cyan-950/50">
+          <div className="p-3 rounded-2xl bg-emerald-950/80 border border-emerald-500/40 text-emerald-400 shadow-lg shadow-emerald-950/50">
             <FileSpreadsheet className="w-7 h-7" />
           </div>
           <div>
-            <h2 className="text-lg font-bold text-slate-100 font-mono tracking-tight flex items-center gap-2">
+            <h2 className="text-xl font-mono font-bold text-slate-100 flex items-center gap-2">
               Export Data Center
-              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-cyan-950 text-cyan-300 border border-cyan-800 font-extrabold uppercase">
-                CSV • JSON • PDF
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-800 font-extrabold uppercase">
+                Excel (.XLSX) • CSV • JSON • PDF
               </span>
             </h2>
             <p className="text-xs text-slate-400 mt-0.5">
-              Select any laboratory section, filter datasets, and download formatted reports or raw backups.
+              Select Smog Section, In/Out Records, or any laboratory dataset to export formatted Excel spreadsheets or full cloud backups.
             </p>
           </div>
         </div>
 
         {/* Action Export Buttons */}
         <div className="flex flex-wrap items-center gap-2 relative z-10">
+          {/* Main Excel Export Button */}
+          <button
+            type="button"
+            onClick={handleExecuteExportExcel}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-mono font-black text-xs shadow-lg shadow-emerald-950/70 hover:scale-105 active:scale-95 transition-all cursor-pointer border border-emerald-400/40"
+            title="Download formatted Excel Spreadsheet (.xlsx)"
+          >
+            <FileSpreadsheet className="w-4 h-4" />
+            <span>Export Excel (.xlsx)</span>
+          </button>
+
+          {/* Quick All-in-One Master Excel */}
+          <button
+            type="button"
+            onClick={handleExportFullExcelWorkbook}
+            className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl bg-indigo-950 hover:bg-indigo-900 text-indigo-300 border border-indigo-700/80 font-mono font-bold text-xs shadow-md hover:scale-105 active:scale-95 transition-all cursor-pointer"
+            title="Export all laboratory sections in a single Multi-Sheet Excel Workbook"
+          >
+            <Layers className="w-3.5 h-3.5 text-indigo-400" />
+            <span>All Sheets (.xlsx)</span>
+          </button>
+
           <button
             type="button"
             onClick={handleExecuteExportCSV}
-            className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-mono font-bold text-xs shadow-md shadow-emerald-950/60 hover:scale-105 active:scale-95 transition-all cursor-pointer"
+            className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-mono font-bold text-xs shadow-md hover:scale-105 active:scale-95 transition-all cursor-pointer"
           >
-            <FileSpreadsheet className="w-4 h-4" />
-            <span>Export CSV</span>
+            <Download className="w-3.5 h-3.5 text-cyan-400" />
+            <span>CSV</span>
           </button>
 
           <button
             type="button"
             onClick={handleExecuteExportJSON}
-            className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-mono font-bold text-xs shadow-md shadow-cyan-950/60 hover:scale-105 active:scale-95 transition-all cursor-pointer"
+            className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-mono font-bold text-xs shadow-md hover:scale-105 active:scale-95 transition-all cursor-pointer"
           >
-            <FileJson className="w-4 h-4" />
-            <span>Export JSON</span>
+            <FileJson className="w-3.5 h-3.5 text-amber-400" />
+            <span>JSON</span>
           </button>
 
           <button
             type="button"
             onClick={handleExecutePrintReport}
-            className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 font-mono font-bold text-xs shadow-md hover:scale-105 active:scale-95 transition-all cursor-pointer"
+            className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-mono font-bold text-xs shadow-md hover:scale-105 active:scale-95 transition-all cursor-pointer"
           >
-            <Printer className="w-4 h-4 text-cyan-400" />
-            <span>Print PDF Report</span>
+            <Printer className="w-3.5 h-3.5 text-purple-400" />
+            <span>Print PDF</span>
           </button>
         </div>
       </div>
@@ -576,15 +903,30 @@ export const ExportDataModule: React.FC<ExportDataModuleProps> = ({ units }) => 
       )}
 
       {/* Category Selection Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2.5">
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-9 gap-2.5">
         {[
-          { id: 'rd-units' as ExportCategory, label: 'R&D Units', icon: Boxes, count: units.length, color: 'text-cyan-400' },
-          { id: 'proto-units' as ExportCategory, label: 'Proto Units', icon: Cpu, count: protoUnits.length, color: 'text-blue-400' },
-          { id: 'pp-units' as ExportCategory, label: 'PP Units', icon: Cpu, count: ppUnits.length, color: 'text-indigo-400' },
-          { id: 'pp-models' as ExportCategory, label: 'Model List', icon: Layers, count: ppUnits.length, color: 'text-teal-400' },
+          { 
+            id: 'smog-section' as ExportCategory, 
+            label: 'Smog Section', 
+            icon: Cloud, 
+            count: totalSmogCount, 
+            color: 'text-cyan-400', 
+            badge: 'Leak + Qty' 
+          },
+          { 
+            id: 'in-out-records' as ExportCategory, 
+            label: 'In/Out Records', 
+            icon: ArrowLeftRight, 
+            count: totalInOutCount, 
+            color: 'text-emerald-400', 
+            badge: 'ELT + BSR' 
+          },
+          { id: 'rd-units' as ExportCategory, label: 'R&D Units', icon: Boxes, count: units.length, color: 'text-blue-400' },
+          { id: 'proto-units' as ExportCategory, label: 'Proto Units', icon: Cpu, count: protoUnits.length, color: 'text-indigo-400' },
+          { id: 'pp-units' as ExportCategory, label: 'PP Units', icon: Cpu, count: ppUnits.length, color: 'text-purple-400' },
+          { id: 'pp-models' as ExportCategory, label: 'PP Models', icon: Layers, count: ppUnits.length, color: 'text-sky-400' },
           { id: 'field-units' as ExportCategory, label: 'Field Units', icon: Compass, count: fieldUnits.length, color: 'text-amber-400' },
-          { id: 'smog-units' as ExportCategory, label: 'Smog Section', icon: Cloud, count: smogUnits.length, color: 'text-purple-400' },
-          { id: 'activity-logs' as ExportCategory, label: 'Activity Logs', icon: History, count: activityLogs.length, color: 'text-emerald-400' },
+          { id: 'activity-logs' as ExportCategory, label: 'Activity Logs', icon: History, count: activityLogs.length, color: 'text-teal-400' },
           { id: 'full-backup' as ExportCategory, label: 'Full Backup', icon: Database, count: 'ALL', color: 'text-rose-400' },
         ].map((cat) => {
           const isSelected = selectedCategory === cat.id;
@@ -607,17 +949,111 @@ export const ExportDataModule: React.FC<ExportDataModuleProps> = ({ units }) => 
                 </span>
               </div>
               <div>
-                <div className="text-xs font-mono font-bold text-slate-200">
+                <div className="text-xs font-mono font-bold text-slate-200 truncate">
                   {cat.label}
                 </div>
-                <div className="text-[10px] text-slate-400">
-                  {isSelected ? 'Selected' : 'Click to View'}
+                <div className="text-[10px] text-slate-400 flex items-center justify-between mt-0.5">
+                  <span>{isSelected ? 'Selected' : 'Select'}</span>
+                  {cat.badge && (
+                    <span className="text-[9px] font-mono px-1 py-0.2 rounded bg-cyan-950 text-cyan-300 border border-cyan-800/80 font-bold">
+                      {cat.badge}
+                    </span>
+                  )}
                 </div>
               </div>
             </button>
           );
         })}
       </div>
+
+      {/* Sub-Filters / Scope Selector for Unified Categories */}
+      {selectedCategory === 'smog-section' && (
+        <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-2xl bg-cyan-950/30 border border-cyan-800/50">
+          <div className="flex items-center gap-2">
+            <Cloud className="w-4 h-4 text-cyan-400" />
+            <span className="text-xs font-mono font-bold text-slate-200">Smog Section Dataset:</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setSmogSubFilter('all')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold transition-all cursor-pointer ${
+                smogSubFilter === 'all'
+                  ? 'bg-cyan-600 text-white shadow-md shadow-cyan-950'
+                  : 'bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800'
+              }`}
+            >
+              All Smog Records ({totalSmogCount})
+            </button>
+            <button
+              type="button"
+              onClick={() => setSmogSubFilter('leak')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold transition-all cursor-pointer ${
+                smogSubFilter === 'leak'
+                  ? 'bg-cyan-600 text-white shadow-md shadow-cyan-950'
+                  : 'bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800'
+              }`}
+            >
+              Leak Units Only ({smogUnits.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setSmogSubFilter('qty')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold transition-all cursor-pointer ${
+                smogSubFilter === 'qty'
+                  ? 'bg-cyan-600 text-white shadow-md shadow-cyan-950'
+                  : 'bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800'
+              }`}
+            >
+              Production Qty Only ({smogQtyRecords.length})
+            </button>
+          </div>
+        </div>
+      )}
+
+      {selectedCategory === 'in-out-records' && (
+        <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-2xl bg-emerald-950/30 border border-emerald-800/50">
+          <div className="flex items-center gap-2">
+            <ArrowLeftRight className="w-4 h-4 text-emerald-400" />
+            <span className="text-xs font-mono font-bold text-slate-200">In/Out Section Dataset:</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setInOutSubFilter('all')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold transition-all cursor-pointer ${
+                inOutSubFilter === 'all'
+                  ? 'bg-emerald-600 text-white shadow-md shadow-emerald-950'
+                  : 'bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800'
+              }`}
+            >
+              All In/Out Records ({totalInOutCount})
+            </button>
+            <button
+              type="button"
+              onClick={() => setInOutSubFilter('elt')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold transition-all cursor-pointer ${
+                inOutSubFilter === 'elt'
+                  ? 'bg-emerald-600 text-white shadow-md shadow-emerald-950'
+                  : 'bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800'
+              }`}
+            >
+              ELT Records (Out) ({eltRecords.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setInOutSubFilter('bsr')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold transition-all cursor-pointer ${
+                inOutSubFilter === 'bsr'
+                  ? 'bg-emerald-600 text-white shadow-md shadow-emerald-950'
+                  : 'bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800'
+              }`}
+            >
+              BSR Records (In) ({bsrRecords.length})
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Filter Toolbar */}
       {selectedCategory !== 'full-backup' && (

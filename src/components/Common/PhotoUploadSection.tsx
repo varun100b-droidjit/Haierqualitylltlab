@@ -31,6 +31,7 @@ import {
   calculatePhotoCoverageStats,
   getPhotosGroupedBySection
 } from '../../utils/photoManager';
+import { compressImageFile, CompressionResult } from '../../services/photoSettingsStore';
 
 export interface PhotoFieldConfig {
   key: string;
@@ -148,57 +149,19 @@ export const PhotoUploadSection: React.FC<PhotoUploadSectionProps> = ({
     return '';
   };
 
-  const processSingleFile = async (file: File): Promise<string | null> => {
+  const processSingleFile = async (file: File): Promise<CompressionResult | null> => {
     if (!file) return null;
     if (!file.type.startsWith('image/') && !file.name.match(/\.(jpg|jpeg|png|webp|bmp|gif|heic|heif)$/i)) {
       return null;
     }
 
-    return new Promise<string>((resolve) => {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const dataUrl = e.target?.result as string;
-        if (!dataUrl) {
-          resolve('');
-          return;
-        }
-
-        // Fast canvas resize/compression for huge photos (>2MB)
-        if (file.size > 2 * 1024 * 1024) {
-          const img = new window.Image();
-          img.onload = () => {
-            const canvas = document.createElement('canvas');
-            let width = img.width;
-            let height = img.height;
-            const maxDim = 1600;
-            if (width > maxDim || height > maxDim) {
-              if (width > height) {
-                height = Math.round((height * maxDim) / width);
-                width = maxDim;
-              } else {
-                width = Math.round((width * maxDim) / height);
-                height = maxDim;
-              }
-            }
-            canvas.width = width;
-            canvas.height = height;
-            const ctx = canvas.getContext('2d');
-            if (ctx) {
-              ctx.drawImage(img, 0, 0, width, height);
-              resolve(canvas.toDataURL('image/jpeg', 0.88));
-              return;
-            }
-            resolve(dataUrl);
-          };
-          img.onerror = () => resolve(dataUrl);
-          img.src = dataUrl;
-        } else {
-          resolve(dataUrl);
-        }
-      };
-      reader.onerror = () => resolve('');
-      reader.readAsDataURL(file);
-    });
+    try {
+      const result = await compressImageFile(file);
+      return result;
+    } catch (err) {
+      console.error('Error compressing image:', err);
+      return null;
+    }
   };
 
   const processFile = async (config: PhotoFieldConfig, file: File) => {
@@ -209,13 +172,14 @@ export const PhotoUploadSection: React.FC<PhotoUploadSectionProps> = ({
       return;
     }
 
-    const dataUrl = await processSingleFile(file);
-    if (dataUrl) {
-      savePhotoToState(config, dataUrl, file.size, file.name);
+    const result = await processSingleFile(file);
+    if (result && result.dataUrl) {
+      savePhotoToState(config, result, file.name);
     }
   };
 
-  const savePhotoToState = (config: PhotoFieldConfig, dataUrl: string, originalSize: number, originalFileName?: string) => {
+  const savePhotoToState = (config: PhotoFieldConfig, result: CompressionResult, originalFileName?: string) => {
+    const dataUrl = result.dataUrl;
     const updated = { ...photos };
     // Save under exact Word key
     updated[config.key] = dataUrl;
@@ -246,9 +210,13 @@ export const PhotoUploadSection: React.FC<PhotoUploadSectionProps> = ({
     onChange(updated);
 
     const standardName = config.suggestedFilename;
+    const feedbackText = result.isCompressed && result.savedPercent > 0
+      ? `"${standardName}" • ${result.originalSizeKB > 1024 ? (result.originalSizeKB / 1024).toFixed(1) + 'MB' : result.originalSizeKB + 'KB'} ➔ ${result.compressedSizeKB}KB (-${result.savedPercent}%)`
+      : `Auto-renamed to "${standardName}" (${result.originalSizeKB} KB)`;
+
     setUploadFeedback(prev => ({
       ...prev,
-      [config.key]: `Auto-renamed to "${standardName}" (${Math.round(originalSize / 1024)} KB)`
+      [config.key]: feedbackText
     }));
 
     setTimeout(() => {
@@ -257,7 +225,7 @@ export const PhotoUploadSection: React.FC<PhotoUploadSectionProps> = ({
         delete next[config.key];
         return next;
       });
-    }, 4000);
+    }, 5000);
   };
 
   // Direct download photo with standardized name (e.g. odu_compressor.jpg)
@@ -295,12 +263,15 @@ export const PhotoUploadSection: React.FC<PhotoUploadSectionProps> = ({
       const file = files[i];
       const matchedDef = findBestMatchingPhotoKey(file.name);
       if (matchedDef) {
-        const dataUrl = await processSingleFile(file);
-        if (dataUrl) {
-          updated[matchedDef.photoKey] = dataUrl;
-          if (matchedDef.id) updated[matchedDef.id] = dataUrl;
+        const result = await processSingleFile(file);
+        if (result && result.dataUrl) {
+          updated[matchedDef.photoKey] = result.dataUrl;
+          if (matchedDef.id) updated[matchedDef.id] = result.dataUrl;
           matchedCount++;
-          messages.push(`${file.name} ➔ ${matchedDef.label}`);
+          const sizeInfo = result.isCompressed && result.savedPercent > 0
+            ? ` (${result.compressedSizeKB} KB, -${result.savedPercent}%)`
+            : '';
+          messages.push(`${file.name} ➔ ${matchedDef.label}${sizeInfo}`);
         }
       }
     }

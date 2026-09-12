@@ -25,6 +25,7 @@ import { ProtoUnit, ProtoUnitParts, ProtoUnitPhotos, ReportDetails, NamePlateDet
 import { addProtoUnit, generate5DigitSerial, getProtoUnits } from '../../services/protoUnitStore';
 import { ALL_STATIONS, getOccupiedStations } from '../../utils/stationManager';
 import { PhotoUploadSection } from '../Common/PhotoUploadSection';
+import { compressImageFile } from '../../services/photoSettingsStore';
 
 interface AddProtoUnitDialogProps {
   isOpen: boolean;
@@ -214,18 +215,20 @@ export const AddProtoUnitDialog: React.FC<AddProtoUnitDialogProps> = ({
     setOduSerialNumber(generate5DigitSerial());
   };
 
-  const handleFileUpload = (key: keyof ProtoUnitPhotos, file: File) => {
+  const handleFileUpload = async (key: keyof ProtoUnitPhotos, file: File) => {
     if (!file) return;
     if (!file.type.startsWith('image/')) {
       alert('Please select an image file.');
       return;
     }
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const result = e.target?.result as string;
-      setPhotos(prev => ({ ...prev, [key]: result }));
-    };
-    reader.readAsDataURL(file);
+    try {
+      const result = await compressImageFile(file);
+      if (result.dataUrl) {
+        setPhotos(prev => ({ ...prev, [key]: result.dataUrl }));
+      }
+    } catch (err) {
+      console.error('Error compressing image in Proto dialog:', err);
+    }
   };
 
   const handleRemovePhoto = (key: keyof ProtoUnitPhotos) => {

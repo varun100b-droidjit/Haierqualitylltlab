@@ -29,6 +29,7 @@ import { resetToDemoData } from '../../services/unitStore';
 import { LabShiftSelector } from '../Common/LabShiftSelector';
 import { SystemVersionCard } from './SystemVersionCard';
 import { ModelSheetManagementCard } from './ModelSheetManagementCard';
+import { PhotoQualityCard } from './PhotoQualityCard';
 import { 
   downloadAllMonsterData, 
   purgeAllSupabaseAndFirebaseData, 
@@ -435,6 +436,9 @@ export const SettingsModule: React.FC<SettingsModuleProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Photo Quality & Size Compression CardView */}
+      <PhotoQualityCard />
 
       {/* Model Sheet Management CardView (Excel Upload & Manual Prefix Entry) */}
       <ModelSheetManagementCard />

@@ -36,6 +36,7 @@ import { getProtoUnits, updateProtoUnit } from '../../services/protoUnitStore';
 import { getPpUnits, updatePpUnit } from '../../services/ppUnitStore';
 import { MasterTemplate, getMasterTemplate } from '../../services/reportTemplateStore';
 import { PhotoUploadSection } from '../Common/PhotoUploadSection';
+import { compressImageFile } from '../../services/photoSettingsStore';
 import { 
   saveReportToRoom, 
   updateSavedReport,
@@ -378,10 +379,11 @@ export const ProtoReportGenerator: React.FC<ProtoReportGeneratorProps> = ({
   };
 
   // Allow inline upload of photos & persist with unit
-  const handlePhotoUpload = (key: string, file: File) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const url = e.target?.result as string;
+  const handlePhotoUpload = async (key: string, file: File) => {
+    try {
+      const result = await compressImageFile(file);
+      const url = result.dataUrl;
+      if (!url) return;
       setPhotos(prev => {
         const rawUpdated = { ...prev, [key]: url };
         const norm = buildNormalizedPhotos(rawUpdated);
@@ -394,8 +396,9 @@ export const ProtoReportGenerator: React.FC<ProtoReportGeneratorProps> = ({
         }
         return norm.photos;
       });
-    };
-    reader.readAsDataURL(file);
+    } catch (err) {
+      console.error('Error compressing photo in Report Generator:', err);
+    }
   };
 
   // Validation calculations
