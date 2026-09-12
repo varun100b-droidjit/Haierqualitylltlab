@@ -240,7 +240,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     } else if (activeSection === 'pp') {
       const filtered = filterListByYearMonth(ppUnits, ['createdAt', 'updatedAt'], selectedYear, selectedMonth) as PpUnit[];
       const ppCalc = calculatePpUnitMetrics(filtered);
-      const total = filtered.length;
+      const total = ppCalc.bothQty;
       const live = ppCalc.liveQty;
       const finished = ppCalc.finishedQty;
       const stop = ppCalc.stoppedQty;
@@ -251,7 +251,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         const mCalc = calculatePpUnitMetrics(mList);
         return {
           month: m,
-          Total: mList.length,
+          Total: mCalc.bothQty,
           Live: mCalc.liveQty,
           Finished: mCalc.finishedQty,
           Stop: mCalc.stoppedQty,
@@ -770,11 +770,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
       {/* SECTION SPECIFIC ANALYSIS DASHBOARD PANEL */}
       <div className="p-6 rounded-3xl bg-slate-900/95 border border-slate-800 shadow-2xl space-y-6 animate-in fade-in zoom-in-95 duration-200">
-        {/* If PP Unit: 7 Cards (Pending, Live Units, Stop Units, Finished Units, Both Qty, IDU Qty, ODU Qty) */}
+        {/* If PP Unit: 6 Cards (Pending, Live Units, Finished Units, Both Qty, IDU Qty, ODU Qty) */}
         {/* If Other Sections: 4 Cards (Total Units, Stop/Overdue Units, Live Units, Finished Units) */}
         {activeSection === 'pp' ? (
           <div className="space-y-4">
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3 sm:gap-3.5">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-3.5">
               {/* Card 1: Pending */}
               <div className="p-3.5 sm:p-4 rounded-xl bg-gradient-to-br from-slate-900/90 via-slate-950 to-slate-950 border-2 border-rose-500/50 hover:border-rose-400 shadow-[0_4px_15px_rgba(244,63,94,0.15)] hover:shadow-[0_0_20px_rgba(244,63,94,0.25)] flex flex-col justify-between relative overflow-hidden group transition-all duration-300 hover:-translate-y-0.5">
                 <div className="absolute top-0 right-0 w-20 h-20 bg-rose-500/15 rounded-full blur-xl group-hover:bg-rose-500/25 transition-all pointer-events-none" />
@@ -812,7 +812,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     {ppMetrics.liveQty}
                   </div>
                   <CircularProgressRing
-                    percentage={sectionAnalysis.total > 0 ? (ppMetrics.liveQty / sectionAnalysis.total) * 100 : 0}
+                    percentage={ppMetrics.bothQty > 0 ? (ppMetrics.liveQty / ppMetrics.bothQty) * 100 : 0}
                     colorClass="text-amber-400"
                     strokeColor="#f59e0b"
                     glowColor="rgba(245,158,11,0.6)"
@@ -822,29 +822,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 </div>
               </div>
 
-              {/* Card 3: Stop Units */}
-              <div className="p-3.5 sm:p-4 rounded-xl bg-gradient-to-br from-slate-900/90 via-slate-950 to-slate-950 border border-orange-500/30 hover:border-orange-400 shadow-[0_4px_15px_rgba(249,115,22,0.1)] hover:shadow-[0_0_20px_rgba(249,115,22,0.2)] flex flex-col justify-between relative overflow-hidden group transition-all duration-300 hover:-translate-y-0.5">
-                <div className="absolute top-0 right-0 w-20 h-20 bg-orange-500/10 rounded-full blur-xl group-hover:bg-orange-500/20 transition-all pointer-events-none" />
-                <div className="z-10">
-                  <span className="text-xs font-extrabold text-white tracking-wide block truncate">Stop Units</span>
-                  <span className="text-[10px] font-mono text-orange-400/80 block truncate">Testing Stopped</span>
-                </div>
-                <div className="z-10 mt-3 flex items-center justify-between gap-2">
-                  <div className="text-2xl sm:text-3xl font-black text-orange-400 font-mono tracking-tight drop-shadow-[0_2px_8px_rgba(249,115,22,0.3)]">
-                    {ppMetrics.stoppedQty}
-                  </div>
-                  <CircularProgressRing
-                    percentage={sectionAnalysis.total > 0 ? (ppMetrics.stoppedQty / sectionAnalysis.total) * 100 : 0}
-                    colorClass="text-orange-400"
-                    strokeColor="#f97316"
-                    glowColor="rgba(249,115,22,0.6)"
-                    icon={PauseCircle}
-                    size={38}
-                  />
-                </div>
-              </div>
-
-              {/* Card 4: Finished Units */}
+              {/* Card 3: Finished Units */}
               <div className="p-3.5 sm:p-4 rounded-xl bg-gradient-to-br from-slate-900/90 via-slate-950 to-slate-950 border border-emerald-500/30 hover:border-emerald-400 shadow-[0_4px_15px_rgba(16,185,129,0.1)] hover:shadow-[0_0_20px_rgba(16,185,129,0.2)] flex flex-col justify-between relative overflow-hidden group transition-all duration-300 hover:-translate-y-0.5">
                 <div className="absolute top-0 right-0 w-20 h-20 bg-emerald-500/10 rounded-full blur-xl group-hover:bg-emerald-500/20 transition-all pointer-events-none" />
                 <div className="z-10">
@@ -856,7 +834,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     {ppMetrics.finishedQty}
                   </div>
                   <CircularProgressRing
-                    percentage={sectionAnalysis.total > 0 ? (ppMetrics.finishedQty / sectionAnalysis.total) * 100 : 0}
+                    percentage={ppMetrics.bothQty > 0 ? (ppMetrics.finishedQty / ppMetrics.bothQty) * 100 : 0}
                     colorClass="text-emerald-400"
                     strokeColor="#10b981"
                     glowColor="rgba(16,185,129,0.6)"
@@ -866,7 +844,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 </div>
               </div>
 
-              {/* Card 5: Both Qty */}
+              {/* Card 4: Both Qty */}
               <div className="p-3.5 sm:p-4 rounded-xl bg-gradient-to-br from-slate-900/90 via-slate-950 to-slate-950 border border-cyan-500/30 hover:border-cyan-400 shadow-[0_4px_15px_rgba(6,182,212,0.1)] flex flex-col justify-between relative overflow-hidden group transition-all duration-300 hover:-translate-y-0.5">
                 <div className="absolute top-0 right-0 w-20 h-20 bg-cyan-500/10 rounded-full blur-xl pointer-events-none" />
                 <div className="z-10">
@@ -879,7 +857,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 </div>
               </div>
 
-              {/* Card 6: IDU Qty */}
+              {/* Card 5: IDU Qty */}
               <div className="p-3.5 sm:p-4 rounded-xl bg-gradient-to-br from-slate-900/90 via-slate-950 to-slate-950 border border-indigo-500/30 hover:border-indigo-400 shadow-[0_4px_15px_rgba(99,102,241,0.1)] flex flex-col justify-between relative overflow-hidden group transition-all duration-300 hover:-translate-y-0.5">
                 <div className="absolute top-0 right-0 w-20 h-20 bg-indigo-500/10 rounded-full blur-xl pointer-events-none" />
                 <div className="z-10">
@@ -888,11 +866,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 </div>
                 <div className="z-10 mt-3 flex items-center justify-between gap-2">
                   <div className="text-2xl sm:text-3xl font-black text-indigo-300 font-mono tracking-tight">{ppMetrics.iduQty}</div>
-                  <div className="w-9 h-9 rounded-xl bg-indigo-950/80 border border-indigo-800 flex items-center justify-center text-indigo-300 shadow-md"><Cpu className="w-4 h-4" /></div>
+                  <div className="w-9 h-9 rounded-xl bg-indigo-950/80 border border-indigo-800 flex items-center justify-center text-indigo-300 shadow-md"><Boxes className="w-4 h-4" /></div>
                 </div>
               </div>
 
-              {/* Card 7: ODU Qty */}
+              {/* Card 6: ODU Qty */}
               <div className="p-3.5 sm:p-4 rounded-xl bg-gradient-to-br from-slate-900/90 via-slate-950 to-slate-950 border border-blue-500/30 hover:border-blue-400 shadow-[0_4px_15px_rgba(59,130,246,0.1)] flex flex-col justify-between relative overflow-hidden group transition-all duration-300 hover:-translate-y-0.5">
                 <div className="absolute top-0 right-0 w-20 h-20 bg-blue-500/10 rounded-full blur-xl pointer-events-none" />
                 <div className="z-10">
@@ -901,7 +879,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 </div>
                 <div className="z-10 mt-3 flex items-center justify-between gap-2">
                   <div className="text-2xl sm:text-3xl font-black text-blue-300 font-mono tracking-tight">{ppMetrics.oduQty}</div>
-                  <div className="w-9 h-9 rounded-xl bg-blue-950/80 border border-blue-800 flex items-center justify-center text-blue-300 shadow-md"><Box className="w-4 h-4" /></div>
+                  <div className="w-9 h-9 rounded-xl bg-blue-950/80 border border-blue-800 flex items-center justify-center text-blue-300 shadow-md"><Boxes className="w-4 h-4" /></div>
                 </div>
               </div>
             </div>

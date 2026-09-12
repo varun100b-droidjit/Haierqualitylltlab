@@ -8,12 +8,14 @@ interface IduOduMatchingSectionProps {
 }
 
 export const IduOduMatchingSection: React.FC<IduOduMatchingSectionProps> = ({ units }) => {
-  const matchingPairs = getIduOduMatchingPairs(units);
+  const allPairs = getIduOduMatchingPairs(units);
+  const matchingPairs = allPairs.filter(p => Boolean(p.iduItem && p.oduItem));
+  const unmatchedPairs = allPairs.filter(p => !p.iduItem || !p.oduItem);
 
   const pendingCount = matchingPairs.filter(p => p.isPending).length;
   const activeCount = matchingPairs.filter(p => !p.isPending).length;
 
-  if (matchingPairs.length === 0) {
+  if (matchingPairs.length === 0 && unmatchedPairs.length === 0) {
     return (
       <div className="p-8 rounded-2xl bg-slate-900/50 border border-slate-800 text-center space-y-2">
         <Layers className="w-8 h-8 text-slate-500 mx-auto" />
@@ -164,6 +166,38 @@ export const IduOduMatchingSection: React.FC<IduOduMatchingSectionProps> = ({ un
           );
         })}
       </div>
+
+      {/* Unmatched Models Section (if any model is missing its IDU or ODU partner) */}
+      {unmatchedPairs.length > 0 && (
+        <div className="pt-4 space-y-3">
+          <div className="flex items-center gap-2 p-3 rounded-xl bg-slate-950/80 border border-slate-800 text-xs font-bold text-slate-400">
+            <AlertOctagon className="w-4 h-4 text-amber-400" />
+            <span>Unmatched Models ({unmatchedPairs.length}):</span>
+            <span className="text-[11px] font-normal text-slate-500">Models registered without a compatible IDU or ODU partner</span>
+          </div>
+
+          <div className="space-y-2">
+            {unmatchedPairs.map(pair => (
+              <div 
+                key={pair.id} 
+                className="p-3.5 rounded-xl bg-slate-900/60 border border-slate-800/80 flex items-center justify-between gap-3 text-xs"
+              >
+                <div className="flex items-center gap-2.5">
+                  <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono text-[10px] font-bold">
+                    {pair.commonKey}
+                  </span>
+                  <span className="font-bold text-white font-mono">
+                    {pair.iduModel !== 'N/A (No Matching IDU)' ? pair.iduModel : pair.oduModel}
+                  </span>
+                </div>
+                <span className="text-[11px] font-medium text-amber-400/90">
+                  {pair.status}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

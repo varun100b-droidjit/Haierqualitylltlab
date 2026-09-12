@@ -20,7 +20,8 @@ import {
   getPpUnits, 
   subscribePpUnitStore, 
   updatePpUnitStatus, 
-  deletePpUnit
+  deletePpUnit,
+  isUnitTestingEntry
 } from '../../services/ppUnitStore';
 import { AddPpUnitDialog } from './AddPpUnitDialog';
 import { PpUnitDetailsDialog } from './PpUnitDetailsDialog';
@@ -108,8 +109,11 @@ export const PpUnitsModule: React.FC<PpUnitsModuleProps> = ({
     }
   };
 
+  // Only actual Unit Testing runs (machines submitted via Add PP Unit form), NOT model registration items
+  const actualTestingUnits = ppUnits.filter(isUnitTestingEntry);
+
   // Filter units based on section and search term
-  const sectionUnits = ppUnits.filter(u => u.status === activeSection);
+  const sectionUnits = actualTestingUnits.filter(u => u.status === activeSection);
   const filteredUnits = sectionUnits.filter(u => {
     const q = searchTerm.toLowerCase();
     return (
@@ -122,9 +126,9 @@ export const PpUnitsModule: React.FC<PpUnitsModuleProps> = ({
     );
   });
 
-  const liveCount = ppUnits.filter(u => u.status === 'live').length;
-  const stoppedCount = ppUnits.filter(u => u.status === 'stopped').length;
-  const finishedCount = ppUnits.filter(u => u.status === 'finished').length;
+  const liveCount = actualTestingUnits.filter(u => u.status === 'live').length;
+  const stoppedCount = actualTestingUnits.filter(u => u.status === 'stopped').length;
+  const finishedCount = actualTestingUnits.filter(u => u.status === 'finished').length;
   const isShiftActive = true; // PP Unit always runs continuously without shift pause
 
   return (
