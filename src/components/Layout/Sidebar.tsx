@@ -65,8 +65,8 @@ interface SidebarProps {
   receivedUnitsCount: number;
   onOpenAddPpModal?: (initialType?: 'IDU' | 'ODU' | 'BOTH') => void;
   userRole?: AuthRole;
-  selectedSmogShift?: 'all' | 'A' | 'B' | 'C';
-  onSelectSmogShift?: (shift: 'all' | 'A' | 'B' | 'C') => void;
+  selectedSmogShift?: 'all' | 'A' | 'B';
+  onSelectSmogShift?: (shift: 'all' | 'A' | 'B') => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({

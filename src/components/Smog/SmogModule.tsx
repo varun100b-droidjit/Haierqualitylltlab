@@ -21,7 +21,9 @@ import {
   Filter,
   FileText,
   MapPin,
-  Hash
+  Hash,
+  Boxes,
+  Hourglass
 } from 'lucide-react';
 import { UserProfile } from '../../types';
 import { 
@@ -31,11 +33,16 @@ import {
   broadcastLabRealtimeEvent,
   subscribeToLabRealtimeEvents 
 } from '../../lib/supabase';
-import { SmogBarcodeScannerModal } from './SmogBarcodeScannerModal';
+import { SmogBarcodeScannerModal, getAutoSmogShift } from './SmogBarcodeScannerModal';
 import { SmogUniqueCalendar } from './SmogUniqueCalendar';
 import { SmogQtyFormModal } from './SmogQtyFormModal';
 import { SmogWhatsAppReportModal } from './SmogWhatsAppReportModal';
 import { subscribeSmogQtyRecords, SmogQtyRecord } from '../../services/smogQtyStore';
+import { 
+  getSmogExtraMetrics, 
+  subscribeSmogExtraMetrics, 
+  SmogExtraMetrics 
+} from '../../services/smogExtraStore';
 import { findModelByPrefix } from '../../services/modelMasterStore';
 import { 
   syncSmogLeakUnitToFirebase, 
@@ -47,7 +54,7 @@ import {
 export interface LeakUnitRecord {
   id: string;
   smogPerson: string;
-  shift: 'A' | 'B' | 'C';
+  shift: 'A' | 'B' | 'C' | string;
   modelName: string;
   serialNumbers: string[];
   passedSerials: string[]; // List of Sr. No. passed/verified
@@ -63,6 +70,120 @@ export interface LeakUnitRecord {
   operatorUserId?: string;
   location?: string;
   qty?: number;
+}
+
+/**
+ * Resolves shift ('A' or 'B') for any Smog machine record:
+ * - Shift A: 07:00 AM to 07:00 PM (07:00 - 18:59)
+ * - Shift B: 07:00 PM to 07:00 AM next day (19:00 - 06:59)
+ */
+export function resolveRecordShift(record: LeakUnitRecord): 'A' | 'B' {
+  if (record.shift === 'A' || record.shift === 'B') {
+    return record.shift;
+  }
+  // Check createdAt ISO timestamp if available
+  if (record.createdAt) {
+    const d = new Date(record.createdAt);
+    if (!isNaN(d.getTime())) {
+      const h = d.getHours();
+      const m = d.getMinutes();
+      const mins = h * 60 + m;
+      return (mins >= 420 && mins < 1140) ? 'A' : 'B';
+    }
+  }
+  // Parse time string (supports 12-hour AM/PM and 24-hour)
+  if (record.time) {
+    const isPM = /pm/i.test(record.time);
+    const isAM = /am/i.test(record.time);
+    const cleanTime = record.time.replace(/[^0-9:]/g, '');
+    const parts = cleanTime.split(':');
+    if (parts.length >= 2) {
+      let h = parseInt(parts[0], 10);
+      const m = parseInt(parts[1], 10);
+      if (!isNaN(h) && !isNaN(m)) {
+        if (isPM && h < 12) h += 12;
+        if (isAM && h === 12) h = 0;
+        const mins = h * 60 + m;
+        return (mins >= 420 && mins < 1140) ? 'A' : 'B';
+      }
+    }
+  }
+  return 'A';
+}
+
+export interface ShiftModelSummary {
+  modelName: string;
+  location: string;
+  leakQty: number;
+  suspectCount: number;
+  actualCount: number;
+  records: LeakUnitRecord[];
+  allSerials: string[];
+}
+
+export function getShiftModelSummaries(records: LeakUnitRecord[]): ShiftModelSummary[] {
+  const map = new Map<string, ShiftModelSummary>();
+
+  for (const record of records) {
+    let resolvedModel = 'SAC-1.5T-INV-3S';
+    if (record.serialNumbers && record.serialNumbers.length > 0) {
+      for (const sn of record.serialNumbers) {
+        if (sn) {
+          const found = findModelByPrefix(sn);
+          if (found?.modelName) {
+            resolvedModel = found.modelName;
+            break;
+          }
+        }
+      }
+    }
+    if (resolvedModel === 'SAC-1.5T-INV-3S' && 
+        record.modelName && 
+        record.modelName.trim() && 
+        record.modelName !== 'General Location' && 
+        record.modelName !== 'General Smog Unit' &&
+        record.modelName !== record.location) {
+      resolvedModel = record.modelName.trim();
+    }
+
+    let resolvedLocation = 'General Location';
+    if (record.location && record.location.trim()) {
+      resolvedLocation = record.location.trim();
+    } else if (record.modelName && (
+      record.modelName.toLowerCase().includes('line') ||
+      record.modelName.toLowerCase().includes('bed') ||
+      record.modelName.toLowerCase().includes('station') ||
+      record.modelName.toLowerCase().includes('b')
+    )) {
+      resolvedLocation = record.modelName.trim();
+    }
+
+    const key = `${resolvedModel}:::${resolvedLocation}`;
+    const qty = record.qty ?? record.suspectCount ?? (record.serialNumbers?.length || 1);
+    const existing = map.get(key);
+
+    if (existing) {
+      existing.leakQty += qty;
+      existing.suspectCount += record.suspectCount;
+      existing.actualCount += record.actualCount;
+      existing.records.push(record);
+      if (record.serialNumbers) {
+        existing.allSerials.push(...record.serialNumbers);
+      }
+    } else {
+      map.set(key, {
+        modelName: resolvedModel,
+        location: resolvedLocation,
+        leakQty: qty,
+        suspectCount: record.suspectCount,
+        actualCount: record.actualCount,
+        records: [record],
+        allSerials: [...(record.serialNumbers || [])]
+      });
+    }
+  }
+
+  return Array.from(map.values());
 }
 
 // Backward compatibility export alias
@@ -141,8 +262,8 @@ export function subscribeSmogUnits(callback: (units: LeakUnitRecord[]) => void):
 interface SmogModuleProps {
   currentUser?: UserProfile;
   onNavigateToDashboard?: () => void;
-  selectedShiftFilter?: 'all' | 'A' | 'B' | 'C';
-  onShiftFilterChange?: (shift: 'all' | 'A' | 'B' | 'C') => void;
+  selectedShiftFilter?: 'all' | 'A' | 'B';
+  onShiftFilterChange?: (shift: 'all' | 'A' | 'B') => void;
 }
 
 export const SmogModule: React.FC<SmogModuleProps> = ({ 
@@ -150,10 +271,11 @@ export const SmogModule: React.FC<SmogModuleProps> = ({
   selectedShiftFilter = 'all',
   onShiftFilterChange,
 }) => {
+  const todayStr = new Date().toISOString().split('T')[0];
   const [leakRecords, setLeakRecords] = useState<LeakUnitRecord[]>(getSmogUnits());
   const [searchQuery, setSearchQuery] = useState('');
-  const [shiftFilter, setShiftFilter] = useState<'all' | 'A' | 'B' | 'C'>(selectedShiftFilter);
-  const [selectedDate, setSelectedDate] = useState<string>('');
+  const [shiftFilter, setShiftFilter] = useState<'all' | 'A' | 'B'>(selectedShiftFilter);
+  const [selectedDate, setSelectedDate] = useState<string>(todayStr);
   const [supabaseStatus, setSupabaseStatus] = useState<'connected' | 'syncing' | 'idle'>('idle');
   const [toastNotification, setToastNotification] = useState<string | null>(null);
 
@@ -164,7 +286,7 @@ export const SmogModule: React.FC<SmogModuleProps> = ({
     }
   }, [selectedShiftFilter]);
 
-  const handleSelectShiftFilter = (newShift: 'all' | 'A' | 'B' | 'C') => {
+  const handleSelectShiftFilter = (newShift: 'all' | 'A' | 'B') => {
     setShiftFilter(newShift);
     onShiftFilterChange?.(newShift);
   };
@@ -176,25 +298,34 @@ export const SmogModule: React.FC<SmogModuleProps> = ({
   const [isWhatsAppReportOpen, setIsWhatsAppReportOpen] = useState(false);
   const [whatsAppReportParams, setWhatsAppReportParams] = useState<{
     date: string;
-    shift: 'A' | 'B' | 'C' | 'all';
+    shift: 'A' | 'B' | 'all';
     smogQty: number;
   } | null>(null);
   const [smogQtyRecords, setSmogQtyRecords] = useState<SmogQtyRecord[]>([]);
+  const [extraMetrics, setExtraMetrics] = useState<SmogExtraMetrics>(() => getSmogExtraMetrics());
 
   // Subscribe to Smog Qty store changes
   useEffect(() => {
     const unsub = subscribeSmogQtyRecords((records) => {
       setSmogQtyRecords(records);
     });
-    return () => unsub();
+    const unsubExtra = subscribeSmogExtraMetrics((metrics) => {
+      setExtraMetrics(metrics);
+    });
+    return () => {
+      unsub();
+      unsubExtra();
+    };
   }, []);
   
   // View Details Modal State
   const [selectedRecordForDetails, setSelectedRecordForDetails] = useState<LeakUnitRecord | null>(null);
+  const [selectedShiftForDetails, setSelectedShiftForDetails] = useState<'A' | 'B' | null>(null);
+  const [shiftDetailsSearch, setShiftDetailsSearch] = useState<string>('');
 
   // Form State
   const [smogPerson, setSmogPerson] = useState(currentUser?.name || 'Indrajit');
-  const [shift, setShift] = useState<'A' | 'B' | 'C'>('A');
+  const [shift, setShift] = useState<'A' | 'B'>('A');
   const [modelName, setModelName] = useState('SAC-1.5T-INV-3S');
   const [locationName, setLocationName] = useState('General Location');
   const [serialNumbers, setSerialNumbers] = useState<string[]>(['']);
@@ -437,7 +568,7 @@ export const SmogModule: React.FC<SmogModuleProps> = ({
     // Auto-align view to the newly scanned units' Date & Shift
     if (newRecords.length > 0) {
       const savedDate = newRecords[0].smogDate || newRecords[0].date;
-      const savedShift = newRecords[0].shift;
+      const savedShift = resolveRecordShift(newRecords[0]);
 
       if (selectedDate && selectedDate !== savedDate) {
         setSelectedDate(savedDate);
@@ -460,6 +591,94 @@ export const SmogModule: React.FC<SmogModuleProps> = ({
     setTimeout(() => setToastNotification(null), 3500);
   };
 
+  const handleDeleteShiftRecords = async (shiftToDelete: 'A' | 'B') => {
+    const shiftRecords = filteredRecords.filter(r => resolveRecordShift(r) === shiftToDelete);
+    if (shiftRecords.length === 0) return;
+    
+    if (!window.confirm(`Are you sure you want to delete all ${shiftRecords.length} records scanned in Shift ${shiftToDelete}?`)) {
+      return;
+    }
+
+    const idsToDelete = new Set(shiftRecords.map(r => r.id));
+    const remaining = leakRecords.filter(r => !idsToDelete.has(r.id));
+    setLeakRecords(remaining);
+    saveSmogUnits(remaining);
+
+    for (const rec of shiftRecords) {
+      deleteSmogLeakUnitFromFirebase(rec.id).catch(console.warn);
+      deleteLeakUnitFromSupabase(rec.id).catch(console.warn);
+    }
+
+    setToastNotification(`Deleted ${shiftRecords.length} Shift ${shiftToDelete} records`);
+    setTimeout(() => setToastNotification(null), 3000);
+  };
+
+  const handleDeleteSingleMachineFromShift = async (recordId: string, serialNumber: string) => {
+    const targetRecord = leakRecords.find(r => r.id === recordId);
+    if (!targetRecord) return;
+
+    if (!window.confirm(`Delete unit serial "${serialNumber}"?`)) return;
+
+    let updatedRecords: LeakUnitRecord[];
+
+    if (targetRecord.serialNumbers.length <= 1) {
+      updatedRecords = leakRecords.filter(r => r.id !== recordId);
+      deleteSmogLeakUnitFromFirebase(recordId).catch(console.warn);
+      deleteLeakUnitFromSupabase(recordId).catch(console.warn);
+    } else {
+      const remainingSerials = targetRecord.serialNumbers.filter(s => s !== serialNumber);
+      const remainingPassed = (targetRecord.passedSerials || []).filter(s => s !== serialNumber);
+      const newSuspect = remainingSerials.length;
+      const newActual = remainingPassed.length;
+
+      const updatedRecord: LeakUnitRecord = {
+        ...targetRecord,
+        serialNumbers: remainingSerials,
+        passedSerials: remainingPassed,
+        suspectCount: newSuspect,
+        actualCount: newActual,
+        qty: newSuspect
+      };
+
+      updatedRecords = leakRecords.map(r => r.id === recordId ? updatedRecord : r);
+      syncSmogLeakUnitToFirebase(updatedRecord).catch(console.warn);
+      syncLeakUnitToSupabase(updatedRecord).catch(console.warn);
+    }
+
+    setLeakRecords(updatedRecords);
+    saveSmogUnits(updatedRecords);
+    setToastNotification(`Removed unit "${serialNumber}"`);
+    setTimeout(() => setToastNotification(null), 2500);
+  };
+
+  const handleMarkAllPassForShift = async (shiftTarget: 'A' | 'B') => {
+    const recordsInShift = filteredRecords.filter(r => resolveRecordShift(r) === shiftTarget);
+    if (recordsInShift.length === 0) return;
+
+    const shiftRecordIds = new Set(recordsInShift.map(r => r.id));
+    const updatedRecords = leakRecords.map(r => {
+      if (shiftRecordIds.has(r.id)) {
+        return {
+          ...r,
+          passedSerials: [...r.serialNumbers],
+          actualCount: r.serialNumbers.length
+        };
+      }
+      return r;
+    });
+
+    setLeakRecords(updatedRecords);
+    saveSmogUnits(updatedRecords);
+
+    for (const r of updatedRecords.filter(rec => shiftRecordIds.has(rec.id))) {
+      syncSmogLeakUnitToFirebase(r).catch(console.warn);
+      syncLeakUnitToSupabase(r).catch(console.warn);
+    }
+
+    setToastNotification(`All units in Shift ${shiftTarget} marked as Passed`);
+    setTimeout(() => setToastNotification(null), 3000);
+  };
+
   // Filtered Records (includes Search, Shift, and Calendar Date)
   const filteredRecords = leakRecords.filter(record => {
     const matchSearch = searchQuery === '' ||
@@ -467,7 +686,8 @@ export const SmogModule: React.FC<SmogModuleProps> = ({
       record.smogPerson.toLowerCase().includes(searchQuery.toLowerCase()) ||
       record.serialNumbers.some(s => s.toLowerCase().includes(searchQuery.toLowerCase()));
 
-    const matchShift = shiftFilter === 'all' || record.shift === shiftFilter;
+    const recordShift = resolveRecordShift(record);
+    const matchShift = shiftFilter === 'all' || recordShift === shiftFilter;
 
     const matchDate = !selectedDate || 
       record.date === selectedDate || 
@@ -477,7 +697,6 @@ export const SmogModule: React.FC<SmogModuleProps> = ({
     return matchSearch && matchShift && matchDate;
   });
 
-  const todayStr = new Date().toISOString().split('T')[0];
   const todayCount = leakRecords.filter(r => r.date === todayStr || r.smogDate === todayStr).length;
 
   // Date-wise active records for Dashboard calculations
@@ -510,18 +729,15 @@ export const SmogModule: React.FC<SmogModuleProps> = ({
     })
     .reduce((sum, r) => sum + (Number(r.smogQty) || 0), 0);
 
-  // Shift-wise counts for current active records (Date-filtered)
-  const countShiftA = activeRecordsForMetrics.filter(r => r.shift === 'A').length;
-  const countShiftB = activeRecordsForMetrics.filter(r => r.shift === 'B').length;
-  const countShiftC = activeRecordsForMetrics.filter(r => r.shift === 'C').length;
+  // Shift-wise counts for current active records (Date-filtered, auto-detected: Shift A = 7AM-7PM, Shift B = 7PM-7AM)
+  const countShiftA = activeRecordsForMetrics.filter(r => resolveRecordShift(r) === 'A').length;
+  const countShiftB = activeRecordsForMetrics.filter(r => resolveRecordShift(r) === 'B').length;
 
-  const suspectsShiftA = activeRecordsForMetrics.filter(r => r.shift === 'A').reduce((sum, r) => sum + r.suspectCount, 0);
-  const suspectsShiftB = activeRecordsForMetrics.filter(r => r.shift === 'B').reduce((sum, r) => sum + r.suspectCount, 0);
-  const suspectsShiftC = activeRecordsForMetrics.filter(r => r.shift === 'C').reduce((sum, r) => sum + r.suspectCount, 0);
+  const suspectsShiftA = activeRecordsForMetrics.filter(r => resolveRecordShift(r) === 'A').reduce((sum, r) => sum + r.suspectCount, 0);
+  const suspectsShiftB = activeRecordsForMetrics.filter(r => resolveRecordShift(r) === 'B').reduce((sum, r) => sum + r.suspectCount, 0);
 
-  const actualsShiftA = activeRecordsForMetrics.filter(r => r.shift === 'A').reduce((sum, r) => sum + r.actualCount, 0);
-  const actualsShiftB = activeRecordsForMetrics.filter(r => r.shift === 'B').reduce((sum, r) => sum + r.actualCount, 0);
-  const actualsShiftC = activeRecordsForMetrics.filter(r => r.shift === 'C').reduce((sum, r) => sum + r.actualCount, 0);
+  const actualsShiftA = activeRecordsForMetrics.filter(r => resolveRecordShift(r) === 'A').reduce((sum, r) => sum + r.actualCount, 0);
+  const actualsShiftB = activeRecordsForMetrics.filter(r => resolveRecordShift(r) === 'B').reduce((sum, r) => sum + r.actualCount, 0);
 
   return (
     <div className="space-y-4 sm:space-y-5 animate-in fade-in duration-300">
@@ -667,6 +883,51 @@ export const SmogModule: React.FC<SmogModuleProps> = ({
             </div>
           </div>
         </div>
+
+        {/* ROW 3: Pro. Qty & Smog Pending Qty (Hides if 0, Shows if non-zero) */}
+        {(extraMetrics.proQty !== 0 || extraMetrics.smogPendingQty !== 0) && (
+          <div className={`grid ${extraMetrics.proQty !== 0 && extraMetrics.smogPendingQty !== 0 ? 'grid-cols-2' : 'grid-cols-1'} gap-3 animate-in fade-in duration-200`}>
+            {/* Pro. Qty Card */}
+            {extraMetrics.proQty !== 0 && (
+              <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800/90 shadow-sm relative overflow-hidden group">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-mono text-blue-400 uppercase tracking-wider block font-bold">
+                    Pro. Qty
+                  </span>
+                  <Boxes className="w-3.5 h-3.5 text-blue-400/80" />
+                </div>
+                <div className="flex items-baseline gap-2 mt-1">
+                  <span className="text-2xl font-black text-blue-400 font-mono">{extraMetrics.proQty}</span>
+                  <span className="text-[10px] text-slate-400 font-mono">Units</span>
+                </div>
+                <div className="mt-1.5 text-[9px] text-slate-400 font-mono flex items-center justify-between">
+                  <span>Production Qty</span>
+                  <span className="text-blue-400 font-semibold">{extraMetrics.proQty} Total</span>
+                </div>
+              </div>
+            )}
+
+            {/* Smog Pending Qty Card */}
+            {extraMetrics.smogPendingQty !== 0 && (
+              <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800/90 shadow-sm relative overflow-hidden group">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-mono text-rose-400 uppercase tracking-wider block font-bold">
+                    Smog Pending Qty
+                  </span>
+                  <Hourglass className="w-3.5 h-3.5 text-rose-400/80" />
+                </div>
+                <div className="flex items-baseline gap-2 mt-1">
+                  <span className="text-2xl font-black text-rose-400 font-mono">{extraMetrics.smogPendingQty}</span>
+                  <span className="text-[10px] text-slate-400 font-mono">Pending</span>
+                </div>
+                <div className="mt-1.5 text-[9px] text-slate-400 font-mono flex items-center justify-between">
+                  <span>Inspection Queue</span>
+                  <span className="text-rose-400 font-semibold">{extraMetrics.smogPendingQty} Remaining</span>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* SHIFT SELECTOR & SEARCH BAR */}
@@ -700,6 +961,7 @@ export const SmogModule: React.FC<SmogModuleProps> = ({
             >
               <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
               <span>Shift A</span>
+              <span className="text-[10px] text-slate-400 font-mono hidden sm:inline">(7 AM – 7 PM)</span>
               <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
                 shiftFilter === 'A' ? 'bg-slate-950/40 text-slate-950' : 'bg-cyan-950 text-cyan-300 border border-cyan-800'
               }`}>
@@ -717,27 +979,11 @@ export const SmogModule: React.FC<SmogModuleProps> = ({
             >
               <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
               <span>Shift B</span>
+              <span className="text-[10px] text-slate-400 font-mono hidden sm:inline">(7 PM – 7 AM)</span>
               <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
                 shiftFilter === 'B' ? 'bg-slate-950/40 text-slate-950' : 'bg-amber-950 text-amber-300 border border-amber-800'
               }`}>
                 {countShiftB}
-              </span>
-            </button>
-
-            <button
-              onClick={() => handleSelectShiftFilter('C')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
-                shiftFilter === 'C'
-                  ? 'bg-indigo-400 text-slate-950 shadow-md shadow-indigo-950/50 font-black'
-                  : 'bg-slate-800 text-slate-400 hover:text-white'
-              }`}
-            >
-              <span className="w-1.5 h-1.5 rounded-full bg-indigo-400" />
-              <span>Shift C</span>
-              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
-                shiftFilter === 'C' ? 'bg-slate-950/40 text-slate-950' : 'bg-indigo-950 text-indigo-300 border border-indigo-800'
-              }`}>
-                {countShiftC}
               </span>
             </button>
           </div>
@@ -755,17 +1001,16 @@ export const SmogModule: React.FC<SmogModuleProps> = ({
         </div>
       </div>
 
-      {/* ACTIVE SHIFT FILTER TAG (Cards from photo removed as requested) */}
+      {/* ACTIVE SHIFT FILTER TAG */}
       {shiftFilter !== 'all' && (
         <div className="flex items-center justify-between px-3.5 py-2 rounded-xl bg-slate-900/70 border border-slate-800 text-xs font-mono">
           <div className="flex items-center gap-2 text-slate-300">
             <span>Filtered to:</span>
             <span className={`px-2 py-0.5 rounded-md text-xs font-black ${
               shiftFilter === 'A' ? 'bg-cyan-950 text-cyan-300 border border-cyan-800' :
-              shiftFilter === 'B' ? 'bg-amber-950 text-amber-300 border border-amber-800' :
-              'bg-indigo-950 text-indigo-300 border border-indigo-800'
+              'bg-amber-950 text-amber-300 border border-amber-800'
             }`}>
-              Shift {shiftFilter}
+              Shift {shiftFilter} ({shiftFilter === 'A' ? '07:00 AM – 07:00 PM' : '07:00 PM – 07:00 AM Next Day'})
             </span>
             <span className="text-slate-400">
               {selectedDate ? `(${selectedDate})` : '(All Dates)'}
@@ -780,193 +1025,338 @@ export const SmogModule: React.FC<SmogModuleProps> = ({
         </div>
       )}
 
-      {/* SAVED LEAK UNITS LIST / CARDS VIEW */}
-      <div className="space-y-3">
-        <div className="flex items-center justify-between px-1">
-          <h3 className="text-xs font-bold font-mono text-slate-400 uppercase tracking-wider flex items-center gap-2">
-            <Layers className="w-4 h-4 text-cyan-400" />
-            Leak Unit Cards ({filteredRecords.length})
-          </h3>
-        </div>
+      {/* ========================================================================= */}
+      {/* SHIFT A & SHIFT B CARDVIEWS CONTAINER */}
+      {/* ========================================================================= */}
+      {(() => {
+        const shiftARecords = filteredRecords.filter(r => resolveRecordShift(r) === 'A');
+        const shiftBRecords = filteredRecords.filter(r => resolveRecordShift(r) === 'B');
 
-        {filteredRecords.length === 0 ? (
-          <div className="p-12 text-center bg-slate-900/60 rounded-3xl border border-slate-800/80 space-y-3">
-            <Cloud className="w-10 h-10 text-slate-600 mx-auto" />
-            <p className="text-sm font-bold text-slate-400">No Leak Unit records found.</p>
-            <button
-              onClick={handleOpenLeakModal}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold text-slate-950 bg-cyan-400 hover:bg-cyan-300 transition-all cursor-pointer"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Add First Leak Unit</span>
-            </button>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filteredRecords.map((record) => (
-              <div 
-                key={record.id}
-                className="p-5 rounded-3xl bg-slate-900 border border-slate-800 hover:border-slate-700 transition-all space-y-4 shadow-xl relative group"
-              >
-                {/* Card Header: Shift Badge & Date / Time */}
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className={`px-2.5 py-1 rounded-xl text-xs font-black font-mono border ${
-                      record.shift === 'A'
-                        ? 'bg-cyan-950 text-cyan-300 border-cyan-800'
-                        : record.shift === 'B'
-                        ? 'bg-amber-950 text-amber-300 border-amber-800'
-                        : 'bg-indigo-950 text-indigo-300 border-indigo-800'
-                    }`}>
-                      Shift {record.shift}
-                    </span>
-                    <span className="text-[11px] font-mono text-slate-400 flex items-center gap-1">
-                      <Clock className="w-3 h-3 text-slate-500" />
-                      {record.date} ({record.time})
-                    </span>
+        const shiftASummaries = getShiftModelSummaries(shiftARecords);
+        const shiftBSummaries = getShiftModelSummaries(shiftBRecords);
+
+        const latestTimeA = shiftARecords[0]?.time;
+        const latestProdA = shiftARecords[0]?.productionDate || (selectedDate || todayStr);
+        const latestSmogA = shiftARecords[0]?.smogDate || shiftARecords[0]?.date || (selectedDate || todayStr);
+
+        const latestTimeB = shiftBRecords[0]?.time;
+        const latestProdB = shiftBRecords[0]?.productionDate || (selectedDate || todayStr);
+        const latestSmogB = shiftBRecords[0]?.smogDate || shiftBRecords[0]?.date || (selectedDate || todayStr);
+
+        const totalSuspectA = shiftARecords.reduce((sum, r) => sum + r.suspectCount, 0);
+        const totalActualA = shiftARecords.reduce((sum, r) => sum + r.actualCount, 0);
+
+        const totalSuspectB = shiftBRecords.reduce((sum, r) => sum + r.suspectCount, 0);
+        const totalActualB = shiftBRecords.reduce((sum, r) => sum + r.actualCount, 0);
+
+        const activeDateDisplay = selectedDate || todayStr;
+
+        return (
+          <div className="space-y-6">
+            <div className={`grid gap-6 ${shiftFilter === 'all' ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1 max-w-2xl mx-auto'}`}>
+              {/* ===================== SHIFT A CARDVIEW ===================== */}
+              {(shiftFilter === 'all' || shiftFilter === 'A') && (
+                <div 
+                  id="cardview-shift-a"
+                  className="p-5 sm:p-6 rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl relative space-y-4 hover:border-cyan-500/50 transition-all flex flex-col justify-between"
+                >
+                  <div className="space-y-4">
+                    {/* Header Row: Shift Badge & Date/Time & Actions */}
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="px-3 py-1 rounded-xl text-xs font-black font-mono border bg-cyan-950 text-cyan-300 border-cyan-800 shadow-sm shadow-cyan-950/40">
+                          Shift A
+                        </span>
+                        <span className="text-[11px] font-mono text-slate-400 flex items-center gap-1">
+                          <Clock className="w-3.5 h-3.5 text-slate-500" />
+                          <span>{activeDateDisplay} {latestTimeA ? `(${latestTimeA})` : '(07:00 AM – 07:00 PM)'}</span>
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => setIsScannerOpen(true)}
+                          className="p-1.5 rounded-lg text-cyan-400 hover:text-white hover:bg-slate-800 transition-all cursor-pointer"
+                          title="Scan machine in Shift A"
+                        >
+                          <ScanBarcode className="w-4 h-4" />
+                        </button>
+                        {shiftARecords.length > 0 && (
+                          <button
+                            onClick={() => handleDeleteShiftRecords('A')}
+                            className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-slate-800 transition-all cursor-pointer"
+                            title="Delete all Shift A records for this date"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* 3-Column Table: Model Name | Location | Leak Qty */}
+                    <div className="rounded-2xl border border-slate-800 bg-slate-950/80 overflow-hidden shadow-inner">
+                      {/* Table Header */}
+                      <div className="grid grid-cols-12 gap-1 px-3.5 py-2 bg-slate-900/90 border-b border-slate-800 text-[10px] sm:text-[11px] font-mono font-bold text-slate-400">
+                        <div className="col-span-5 text-left truncate">Model Name</div>
+                        <div className="col-span-4 text-center truncate">Location</div>
+                        <div className="col-span-3 text-right truncate">Leak Qty</div>
+                      </div>
+
+                      {/* Table Rows (All Machines Scanned in Shift A show underneath each other) */}
+                      {shiftASummaries.length === 0 ? (
+                        <div className="py-7 px-4 text-center space-y-2">
+                          <Cloud className="w-6 h-6 text-slate-600 mx-auto" />
+                          <p className="text-xs font-mono text-slate-400 font-bold">
+                            No machines scanned yet today in Shift A.
+                          </p>
+                          <p className="text-[10px] text-slate-500 font-mono">
+                            Scans between 07:00 AM and 07:00 PM will appear here automatically.
+                          </p>
+                          <button
+                            onClick={() => setIsScannerOpen(true)}
+                            className="mt-1 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-mono font-bold text-cyan-300 bg-cyan-950 border border-cyan-800 hover:bg-cyan-900 transition-all cursor-pointer"
+                          >
+                            <ScanBarcode className="w-3.5 h-3.5" />
+                            <span>Scan Shift A Machine</span>
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="divide-y divide-slate-900/60 max-h-56 overflow-y-auto">
+                          {shiftASummaries.map((summary, idx) => (
+                            <div
+                              key={idx}
+                              onClick={() => setSelectedShiftForDetails('A')}
+                              className="grid grid-cols-12 gap-1 px-3.5 py-2.5 items-center bg-slate-950/60 hover:bg-slate-900/50 transition-colors cursor-pointer"
+                              title="Click to view serial numbers"
+                            >
+                              <div className="col-span-5 text-left text-xs font-black text-white tracking-tight truncate flex items-center gap-1.5">
+                                <Layers className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                                <span className="truncate">{summary.modelName}</span>
+                              </div>
+                              <div className="col-span-4 text-center text-xs font-bold text-slate-200 tracking-tight truncate flex items-center justify-center gap-1">
+                                <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
+                                <span className="truncate">{summary.location}</span>
+                              </div>
+                              <div className="col-span-3 text-right text-xs font-mono font-black text-cyan-400">
+                                {summary.leakQty}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Production & Smog Date Badges below Table */}
+                    <div className="flex flex-wrap items-center gap-2 pt-0.5 text-[10px] font-mono">
+                      {latestProdA && (
+                        <span className="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-slate-300">
+                          Prod: <strong className="text-white">{latestProdA}</strong>
+                        </span>
+                      )}
+                      {latestSmogA && (
+                        <span className="px-2.5 py-1 rounded-lg bg-emerald-950/70 border border-emerald-800/80 text-emerald-400">
+                          Smog: <strong className="text-emerald-300">{latestSmogA}</strong>
+                        </span>
+                      )}
+                      {shiftARecords.length > 0 && shiftARecords[0].smogPerson && (
+                        <span className="px-2.5 py-1 rounded-lg bg-cyan-950/60 border border-cyan-800/60 text-cyan-300 flex items-center gap-1">
+                          <User className="w-3 h-3 text-cyan-400" />
+                          <span className="truncate max-w-[120px]">{shiftARecords[0].smogPerson}</span>
+                        </span>
+                      )}
+                    </div>
+
+                    {/* SUSPECT & ACTUAL Metrics Display */}
+                    <div className="grid grid-cols-2 gap-2 p-3.5 rounded-2xl bg-slate-950 border border-slate-800/80">
+                      <div className="text-center border-r border-slate-800">
+                        <span className="text-[10px] font-mono text-amber-400 uppercase tracking-wider block font-bold">
+                          Suspect
+                        </span>
+                        <span className="text-2xl font-black font-mono text-amber-300 mt-0.5 block">
+                          {totalSuspectA}
+                        </span>
+                        <span className="text-[9px] text-slate-500 block font-mono">
+                          Sr. No. in Form
+                        </span>
+                      </div>
+                      <div className="text-center">
+                        <span className="text-[10px] font-mono text-emerald-400 uppercase tracking-wider block font-bold">
+                          Actual
+                        </span>
+                        <span className="text-2xl font-black font-mono text-emerald-400 mt-0.5 block">
+                          {totalActualA}
+                        </span>
+                        <span className="text-[9px] text-slate-500 block font-mono">
+                          Passed Sr. No.
+                        </span>
+                      </div>
+                    </div>
                   </div>
 
+                  {/* View Details Button */}
                   <button
-                    onClick={() => handleDeleteRecord(record.id)}
-                    className="text-slate-500 hover:text-rose-400 p-1.5 rounded-lg hover:bg-slate-800 transition-all cursor-pointer opacity-80 group-hover:opacity-100"
-                    title="Delete record"
+                    onClick={() => setSelectedShiftForDetails('A')}
+                    className="w-full py-2.5 px-4 rounded-xl font-extrabold text-xs text-cyan-300 bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-800/80 flex items-center justify-center gap-2 cursor-pointer transition-all shadow-md mt-4"
                   >
-                    <Trash2 className="w-4 h-4" />
+                    <Eye className="w-4 h-4 text-cyan-400" />
+                    <span>View Details</span>
                   </button>
                 </div>
+              )}
 
-                {/* 3-Column Table: Header (Model Name | Location | Leak Qty) & Data Row (Model | Location Name | Leak Qty) */}
-                <div className="space-y-1">
-                  {(() => {
-                    const resolvedModel = (() => {
-                      if (record.serialNumbers && record.serialNumbers.length > 0) {
-                        for (const sn of record.serialNumbers) {
-                          if (sn) {
-                            const found = findModelByPrefix(sn);
-                            if (found?.modelName) return found.modelName;
-                          }
-                        }
-                      }
-                      if (record.modelName && 
-                          record.modelName.trim() && 
-                          record.modelName !== 'General Location' && 
-                          record.modelName !== 'General Smog Unit' &&
-                          record.modelName !== record.location) {
-                        return record.modelName;
-                      }
-                      return 'SAC-1.5T-INV-3S';
-                    })();
-
-                    const resolvedLocation = (() => {
-                      if (record.location && record.location.trim()) {
-                        return record.location.trim();
-                      }
-                      if (record.modelName && (
-                        record.modelName.toLowerCase().includes('line') ||
-                        record.modelName.toLowerCase().includes('bed') ||
-                        record.modelName.toLowerCase().includes('station') ||
-                        record.modelName === 'General Location'
-                      )) {
-                        return record.modelName;
-                      }
-                      return 'General Location';
-                    })();
-
-                    const resolvedLeakQty = record.qty ?? record.suspectCount ?? (record.serialNumbers?.length || 1);
-
-                    return (
-                      <div className="rounded-xl border border-slate-800 bg-slate-950/80 overflow-hidden shadow-inner">
-                        {/* Header Row: Model Name | Location | Leak Qty */}
-                        <div className="grid grid-cols-12 gap-1 px-3 py-1.5 bg-slate-900/90 border-b border-slate-800 text-[10px] sm:text-[11px] font-mono font-bold text-slate-400">
-                          <div className="col-span-5 text-left truncate">Model Name</div>
-                          <div className="col-span-4 text-center truncate">Location</div>
-                          <div className="col-span-3 text-right truncate">Leak Qty</div>
-                        </div>
-
-                        {/* Data Row: Model Value | Location Value | Leak Qty Value */}
-                        <div className="grid grid-cols-12 gap-1 px-3 py-2 items-center bg-slate-950/60">
-                          <div 
-                            className="col-span-5 text-left text-xs font-black text-white tracking-tight truncate" 
-                            title={resolvedModel}
-                          >
-                            {resolvedModel}
-                          </div>
-                          <div 
-                            className="col-span-4 text-center text-xs font-bold text-slate-200 tracking-tight truncate" 
-                            title={resolvedLocation}
-                          >
-                            {resolvedLocation}
-                          </div>
-                          <div className="col-span-3 text-right text-xs font-mono font-black text-cyan-400">
-                            {resolvedLeakQty}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })()}
-
-                  {record.smogPerson && 
-                   !record.smogPerson.includes('Lab Administrator') && 
-                   !record.smogPerson.includes('ADMIN01') && (
-                    <div className="flex items-center gap-1.5 text-xs text-slate-300 pt-0.5">
-                      <User className="w-3.5 h-3.5 text-cyan-400" />
-                      <span className="font-semibold">{record.smogPerson}</span>
-                    </div>
-                  )}
-
-                  {/* Production Date & Smog Date Badges */}
-                  {(record.productionDate || record.smogDate) && (
-                    <div className="flex flex-wrap items-center gap-1.5 pt-1 text-[10px] font-mono">
-                      {record.productionDate && (
-                        <span className="px-2 py-0.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-400">
-                          Prod: <strong className="text-slate-200">{record.productionDate}</strong>
-                        </span>
-                      )}
-                      {record.smogDate && (
-                        <span className="px-2 py-0.5 rounded-lg bg-emerald-950/70 border border-emerald-800/80 text-emerald-400">
-                          Smog: <strong className="text-emerald-300">{record.smogDate}</strong>
-                        </span>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {/* SUSPECT & ACTUAL METRICS DISPLAY */}
-                <div className="grid grid-cols-2 gap-2 p-3 rounded-2xl bg-slate-950 border border-slate-800/80">
-                  <div className="text-center border-r border-slate-800">
-                    <span className="text-[10px] font-mono text-amber-400 uppercase tracking-wider block font-bold">
-                      Suspect
-                    </span>
-                    <span className="text-xl font-black font-mono text-amber-300 mt-0.5 block">
-                      {record.suspectCount}
-                    </span>
-                    <span className="text-[9px] text-slate-500 block font-mono">Sr. No. in Form</span>
-                  </div>
-
-                  <div className="text-center">
-                    <span className="text-[10px] font-mono text-emerald-400 uppercase tracking-wider block font-bold">
-                      Actual
-                    </span>
-                    <span className="text-xl font-black font-mono text-emerald-400 mt-0.5 block">
-                      {record.actualCount}
-                    </span>
-                    <span className="text-[9px] text-slate-500 block font-mono">Passed Sr. No.</span>
-                  </div>
-                </div>
-
-                {/* View Details Button */}
-                <button
-                  onClick={() => setSelectedRecordForDetails(record)}
-                  className="w-full py-2.5 px-4 rounded-xl font-extrabold text-xs text-cyan-300 bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-800/80 flex items-center justify-center gap-2 cursor-pointer transition-all shadow-md"
+              {/* ===================== SHIFT B CARDVIEW ===================== */}
+              {(shiftFilter === 'all' || shiftFilter === 'B') && (
+                <div 
+                  id="cardview-shift-b"
+                  className="p-5 sm:p-6 rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl relative space-y-4 hover:border-amber-500/50 transition-all flex flex-col justify-between"
                 >
-                  <Eye className="w-4 h-4 text-cyan-400" />
-                  <span>View Details</span>
-                </button>
-              </div>
-            ))}
+                  <div className="space-y-4">
+                    {/* Header Row: Shift Badge & Date/Time & Actions */}
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="px-3 py-1 rounded-xl text-xs font-black font-mono border bg-amber-950 text-amber-300 border-amber-800 shadow-sm shadow-amber-950/40">
+                          Shift B
+                        </span>
+                        <span className="text-[11px] font-mono text-slate-400 flex items-center gap-1">
+                          <Clock className="w-3.5 h-3.5 text-slate-500" />
+                          <span>{activeDateDisplay} {latestTimeB ? `(${latestTimeB})` : '(07:00 PM – 07:00 AM Next Day)'}</span>
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => setIsScannerOpen(true)}
+                          className="p-1.5 rounded-lg text-amber-400 hover:text-white hover:bg-slate-800 transition-all cursor-pointer"
+                          title="Scan machine in Shift B"
+                        >
+                          <ScanBarcode className="w-4 h-4" />
+                        </button>
+                        {shiftBRecords.length > 0 && (
+                          <button
+                            onClick={() => handleDeleteShiftRecords('B')}
+                            className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-slate-800 transition-all cursor-pointer"
+                            title="Delete all Shift B records for this date"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* 3-Column Table: Model Name | Location | Leak Qty */}
+                    <div className="rounded-2xl border border-slate-800 bg-slate-950/80 overflow-hidden shadow-inner">
+                      {/* Table Header */}
+                      <div className="grid grid-cols-12 gap-1 px-3.5 py-2 bg-slate-900/90 border-b border-slate-800 text-[10px] sm:text-[11px] font-mono font-bold text-slate-400">
+                        <div className="col-span-5 text-left truncate">Model Name</div>
+                        <div className="col-span-4 text-center truncate">Location</div>
+                        <div className="col-span-3 text-right truncate">Leak Qty</div>
+                      </div>
+
+                      {/* Table Rows (All Machines Scanned in Shift B show underneath each other) */}
+                      {shiftBSummaries.length === 0 ? (
+                        <div className="py-7 px-4 text-center space-y-2">
+                          <Cloud className="w-6 h-6 text-slate-600 mx-auto" />
+                          <p className="text-xs font-mono text-slate-400 font-bold">
+                            No machines scanned yet today in Shift B.
+                          </p>
+                          <p className="text-[10px] text-slate-500 font-mono">
+                            Scans between 07:00 PM and 07:00 AM will appear here automatically.
+                          </p>
+                          <button
+                            onClick={() => setIsScannerOpen(true)}
+                            className="mt-1 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-mono font-bold text-amber-300 bg-amber-950 border border-amber-800 hover:bg-amber-900 transition-all cursor-pointer"
+                          >
+                            <ScanBarcode className="w-3.5 h-3.5" />
+                            <span>Scan Shift B Machine</span>
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="divide-y divide-slate-900/60 max-h-56 overflow-y-auto">
+                          {shiftBSummaries.map((summary, idx) => (
+                            <div
+                              key={idx}
+                              onClick={() => setSelectedShiftForDetails('B')}
+                              className="grid grid-cols-12 gap-1 px-3.5 py-2.5 items-center bg-slate-950/60 hover:bg-slate-900/50 transition-colors cursor-pointer"
+                              title="Click to view serial numbers"
+                            >
+                              <div className="col-span-5 text-left text-xs font-black text-white tracking-tight truncate flex items-center gap-1.5">
+                                <Layers className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                                <span className="truncate">{summary.modelName}</span>
+                              </div>
+                              <div className="col-span-4 text-center text-xs font-bold text-slate-200 tracking-tight truncate flex items-center justify-center gap-1">
+                                <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
+                                <span className="truncate">{summary.location}</span>
+                              </div>
+                              <div className="col-span-3 text-right text-xs font-mono font-black text-amber-400">
+                                {summary.leakQty}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Production & Smog Date Badges below Table */}
+                    <div className="flex flex-wrap items-center gap-2 pt-0.5 text-[10px] font-mono">
+                      {latestProdB && (
+                        <span className="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-slate-300">
+                          Prod: <strong className="text-white">{latestProdB}</strong>
+                        </span>
+                      )}
+                      {latestSmogB && (
+                        <span className="px-2.5 py-1 rounded-lg bg-emerald-950/70 border border-emerald-800/80 text-emerald-400">
+                          Smog: <strong className="text-emerald-300">{latestSmogB}</strong>
+                        </span>
+                      )}
+                      {shiftBRecords.length > 0 && shiftBRecords[0].smogPerson && (
+                        <span className="px-2.5 py-1 rounded-lg bg-amber-950/60 border border-amber-800/60 text-amber-300 flex items-center gap-1">
+                          <User className="w-3 h-3 text-amber-400" />
+                          <span className="truncate max-w-[120px]">{shiftBRecords[0].smogPerson}</span>
+                        </span>
+                      )}
+                    </div>
+
+                    {/* SUSPECT & ACTUAL Metrics Display */}
+                    <div className="grid grid-cols-2 gap-2 p-3.5 rounded-2xl bg-slate-950 border border-slate-800/80">
+                      <div className="text-center border-r border-slate-800">
+                        <span className="text-[10px] font-mono text-amber-400 uppercase tracking-wider block font-bold">
+                          Suspect
+                        </span>
+                        <span className="text-2xl font-black font-mono text-amber-300 mt-0.5 block">
+                          {totalSuspectB}
+                        </span>
+                        <span className="text-[9px] text-slate-500 block font-mono">
+                          Sr. No. in Form
+                        </span>
+                      </div>
+                      <div className="text-center">
+                        <span className="text-[10px] font-mono text-emerald-400 uppercase tracking-wider block font-bold">
+                          Actual
+                        </span>
+                        <span className="text-2xl font-black font-mono text-emerald-400 mt-0.5 block">
+                          {totalActualB}
+                        </span>
+                        <span className="text-[9px] text-slate-500 block font-mono">
+                          Passed Sr. No.
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* View Details Button */}
+                  <button
+                    onClick={() => setSelectedShiftForDetails('B')}
+                    className="w-full py-2.5 px-4 rounded-xl font-extrabold text-xs text-amber-300 bg-amber-950/80 hover:bg-amber-900 border border-amber-800/80 flex items-center justify-center gap-2 cursor-pointer transition-all shadow-md mt-4"
+                  >
+                    <Eye className="w-4 h-4 text-amber-400" />
+                    <span>View Details</span>
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
-        )}
-      </div>
+        );
+      })()}
 
       {/* ========================================================================= */}
       {/* LEAK UNIT MODAL FORM (TRIGGERED BY "LEAK UNIT" BUTTON) */}
@@ -1013,31 +1403,44 @@ export const SmogModule: React.FC<SmogModuleProps> = ({
                 </div>
               </div>
 
-              {/* 2. SHIFT SELECTION (A, B, C) */}
+              {/* 2. SHIFT SELECTION (A, B) */}
               <div>
-                <label className="block text-slate-300 font-bold mb-1.5">
-                  2. Shift (A, B, C) *
+                <label className="block text-slate-300 font-bold mb-1.5 flex items-center justify-between">
+                  <span>2. Shift *</span>
+                  <span className="text-[10px] text-slate-400 font-mono">Auto: A (7AM-7PM), B (7PM-7AM)</span>
                 </label>
-                <div className="grid grid-cols-3 gap-2">
-                  {(['A', 'B', 'C'] as const).map((s) => (
-                    <button
-                      type="button"
-                      key={s}
-                      onClick={() => setShift(s)}
-                      className={`py-2.5 px-3 rounded-xl font-mono font-black text-xs transition-all flex items-center justify-center gap-2 cursor-pointer border ${
-                        shift === s
-                          ? s === 'A'
-                            ? 'bg-cyan-950 text-cyan-300 border-cyan-500 shadow-md shadow-cyan-950/50'
-                            : s === 'B'
-                            ? 'bg-amber-950 text-amber-300 border-amber-500 shadow-md shadow-amber-950/50'
-                            : 'bg-indigo-950 text-indigo-300 border-indigo-500 shadow-md shadow-indigo-950/50'
-                          : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-white'
-                      }`}
-                    >
-                      <span>Shift {s}</span>
-                      {shift === s && <Check className="w-3.5 h-3.5" />}
-                    </button>
-                  ))}
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShift('A')}
+                    className={`py-2.5 px-3 rounded-xl font-mono font-black text-xs transition-all flex flex-col items-center justify-center gap-0.5 cursor-pointer border ${
+                      shift === 'A'
+                        ? 'bg-cyan-950 text-cyan-300 border-cyan-500 shadow-md shadow-cyan-950/50'
+                        : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-white'
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <span>Shift A</span>
+                      {shift === 'A' && <Check className="w-3.5 h-3.5" />}
+                    </div>
+                    <span className="text-[10px] text-slate-500 font-mono font-normal">07:00 AM – 07:00 PM</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setShift('B')}
+                    className={`py-2.5 px-3 rounded-xl font-mono font-black text-xs transition-all flex flex-col items-center justify-center gap-0.5 cursor-pointer border ${
+                      shift === 'B'
+                        ? 'bg-amber-950 text-amber-300 border-amber-500 shadow-md shadow-amber-950/50'
+                        : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-white'
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <span>Shift B</span>
+                      {shift === 'B' && <Check className="w-3.5 h-3.5" />}
+                    </div>
+                    <span className="text-[10px] text-slate-500 font-mono font-normal">07:00 PM – 07:00 AM</span>
+                  </button>
                 </div>
               </div>
 
@@ -1329,6 +1732,243 @@ export const SmogModule: React.FC<SmogModuleProps> = ({
           </div>
         </div>
       )}
+
+      {/* SHIFT A / SHIFT B COMPREHENSIVE DETAILS MODAL */}
+      {selectedShiftForDetails && (() => {
+        const targetShift = selectedShiftForDetails;
+        const shiftRecords = filteredRecords.filter(r => resolveRecordShift(r) === targetShift);
+        const shiftTotalSuspect = shiftRecords.reduce((s, r) => s + r.suspectCount, 0);
+        const shiftTotalPassed = shiftRecords.reduce((s, r) => s + r.actualCount, 0);
+
+        // Flatten all scanned units with their record context
+        interface FlattenedUnit {
+          recordId: string;
+          serialNumber: string;
+          modelName: string;
+          location: string;
+          time: string;
+          date: string;
+          isPassed: boolean;
+        }
+
+        const flattenedUnits: FlattenedUnit[] = [];
+        for (const rec of shiftRecords) {
+          const recModel = (() => {
+            if (rec.modelName && 
+                rec.modelName.trim() && 
+                rec.modelName !== 'General Location' && 
+                rec.modelName !== 'General Smog Unit') {
+              return rec.modelName;
+            }
+            return 'SAC-1.5T-INV-3S';
+          })();
+
+          const recLoc = rec.location || 'General Location';
+
+          for (const sn of (rec.serialNumbers || [])) {
+            const isPassed = (rec.passedSerials || []).includes(sn);
+            flattenedUnits.push({
+              recordId: rec.id,
+              serialNumber: sn,
+              modelName: recModel,
+              location: recLoc,
+              time: rec.time,
+              date: rec.date,
+              isPassed,
+            });
+          }
+        }
+
+        const filteredUnits = flattenedUnits.filter(u => {
+          if (!shiftDetailsSearch) return true;
+          const q = shiftDetailsSearch.toLowerCase();
+          return u.serialNumber.toLowerCase().includes(q) || 
+                 u.modelName.toLowerCase().includes(q) || 
+                 u.location.toLowerCase().includes(q);
+        });
+
+        const allSerialsList = flattenedUnits.map(u => u.serialNumber);
+
+        return (
+          <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-2xl p-6 space-y-5 shadow-2xl my-auto animate-in fade-in zoom-in-95 duration-200">
+              {/* Modal Header */}
+              <div className="flex items-center justify-between border-b border-slate-800 pb-3.5">
+                <div className="flex items-center gap-3">
+                  <div className={`p-2.5 rounded-2xl border ${
+                    targetShift === 'A'
+                      ? 'bg-cyan-950 border-cyan-800 text-cyan-400'
+                      : 'bg-amber-950 border-amber-800 text-amber-400'
+                  }`}>
+                    <Layers className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-base font-extrabold text-white">
+                        Shift {targetShift} Machine Details
+                      </h3>
+                      <span className={`px-2 py-0.5 rounded-md text-[10px] font-mono font-bold border ${
+                        targetShift === 'A'
+                          ? 'bg-cyan-950 text-cyan-300 border-cyan-800'
+                          : 'bg-amber-950 text-amber-300 border-amber-800'
+                      }`}>
+                        {targetShift === 'A' ? '07:00 AM – 07:00 PM' : '07:00 PM – 07:00 AM (Next Day)'}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 font-mono mt-0.5">
+                      Date: <strong className="text-white">{selectedDate || todayStr}</strong> • Total Scans: <strong className="text-white">{flattenedUnits.length}</strong>
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    setSelectedShiftForDetails(null);
+                    setShiftDetailsSearch('');
+                  }}
+                  className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Suspect vs Actual Summary Box */}
+              <div className="grid grid-cols-3 gap-2 p-3.5 rounded-2xl bg-slate-950 border border-slate-800">
+                <div className="text-center border-r border-slate-800">
+                  <span className="text-[10px] font-mono text-slate-400 uppercase font-bold block">Total Units</span>
+                  <span className="text-xl font-black font-mono text-white mt-0.5 block">
+                    {flattenedUnits.length}
+                  </span>
+                </div>
+                <div className="text-center border-r border-slate-800">
+                  <span className="text-[10px] font-mono text-amber-400 uppercase font-bold block">Suspect</span>
+                  <span className="text-xl font-black font-mono text-amber-300 mt-0.5 block">
+                    {shiftTotalSuspect}
+                  </span>
+                </div>
+                <div className="text-center">
+                  <span className="text-[10px] font-mono text-emerald-400 uppercase font-bold block">Passed</span>
+                  <span className="text-xl font-black font-mono text-emerald-400 mt-0.5 block">
+                    {shiftTotalPassed}
+                  </span>
+                </div>
+              </div>
+
+              {/* Search and Action Bar */}
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
+                <div className="relative flex-1">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-3" />
+                  <input
+                    type="text"
+                    value={shiftDetailsSearch}
+                    onChange={(e) => setShiftDetailsSearch(e.target.value)}
+                    placeholder="Search by Serial No. or Model..."
+                    className="w-full pl-8 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handleMarkAllPassForShift(targetShift)}
+                    className="px-3 py-2 rounded-xl text-xs font-mono font-bold text-emerald-300 bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-800/80 transition-all flex items-center gap-1.5 cursor-pointer shrink-0"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>Mark All Passed</span>
+                  </button>
+                  <button
+                    onClick={() => handleCopySerial(allSerialsList, `shift-${targetShift}`)}
+                    className="px-3 py-2 rounded-xl text-xs font-mono font-bold text-cyan-300 bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-800/80 transition-all flex items-center gap-1.5 cursor-pointer shrink-0"
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                    <span>Copy All</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Serial Units List */}
+              <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                {filteredUnits.length === 0 ? (
+                  <div className="p-8 text-center bg-slate-950 rounded-2xl border border-dashed border-slate-800 space-y-1">
+                    <p className="text-xs font-bold text-slate-400">No matching machine serial numbers found.</p>
+                    <p className="text-[11px] text-slate-500 font-mono">Try clearing the search query or scan new machines.</p>
+                  </div>
+                ) : (
+                  filteredUnits.map((unit, idx) => (
+                    <div
+                      key={idx}
+                      className="p-3 rounded-2xl bg-slate-950 border border-slate-800/90 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:border-slate-700 transition-all"
+                    >
+                      <div className="space-y-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className={`px-2 py-0.5 rounded-md text-[10px] font-mono font-black border ${
+                            targetShift === 'A'
+                              ? 'bg-cyan-950 text-cyan-300 border-cyan-800'
+                              : 'bg-amber-950 text-amber-300 border-amber-800'
+                          }`}>
+                            {unit.modelName}
+                          </span>
+                          <span className="px-2 py-0.5 rounded-md bg-slate-900 text-[10px] font-mono text-slate-300 border border-slate-800 flex items-center gap-1">
+                            <MapPin className="w-3 h-3 text-slate-400" />
+                            {unit.location}
+                          </span>
+                          <span className="text-[10px] font-mono text-slate-500 flex items-center gap-1">
+                            <Clock className="w-3 h-3" />
+                            {unit.time}
+                          </span>
+                        </div>
+                        <p className="text-sm font-mono font-black text-white tracking-wide truncate">
+                          {unit.serialNumber}
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-2 self-end sm:self-center">
+                        <button
+                          onClick={() => handleTogglePassSerial(unit.recordId, unit.serialNumber)}
+                          className={`px-3 py-1.5 rounded-xl font-mono text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all border ${
+                            unit.isPassed
+                              ? 'bg-emerald-950 text-emerald-300 border-emerald-700 hover:bg-emerald-900'
+                              : 'bg-amber-950 text-amber-300 border-amber-700 hover:bg-amber-900'
+                          }`}
+                        >
+                          {unit.isPassed ? (
+                            <>
+                              <CheckCircle className="w-3.5 h-3.5" />
+                              <span>Passed</span>
+                            </>
+                          ) : (
+                            <>
+                              <AlertCircle className="w-3.5 h-3.5" />
+                              <span>Mark Pass</span>
+                            </>
+                          )}
+                        </button>
+                        <button
+                          onClick={() => handleDeleteSingleMachineFromShift(unit.recordId, unit.serialNumber)}
+                          className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-slate-900 rounded-lg transition-all cursor-pointer"
+                          title="Delete unit"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {/* Close Button */}
+              <div className="border-t border-slate-800 pt-3 flex justify-end">
+                <button
+                  onClick={() => {
+                    setSelectedShiftForDetails(null);
+                    setShiftDetailsSearch('');
+                  }}
+                  className="px-5 py-2.5 rounded-xl text-xs font-bold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 transition-all cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* SMOG BARCODE SCANNER MODAL */}
       <SmogBarcodeScannerModal

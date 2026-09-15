@@ -17,9 +17,9 @@ interface SmogQtyFormModalProps {
   isOpen: boolean;
   onClose: () => void;
   defaultDate?: string | null;
-  defaultShift?: 'A' | 'B' | 'C' | 'all';
+  defaultShift?: 'A' | 'B' | 'all';
   onSaved?: (record: SmogQtyRecord) => void;
-  onOpenWhatsAppShare?: (data: { date: string; shift: 'A' | 'B' | 'C'; smogQty: number }) => void;
+  onOpenWhatsAppShare?: (data: { date: string; shift: 'A' | 'B'; smogQty: number }) => void;
 }
 
 export const SmogQtyFormModal: React.FC<SmogQtyFormModalProps> = ({
@@ -32,7 +32,7 @@ export const SmogQtyFormModal: React.FC<SmogQtyFormModalProps> = ({
 }) => {
   const today = new Date().toISOString().split('T')[0];
   const [date, setDate] = useState<string>(defaultDate || today);
-  const [shift, setShift] = useState<'A' | 'B' | 'C'>('A');
+  const [shift, setShift] = useState<'A' | 'B'>('A');
   const [smogQty, setSmogQty] = useState<string>('');
   const [notes, setNotes] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
@@ -43,7 +43,7 @@ export const SmogQtyFormModal: React.FC<SmogQtyFormModalProps> = ({
     if (isOpen) {
       setDate(defaultDate || today);
       if (defaultShift && defaultShift !== 'all') {
-        setShift(defaultShift);
+        setShift(defaultShift as 'A' | 'B');
       } else {
         setShift('A');
       }
@@ -214,32 +214,49 @@ export const SmogQtyFormModal: React.FC<SmogQtyFormModalProps> = ({
 
             {/* Shift Choose Options */}
             <div className="space-y-1.5">
-              <label className="text-xs font-mono font-bold text-slate-300 flex items-center gap-1.5">
-                <Clock className="w-3.5 h-3.5 text-amber-400" />
-                <span>Shift Choose Options</span>
+              <label className="text-xs font-mono font-bold text-slate-300 flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <Clock className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Shift Choose Options</span>
+                </span>
+                <span className="text-[10px] text-slate-400 font-mono">Select Shift A or B</span>
               </label>
-              <div className="grid grid-cols-3 gap-2">
-                {(['A', 'B', 'C'] as const).map((s) => (
-                  <button
-                    key={s}
-                    type="button"
-                    onClick={() => setShift(s)}
-                    className={`py-2.5 px-3 rounded-xl font-mono text-xs font-extrabold transition-all cursor-pointer flex items-center justify-center gap-1.5 border ${
-                      shift === s
-                        ? s === 'A'
-                          ? 'bg-cyan-500 text-slate-950 border-cyan-400 shadow-md shadow-cyan-950/50'
-                          : s === 'B'
-                          ? 'bg-amber-400 text-slate-950 border-amber-300 shadow-md shadow-amber-950/50'
-                          : 'bg-indigo-400 text-slate-950 border-indigo-300 shadow-md shadow-indigo-950/50'
-                        : 'bg-slate-950 text-slate-400 border-slate-800 hover:border-slate-700 hover:text-white'
-                    }`}
-                  >
-                    <span className={`w-2 h-2 rounded-full ${
-                      shift === s ? 'bg-slate-950' : s === 'A' ? 'bg-cyan-400' : s === 'B' ? 'bg-amber-400' : 'bg-indigo-400'
-                    }`} />
-                    <span>Shift {s}</span>
-                  </button>
-                ))}
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShift('A')}
+                  className={`py-2.5 px-3 rounded-xl font-mono text-xs font-extrabold transition-all cursor-pointer flex flex-col items-center justify-center gap-1 border ${
+                    shift === 'A'
+                      ? 'bg-cyan-500 text-slate-950 border-cyan-400 shadow-md shadow-cyan-950/50'
+                      : 'bg-slate-950 text-slate-400 border-slate-800 hover:border-slate-700 hover:text-white'
+                  }`}
+                >
+                  <div className="flex items-center gap-1.5">
+                    <span className={`w-2 h-2 rounded-full ${shift === 'A' ? 'bg-slate-950' : 'bg-cyan-400'}`} />
+                    <span className="font-black text-sm">Shift A</span>
+                  </div>
+                  <span className={`text-[10px] font-mono ${shift === 'A' ? 'text-slate-900 font-bold' : 'text-slate-500'}`}>
+                    07:00 AM – 07:00 PM
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShift('B')}
+                  className={`py-2.5 px-3 rounded-xl font-mono text-xs font-extrabold transition-all cursor-pointer flex flex-col items-center justify-center gap-1 border ${
+                    shift === 'B'
+                      ? 'bg-amber-400 text-slate-950 border-amber-300 shadow-md shadow-amber-950/50'
+                      : 'bg-slate-950 text-slate-400 border-slate-800 hover:border-slate-700 hover:text-white'
+                  }`}
+                >
+                  <div className="flex items-center gap-1.5">
+                    <span className={`w-2 h-2 rounded-full ${shift === 'B' ? 'bg-slate-950' : 'bg-amber-400'}`} />
+                    <span className="font-black text-sm">Shift B</span>
+                  </div>
+                  <span className={`text-[10px] font-mono ${shift === 'B' ? 'text-slate-900 font-bold' : 'text-slate-500'}`}>
+                    07:00 PM – 07:00 AM
+                  </span>
+                </button>
               </div>
             </div>
 

@@ -4,7 +4,7 @@ import { db, collection, doc, setDoc, deleteDoc, getDocs, onSnapshot } from './f
 export interface SmogQtyRecord {
   id: string;
   date: string;       // YYYY-MM-DD
-  shift: 'A' | 'B' | 'C';
+  shift: 'A' | 'B';
   smogQty: number;
   notes?: string;
   createdAt: string;
@@ -166,17 +166,18 @@ export function getSmogQtyRecords(): SmogQtyRecord[] {
 
 export function saveSmogQtyRecord(data: {
   date: string;
-  shift: 'A' | 'B' | 'C';
+  shift: 'A' | 'B' | string;
   smogQty: number;
   notes?: string;
 }): SmogQtyRecord {
   const current = getSmogQtyRecords();
   const today = new Date().toISOString().split('T')[0];
   const targetDate = data.date ? data.date.trim() : today;
+  const normalizedShift: 'A' | 'B' = (data.shift === 'B' || data.shift === 'C') ? 'B' : 'A';
 
   // Check if an entry already exists for this exact date and shift
   const existingIdx = current.findIndex(
-    (r) => r.date === targetDate && r.shift === data.shift
+    (r) => r.date === targetDate && r.shift === normalizedShift
   );
 
   let updatedList: SmogQtyRecord[];
@@ -187,6 +188,7 @@ export function saveSmogQtyRecord(data: {
     const existing = current[existingIdx];
     savedRecord = {
       ...existing,
+      shift: normalizedShift,
       smogQty: Number(data.smogQty),
       notes: data.notes || existing.notes,
       updatedAt: new Date().toISOString()
@@ -197,7 +199,7 @@ export function saveSmogQtyRecord(data: {
     savedRecord = {
       id: `sq-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
       date: targetDate,
-      shift: data.shift,
+      shift: normalizedShift,
       smogQty: Number(data.smogQty),
       notes: data.notes || '',
       createdAt: new Date().toISOString()
@@ -246,7 +248,7 @@ export function deleteSmogQtyRecord(id: string): void {
   });
 }
 
-export function getSmogQtySum(date?: string | null, shift?: 'all' | 'A' | 'B' | 'C'): number {
+export function getSmogQtySum(date?: string | null, shift?: 'all' | 'A' | 'B'): number {
   const records = getSmogQtyRecords();
   return records
     .filter((r) => {

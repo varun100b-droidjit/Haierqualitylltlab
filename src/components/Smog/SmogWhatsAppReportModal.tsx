@@ -14,14 +14,14 @@ import {
   Sparkles,
   AlertCircle
 } from 'lucide-react';
-import { LeakUnitRecord } from './SmogModule';
+import { LeakUnitRecord, resolveRecordShift } from './SmogModule';
 
 export interface SmogWhatsAppReportModalProps {
   isOpen: boolean;
   onClose: () => void;
   productionDate: string;
   smogDate: string;
-  shift: 'A' | 'B' | 'C' | 'all';
+  shift: 'A' | 'B' | 'all';
   smogQty: number;
   records: LeakUnitRecord[];
 }
@@ -41,9 +41,10 @@ export const SmogWhatsAppReportModal: React.FC<SmogWhatsAppReportModalProps> = (
   const [isCopied, setIsCopied] = useState<boolean>(false);
   const [shareSuccess, setShareSuccess] = useState<string | null>(null);
 
-  // Filter records relevant to this shift & date
+  // Filter records relevant to this shift & date (auto-resolves shift: A=7AM-7PM, B=7PM-7AM)
   const filteredRecords = records.filter(r => {
-    const shiftMatch = shift === 'all' || r.shift === shift;
+    const recordShift = resolveRecordShift(r);
+    const shiftMatch = shift === 'all' || recordShift === shift;
     const dateMatch = !smogDate || r.smogDate === smogDate || r.date === smogDate;
     return shiftMatch && dateMatch;
   });

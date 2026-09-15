@@ -62,6 +62,23 @@ const STORAGE_KEY_SHIFT = 'smog_scanner_shift';
 const STORAGE_KEY_LEAK_LOCATION = 'smog_scanner_leak_location';
 const STORAGE_KEY_LEAK_QTY = 'smog_scanner_leak_qty';
 
+/**
+ * Auto-detects Smog Shift based on current time:
+ * - Shift A: 07:00 AM to 07:00 PM (07:00:00 - 18:59:59)
+ * - Shift B: 07:00 PM to 07:00 AM next day (19:00:00 - 06:59:59)
+ */
+export function getAutoSmogShift(): 'A' | 'B' {
+  const now = new Date();
+  const hours = now.getHours();
+  const minutes = now.getMinutes();
+  const totalMinutes = hours * 60 + minutes;
+  // 07:00 AM = 7 * 60 = 420 mins, 07:00 PM = 19 * 60 = 1140 mins
+  if (totalMinutes >= 420 && totalMinutes < 1140) {
+    return 'A';
+  }
+  return 'B';
+}
+
 export const SmogBarcodeScannerModal: React.FC<SmogBarcodeScannerModalProps> = ({
   isOpen,
   onClose,
@@ -71,14 +88,8 @@ export const SmogBarcodeScannerModal: React.FC<SmogBarcodeScannerModalProps> = (
   const operatorUserId = user?.userId || 'ADMIN01';
   const operatorName = user?.name || 'Admin Operator';
 
-  // Persistent Date & Shift Setup - stays locked across day changes until manually edited
-  const [shift, setShift] = useState<'A' | 'B' | 'C'>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY_SHIFT);
-      if (saved === 'A' || saved === 'B' || saved === 'C') return saved;
-    } catch {}
-    return 'A';
-  });
+  // Persistent Date & Auto Shift Setup - Shift is automatically detected (7AM-7PM: A, 7PM-7AM: B)
+  const [shift, setShift] = useState<'A' | 'B'>(() => getAutoSmogShift());
 
   const [productionDate, setProductionDate] = useState<string>(() => {
     try {
@@ -135,10 +146,8 @@ export const SmogBarcodeScannerModal: React.FC<SmogBarcodeScannerModalProps> = (
         if (savedSmog && savedSmog.trim()) {
           setSmogDate(savedSmog.trim());
         }
-        const savedShift = localStorage.getItem(STORAGE_KEY_SHIFT);
-        if (savedShift === 'A' || savedShift === 'B' || savedShift === 'C') {
-          setShift(savedShift);
-        }
+        // Shift is auto-detected: 7AM-7PM = Shift A, 7PM-7AM = Shift B
+        setShift(getAutoSmogShift());
         const savedLoc = localStorage.getItem(STORAGE_KEY_LEAK_LOCATION);
         if (savedLoc && savedLoc.trim()) {
           setLeakLocation(savedLoc.trim());
@@ -258,8 +267,8 @@ export const SmogBarcodeScannerModal: React.FC<SmogBarcodeScannerModalProps> = (
     } catch {}
   };
 
-  // Synchronize and persist Shift
-  const handleShiftChange = (newShift: 'A' | 'B' | 'C') => {
+  // Shift is automatically detected (7AM-7PM: Shift A, 7PM-7AM: Shift B)
+  const handleShiftChange = (newShift: 'A' | 'B') => {
     setShift(newShift);
     try {
       localStorage.setItem(STORAGE_KEY_SHIFT, newShift);
@@ -625,6 +634,7 @@ export const SmogBarcodeScannerModal: React.FC<SmogBarcodeScannerModalProps> = (
 
     const now = new Date();
     const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const autoShift = getAutoSmogShift();
 
     const finalBatchQty = scannedMachines.length;
 
@@ -634,7 +644,7 @@ export const SmogBarcodeScannerModal: React.FC<SmogBarcodeScannerModalProps> = (
     const newRecords: LeakUnitRecord[] = scannedMachines.map((machine, idx) => ({
       id: `leak-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
       smogPerson: (operatorName && operatorName !== 'Lab Administrator' && operatorUserId !== 'ADMIN01') ? `${operatorName} (${operatorUserId})` : '',
-      shift: shift,
+      shift: autoShift,
       modelName: machine.modelName || 'SAC-1.5T-INV-3S',
       serialNumbers: [machine.serialNumber],
       passedSerials: [], // Initially 0 passed
@@ -644,7 +654,7 @@ export const SmogBarcodeScannerModal: React.FC<SmogBarcodeScannerModalProps> = (
       month: smogDate.substring(0, 7),
       time: timeStr,
       createdAt: now.toISOString(),
-      notes: `Scanned via Smog Barcode Scanner [Prod: ${productionDate} | Smog: ${smogDate} | Shift: ${shift}${leakLocation.trim() ? ` | Loc: ${leakLocation.trim()}` : ''} | Batch Qty: ${finalBatchQty}]`,
+      notes: `Scanned via Smog Barcode Scanner [Prod: ${productionDate} | Smog: ${smogDate} | Shift: ${autoShift}${leakLocation.trim() ? ` | Loc: ${leakLocation.trim()}` : ''} | Batch Qty: ${finalBatchQty}]`,
       productionDate,
       smogDate,
       operatorUserId,
@@ -690,46 +700,8 @@ export const SmogBarcodeScannerModal: React.FC<SmogBarcodeScannerModalProps> = (
         {/* SCROLLABLE BODY */}
         <div className="p-3 sm:p-4 overflow-y-auto space-y-3 flex-1">
           
-          {/* ULTRA-COMPACT SECTION 1: SHIFT & DATE SETUP */}
+          {/* ULTRA-COMPACT SECTION 1: DATE SETUP (Shift is auto-detected: 7AM-7PM Shift A, 7PM-7AM Shift B) */}
           <div className="p-2.5 sm:p-3 rounded-2xl bg-slate-950/95 border border-slate-800 space-y-2 shadow-inner">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              {/* Shift Selector */}
-              <div className="flex items-center gap-1.5">
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider font-mono">
-                  Shift:
-                </span>
-                <div className="inline-flex rounded-xl bg-slate-900 p-0.5 border border-slate-800">
-                  {(['A', 'B', 'C'] as const).map((s) => (
-                    <button
-                      key={s}
-                      type="button"
-                      onClick={() => handleShiftChange(s)}
-                      className={`px-3 py-1 rounded-lg text-xs font-black font-mono transition-all cursor-pointer ${
-                        shift === s
-                          ? s === 'A'
-                            ? 'bg-cyan-500 text-slate-950 shadow-sm font-black'
-                            : s === 'B'
-                            ? 'bg-amber-400 text-slate-950 shadow-sm font-black'
-                            : 'bg-indigo-400 text-slate-950 shadow-sm font-black'
-                          : 'text-slate-400 hover:text-white'
-                      }`}
-                    >
-                      Shift {s}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Operator info badge */}
-              <div className="flex items-center gap-1.5 text-[10px] text-slate-400 font-mono">
-                <User className="w-3 h-3 text-cyan-400 shrink-0" />
-                <span className="font-semibold text-slate-300 truncate max-w-[140px]">{operatorName}</span>
-                <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-900 border border-slate-800 text-cyan-400 font-mono">
-                  {operatorUserId}
-                </span>
-              </div>
-            </div>
-
             {/* Compact 2-column Date row on mobile and desktop */}
             <div className="grid grid-cols-2 gap-2">
               {/* Production Date */}

@@ -89,7 +89,7 @@ export function MainApp() {
   const [editedUnit, setEditedUnit] = useState<Unit | null>(null);
   const [isSupabaseModalOpen, setIsSupabaseModalOpen] = useState(false);
   const [isBarcodeScannerOpen, setIsBarcodeScannerOpen] = useState(false);
-  const [selectedSmogShift, setSelectedSmogShift] = useState<'all' | 'A' | 'B' | 'C'>('all');
+  const [selectedSmogShift, setSelectedSmogShift] = useState<'all' | 'A' | 'B'>('all');
 
   // Settings Security: Protected by Password PIN (9090)
   const [isSettingsUnlocked, setIsSettingsUnlocked] = useState(false);

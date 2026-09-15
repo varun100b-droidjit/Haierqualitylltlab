@@ -772,10 +772,12 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                 <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded-full bg-cyan-950 text-cyan-400 border border-cyan-800/80">
                   LLT Station
                 </span>
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700 inline-flex items-center gap-1">
-                  <User className="w-2.5 h-2.5 text-cyan-400" />
-                  ID: <strong className="text-cyan-300 font-bold">{operatorUserId}</strong>
-                </span>
+                {operatorUserId && operatorUserId !== 'ADMIN01' && (
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700 inline-flex items-center gap-1">
+                    <User className="w-2.5 h-2.5 text-cyan-400" />
+                    ID: <strong className="text-cyan-300 font-bold">{operatorUserId}</strong>
+                  </span>
+                )}
               </h2>
             </div>
           </div>
@@ -1013,57 +1015,93 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
             </div>
           )}
 
-          {/* MANUAL / GUN SCANNER INPUT (Pattern identical to Smog Scanner) */}
-          <div className="p-3 rounded-2xl bg-slate-950/95 border border-slate-800 space-y-2 shadow-inner">
-            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-              Series No. (Barcode / Gun Input - Must start with 'A'):
-            </label>
-            <div className="flex gap-2">
-              <div className="relative flex-1">
-                <input
-                  type="text"
-                  value={manualSerialInput}
-                  onChange={(e) => setManualSerialInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      addScannedMachine(manualSerialInput, manualModelInput);
-                    }
-                  }}
-                  placeholder="Scan with gun or type (e.g. A010834A0001)..."
-                  className="w-full pl-8 pr-3 py-2 bg-slate-900 border border-slate-800 rounded-xl font-mono text-xs text-white placeholder-slate-500 focus:border-cyan-500 focus:outline-none"
-                />
-                <ScanBarcode className="w-3.5 h-3.5 text-cyan-400 absolute left-2.5 top-2.5 pointer-events-none" />
+          {/* MANUAL / GUN SCANNER INPUT WITH PROMINENT MODEL NAME */}
+          <div className="p-3 rounded-2xl bg-slate-950/95 border border-slate-800 space-y-2.5 shadow-inner">
+            <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
+              {/* Series No. Input */}
+              <div className="sm:col-span-6">
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                  Series No. (Barcode / Gun Input):
+                </label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={manualSerialInput}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setManualSerialInput(val);
+                      const clean = val.trim().toUpperCase();
+                      if (clean.length >= 9) {
+                        const matched = findModelByPrefix(clean.slice(0, 9));
+                        if (matched?.modelName) {
+                          setManualModelInput(matched.modelName);
+                        }
+                      }
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        addScannedMachine(manualSerialInput, manualModelInput);
+                      }
+                    }}
+                    placeholder="Scan with gun or type (e.g. A010834A0001)..."
+                    className="w-full pl-8 pr-3 py-2 bg-slate-900 border border-slate-800 rounded-xl font-mono text-xs text-white placeholder-slate-500 focus:border-cyan-500 focus:outline-none"
+                  />
+                  <ScanBarcode className="w-3.5 h-3.5 text-cyan-400 absolute left-2.5 top-2.5 pointer-events-none" />
+                </div>
               </div>
 
-              {selectedProcess === 'SEND_ELT' && (
-                <input
-                  type="text"
-                  value={manualModelInput}
-                  onChange={(e) => setManualModelInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      addScannedMachine(manualSerialInput, manualModelInput);
-                    }
-                  }}
-                  placeholder="Model (optional)"
-                  className="w-32 px-2.5 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:border-cyan-500 focus:outline-none hidden sm:block"
-                />
-              )}
+              {/* Model Name Input (Always visible on all screens, auto-detected or selectable) */}
+              <div className="sm:col-span-6">
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                    Model Name:
+                  </label>
+                  {manualModelInput ? (
+                    <span className="text-[9px] font-mono text-cyan-400 font-bold">Auto Matched</span>
+                  ) : (
+                    <span className="text-[9px] text-slate-500 font-mono">From Model Sheet</span>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <input
+                      type="text"
+                      list="elt-modal-model-list"
+                      value={manualModelInput}
+                      onChange={(e) => setManualModelInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          addScannedMachine(manualSerialInput, manualModelInput);
+                        }
+                      }}
+                      placeholder="Select or enter Model Name..."
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl font-mono text-xs font-bold text-cyan-300 placeholder-slate-500 focus:border-cyan-500 focus:outline-none"
+                    />
+                    <datalist id="elt-modal-model-list">
+                      {getAllModels().map((m, idx) => (
+                        <option key={`${m.materialCode}-${idx}`} value={m.modelName}>
+                          {m.modelName} ({m.materialCode})
+                        </option>
+                      ))}
+                    </datalist>
+                  </div>
 
-              <button
-                type="button"
-                onClick={() => addScannedMachine(manualSerialInput, manualModelInput)}
-                className="px-4 py-2 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-md shadow-cyan-950/50 transition-all cursor-pointer active:scale-95 shrink-0"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Add</span>
-              </button>
+                  <button
+                    type="button"
+                    onClick={() => addScannedMachine(manualSerialInput, manualModelInput)}
+                    className="px-3.5 py-2 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-md shadow-cyan-950/50 transition-all cursor-pointer active:scale-95 shrink-0"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Add</span>
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
 
-          {/* SCANNED MACHINES LIST (Matching Smog Scanner UI with prominent Sr. No. display) */}
+          {/* SCANNED MACHINES LIST (Matching Smog Scanner UI with prominent Sr. No. and Model display) */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <h3 className="text-xs font-extrabold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
@@ -1104,20 +1142,29 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                         {idx + 1}
                       </span>
                       <div className="min-w-0">
-                        {/* Prominent Sr. No. display matching user request */}
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-wider">
-                            Sr. No:
-                          </span>
-                          <span className={`font-mono font-black text-sm tracking-wide ${
-                            m.error
-                              ? 'text-rose-300'
-                              : selectedProcess === 'SEND_ELT'
-                              ? 'text-cyan-300'
-                              : 'text-emerald-300'
-                          }`}>
-                            {m.serialNumber}
-                          </span>
+                        {/* Prominent Sr. No. & Model Name display */}
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <div className="flex items-center gap-1">
+                            <span className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-wider">
+                              Sr. No:
+                            </span>
+                            <span className={`font-mono font-black text-sm tracking-wide ${
+                              m.error
+                                ? 'text-rose-300'
+                                : selectedProcess === 'SEND_ELT'
+                                ? 'text-cyan-300'
+                                : 'text-emerald-300'
+                            }`}>
+                              {m.serialNumber}
+                            </span>
+                          </div>
+
+                          {/* Prominent Model Name Badge */}
+                          <div className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-cyan-950/80 border border-cyan-800/80 text-xs font-bold text-cyan-300 shadow-sm">
+                            <span className="text-[10px] font-mono text-slate-400 uppercase font-semibold">Model:</span>
+                            <span className="font-mono font-black text-white">{m.modelName || '—'}</span>
+                          </div>
+
                           <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded border ${
                             m.error
                               ? 'bg-rose-950 border-rose-800 text-rose-400'
@@ -1129,18 +1176,15 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                           </span>
                         </div>
 
-                        {/* Model & Prefix Information */}
-                        <div className="flex items-center gap-2 text-[11px] text-slate-400 mt-0.5 flex-wrap">
-                          <span>
-                            Model: <strong className="text-slate-200 font-medium">{m.modelName || '—'}</strong>
-                          </span>
+                        {/* Prefix & ELT Information */}
+                        <div className="flex items-center gap-2 text-[11px] text-slate-400 mt-1 flex-wrap">
                           {m.materialCode && (
-                            <span className="font-mono text-[10px] text-slate-400 bg-slate-900 px-1 py-0.2 rounded border border-slate-800">
-                              Prefix: {m.materialCode}
+                            <span className="font-mono text-[10px] text-slate-300 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800">
+                              Prefix: <strong className="text-slate-200">{m.materialCode}</strong>
                             </span>
                           )}
                           {m.originalELTDateTime && (
-                            <span className="font-mono text-[10px] text-emerald-400 bg-emerald-950/60 px-1 py-0.2 rounded border border-emerald-800/60">
+                            <span className="font-mono text-[10px] text-emerald-400 bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-800/60">
                               ELT: {m.originalELTDateTime}
                             </span>
                           )}

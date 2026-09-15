@@ -26,7 +26,8 @@ import {
   Play,
   PauseCircle,
   Power,
-  Box
+  Box,
+  Hourglass
 } from 'lucide-react';
 import { Unit, ActivityLog, LabNotification, ProtoUnit, FieldUnit, PpUnit } from '../../types';
 import { getActiveLabShift, LAB_SHIFTS } from '../../services/shiftStore';
@@ -51,7 +52,9 @@ import {
 import { getProtoUnits, subscribeProtoUnitStore } from '../../services/protoUnitStore';
 import { getPpUnits, subscribePpUnitStore, calculatePpUnitMetrics } from '../../services/ppUnitStore';
 import { getFieldUnits, subscribeFieldUnitStore } from '../../services/fieldUnitStore';
-import { getSmogUnits } from '../Smog/SmogModule';
+import { getSmogUnits, subscribeSmogUnits, LeakUnitRecord } from '../Smog/SmogModule';
+import { getSmogQtyRecords, subscribeSmogQtyRecords, SmogQtyRecord } from '../../services/smogQtyStore';
+import { getSmogExtraMetrics, subscribeSmogExtraMetrics, SmogExtraMetrics } from '../../services/smogExtraStore';
 import { extractYearAndMonth } from '../../utils/dateFormatter';
 import { calculateRemainingDays, isUnitOverdue } from '../../services/unitStore';
 
@@ -155,16 +158,24 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const [protoUnits, setProtoUnits] = useState<ProtoUnit[]>(() => getProtoUnits());
   const [ppUnits, setPpUnits] = useState<PpUnit[]>(() => getPpUnits());
   const [fieldUnits, setFieldUnits] = useState<FieldUnit[]>(() => getFieldUnits());
-  const [smogUnits, setSmogUnits] = useState<any[]>(() => getSmogUnits());
+  const [smogUnits, setSmogUnits] = useState<LeakUnitRecord[]>(() => getSmogUnits());
+  const [smogQtyRecords, setSmogQtyRecords] = useState<SmogQtyRecord[]>(() => getSmogQtyRecords());
+  const [smogExtra, setSmogExtra] = useState<SmogExtraMetrics>(() => getSmogExtraMetrics());
 
   useEffect(() => {
     const unsubProto = subscribeProtoUnitStore(() => setProtoUnits(getProtoUnits()));
     const unsubPp = subscribePpUnitStore(() => setPpUnits(getPpUnits()));
     const unsubField = subscribeFieldUnitStore(() => setFieldUnits(getFieldUnits()));
+    const unsubSmog = subscribeSmogUnits((units) => setSmogUnits(units));
+    const unsubSmogQty = subscribeSmogQtyRecords((records) => setSmogQtyRecords(records));
+    const unsubSmogExtra = subscribeSmogExtraMetrics((metrics) => setSmogExtra(metrics));
     return () => {
       unsubProto();
       unsubPp();
       unsubField();
+      unsubSmog();
+      unsubSmogQty();
+      unsubSmogExtra();
     };
   }, []);
 
@@ -343,40 +354,70 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       };
     } else {
       // Smog Section
-      const filtered = filterListByYearMonth(smogUnits, ['date', 'createdAt'], selectedYear, selectedMonth);
-      const total = filtered.length;
-      const live = filtered.filter(u => u.status === 'normal' && u.smogLevelPpm < 30).length;
-      const finished = filtered.filter(u => u.status === 'normal' || u.filterEfficiencyPercent >= 90).length;
-      const stop = filtered.filter(u => u.status === 'warning' || u.status === 'hazard').length;
+      const filtered = filterListByYearMonth(smogUnits, ['date', 'smogDate', 'productionDate', 'createdAt'], selectedYear, selectedMonth);
+      const totalSuspect = filtered.reduce((sum: number, r: any) => sum + (r.suspectCount || (r.serialNumbers ? r.serialNumbers.length : 0)), 0);
+      const totalActual = filtered.reduce((sum: number, r: any) => sum + (r.actualCount || (r.passedSerials ? r.passedSerials.length : 0)), 0);
+      const filteredQty = filterListByYearMonth(smogQtyRecords, ['date', 'createdAt'], selectedYear, selectedMonth);
+      const totalSmogQty = filteredQty.reduce((sum: number, r: any) => sum + (Number(r.smogQty) || 0), 0);
 
       const monthly = months.map(m => {
-        const mList = filterListByYearMonth(smogUnits, ['date', 'createdAt'], selectedYear, m);
+        const mList = filterListByYearMonth(smogUnits, ['date', 'smogDate', 'productionDate', 'createdAt'], selectedYear, m);
+        const mQtyList = filterListByYearMonth(smogQtyRecords, ['date', 'createdAt'], selectedYear, m);
+        const mSuspect = mList.reduce((sum: number, r: any) => sum + (r.suspectCount || (r.serialNumbers ? r.serialNumbers.length : 0)), 0);
+        const mActual = mList.reduce((sum: number, r: any) => sum + (r.actualCount || (r.passedSerials ? r.passedSerials.length : 0)), 0);
+        const mSmog = mQtyList.reduce((sum: number, r: any) => sum + (Number(r.smogQty) || 0), 0);
         return {
           month: m,
-          Total: mList.length,
-          Live: mList.filter(u => u.status === 'normal' && u.smogLevelPpm < 30).length,
-          Finished: mList.filter(u => u.status === 'normal' || u.filterEfficiencyPercent >= 90).length,
-          Stop: mList.filter(u => u.status === 'warning' || u.status === 'hazard').length,
+          Total: mSuspect,
+          Live: mActual,
+          Finished: mSmog,
+          Stop: Math.max(0, mSuspect - mActual),
         };
       });
 
       return {
         id: 'smog',
         title: 'Smog Section Analysis',
-        subtitle: 'Smoke Density, Filter Efficiency & Opacity AQI Sensor Analytics',
+        subtitle: 'Leak Unit Verification, Scanner History & Smog Qty Analytics',
         icon: Cloud,
         color: 'text-amber-400',
         activeBorder: 'border-amber-400 shadow-amber-950/80 bg-amber-950/30',
         activeBadge: 'bg-amber-950 text-amber-300 border-amber-700',
-        total,
-        stop,
-        live,
-        finished,
+        total: totalSuspect,
+        stop: Math.max(0, totalSuspect - totalActual),
+        live: totalActual,
+        finished: totalSmogQty,
         onNavigate: onNavigateToSmog,
         monthly
       };
     }
-  }, [activeSection, selectedYear, selectedMonth, protoUnits, ppUnits, fieldUnits, smogUnits, validUnits, onNavigateToProtoUnits, onNavigateToPpUnits, onNavigateToFieldUnits, onNavigateToRDUnits, onNavigateToSmog]);
+  }, [activeSection, selectedYear, selectedMonth, protoUnits, ppUnits, fieldUnits, smogUnits, smogQtyRecords, validUnits, onNavigateToProtoUnits, onNavigateToPpUnits, onNavigateToFieldUnits, onNavigateToRDUnits, onNavigateToSmog]);
+
+  const smogSectionMetrics = useMemo(() => {
+    const filtered = filterListByYearMonth(smogUnits, ['date', 'smogDate', 'productionDate', 'createdAt'], selectedYear, selectedMonth);
+    const totalSuspect = filtered.reduce((sum: number, r: any) => sum + (r.suspectCount || (r.serialNumbers ? r.serialNumbers.length : 0)), 0);
+    const totalActual = filtered.reduce((sum: number, r: any) => sum + (r.actualCount || (r.passedSerials ? r.passedSerials.length : 0)), 0);
+
+    const uniqueModels = Array.from(
+      new Set(
+        filtered
+          .map((r: any) => r.modelName?.trim())
+          .filter((m): m is string => Boolean(m && m.length > 0 && m !== 'SAC-1.5T-INV-3S' && m !== 'General Location' && m !== 'General Smog Unit'))
+      )
+    );
+    const modelQty = uniqueModels.length;
+
+    const filteredSmogQty = filterListByYearMonth(smogQtyRecords, ['date', 'createdAt'], selectedYear, selectedMonth);
+    const totalSmogQty = filteredSmogQty.reduce((sum: number, r: any) => sum + (Number(r.smogQty) || 0), 0);
+
+    return {
+      totalSuspect,
+      totalActual,
+      modelQty,
+      totalSmogQty,
+      recordsCount: filtered.length,
+    };
+  }, [smogUnits, smogQtyRecords, selectedYear, selectedMonth]);
 
   const ppMetrics = useMemo(() => {
     const filtered = filterListByYearMonth(ppUnits, ['createdAt', 'updatedAt'], selectedYear, selectedMonth) as PpUnit[];
@@ -918,8 +959,156 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </div>
             )}
           </div>
+        ) : activeSection === 'smog' ? (
+          /* Smog Section Cards (TOTAL SUSPECT, TOTAL LEAK, MODEL QTY, SMOG QTY, PRO. QTY, SMOG PENDING QTY) */
+          <div className="space-y-3">
+            {/* Row 1 & 2: Primary Smog KPI Cards */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-3.5">
+              {/* Card 1: TOTAL SUSPECT */}
+              <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-900/90 border border-slate-800/90 shadow-sm relative overflow-hidden group hover:border-amber-500/40 transition-all">
+                <div className="absolute top-0 right-0 w-20 h-20 bg-amber-500/10 rounded-full blur-xl pointer-events-none" />
+                <span className="text-[10px] sm:text-[11px] font-mono text-amber-400 uppercase tracking-wider block font-bold">
+                  TOTAL SUSPECT
+                </span>
+                <div className="flex items-baseline gap-2 mt-1.5">
+                  <span className="text-2xl sm:text-3xl font-black text-amber-400 font-mono">
+                    {smogSectionMetrics.totalSuspect}
+                  </span>
+                  <span className="text-[10px] sm:text-xs text-slate-400 font-mono">Sr. No.</span>
+                </div>
+                <div className="mt-2 text-[9px] sm:text-[10px] text-slate-400 font-mono flex items-center justify-between">
+                  <span>Target Verification</span>
+                  <span className="text-amber-400 font-bold">{smogSectionMetrics.recordsCount} Records</span>
+                </div>
+              </div>
+
+              {/* Card 2: TOTAL LEAK */}
+              <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-900/90 border border-slate-800/90 shadow-sm relative overflow-hidden group hover:border-emerald-500/40 transition-all">
+                <div className="absolute top-0 right-0 w-20 h-20 bg-emerald-500/10 rounded-full blur-xl pointer-events-none" />
+                <span className="text-[10px] sm:text-[11px] font-mono text-emerald-400 uppercase tracking-wider block font-bold">
+                  TOTAL LEAK
+                </span>
+                <div className="flex items-baseline gap-2 mt-1.5">
+                  <span className="text-2xl sm:text-3xl font-black text-emerald-400 font-mono">
+                    {smogSectionMetrics.totalActual}
+                  </span>
+                  <span className="text-[10px] sm:text-xs text-emerald-300/90 font-mono">Verified</span>
+                </div>
+                <div className="mt-2 text-[9px] sm:text-[10px] text-slate-400 font-mono flex items-center justify-between">
+                  <span>Passed Status</span>
+                  <span className="text-emerald-400 font-bold">
+                    {smogSectionMetrics.totalSuspect > 0
+                      ? `${Math.round((smogSectionMetrics.totalActual / smogSectionMetrics.totalSuspect) * 100)}% Pass`
+                      : '100%'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Card 3: MODEL QTY */}
+              <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-900/90 border border-slate-800/90 shadow-sm relative overflow-hidden group hover:border-cyan-500/40 transition-all">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] sm:text-[11px] font-mono text-cyan-400 uppercase tracking-wider block font-bold">
+                    MODEL QTY
+                  </span>
+                  <Layers className="w-3.5 h-3.5 text-cyan-400/80" />
+                </div>
+                <div className="flex items-baseline gap-2 mt-1.5">
+                  <span className="text-2xl sm:text-3xl font-black text-cyan-300 font-mono">
+                    {smogSectionMetrics.modelQty}
+                  </span>
+                  <span className="text-[10px] sm:text-xs text-slate-400 font-mono">
+                    {smogSectionMetrics.modelQty === 1 ? 'Model' : 'Models'} Scanned
+                  </span>
+                </div>
+                <div className="mt-2 text-[9px] sm:text-[10px] text-slate-400 font-mono flex items-center justify-between">
+                  <span>Scanner Data</span>
+                  <span className="text-cyan-400 font-semibold">{smogSectionMetrics.modelQty} Unique</span>
+                </div>
+              </div>
+
+              {/* Card 4: SMOG QTY */}
+              <div 
+                onClick={onNavigateToSmog}
+                className="p-3.5 sm:p-4 rounded-2xl bg-slate-900/90 border border-slate-800/90 shadow-sm hover:border-purple-500/50 transition-all cursor-pointer group relative overflow-hidden"
+                title="Click to open Smog Section"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] sm:text-[11px] font-mono text-purple-400 uppercase tracking-wider block font-bold">
+                    SMOG QTY
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <span className="text-[9px] text-purple-400/90 font-mono group-hover:underline">Upload +</span>
+                    <Cloud className="w-3.5 h-3.5 text-purple-400/80" />
+                  </div>
+                </div>
+                <div className="flex items-baseline gap-2 mt-1.5">
+                  <span className="text-2xl sm:text-3xl font-black text-purple-300 font-mono">
+                    {smogSectionMetrics.totalSmogQty}
+                  </span>
+                  <span className="text-[10px] sm:text-xs text-slate-400 font-mono">
+                    {selectedMonth === 'All' ? selectedYear : `${selectedMonth} ${selectedYear}`}
+                  </span>
+                </div>
+                <div className="mt-2 text-[9px] sm:text-[10px] text-slate-500 font-mono flex items-center justify-between">
+                  <span>Shift: All</span>
+                  <span className="text-purple-400 font-bold group-hover:underline flex items-center gap-0.5">
+                    Open Form →
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Row 3: Pro. Qty & Smog Pending Qty (Hides if 0, Shows if non-zero) */}
+            {(smogExtra.proQty !== 0 || smogExtra.smogPendingQty !== 0) && (
+              <div className={`grid ${smogExtra.proQty !== 0 && smogExtra.smogPendingQty !== 0 ? 'grid-cols-2' : 'grid-cols-1'} gap-3 sm:gap-3.5 animate-in fade-in duration-200`}>
+                {/* Pro. Qty Card */}
+                {smogExtra.proQty !== 0 && (
+                  <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-900/90 border border-slate-800/90 shadow-sm relative overflow-hidden group hover:border-blue-500/40 transition-all">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] sm:text-[11px] font-mono text-blue-400 uppercase tracking-wider block font-bold">
+                        PRO. QTY
+                      </span>
+                      <Boxes className="w-3.5 h-3.5 text-blue-400/80" />
+                    </div>
+                    <div className="flex items-baseline gap-2 mt-1.5">
+                      <span className="text-2xl sm:text-3xl font-black text-blue-400 font-mono">
+                        {smogExtra.proQty}
+                      </span>
+                      <span className="text-[10px] sm:text-xs text-slate-400 font-mono">Units</span>
+                    </div>
+                    <div className="mt-2 text-[9px] sm:text-[10px] text-slate-400 font-mono flex items-center justify-between">
+                      <span>Production Qty</span>
+                      <span className="text-blue-400 font-semibold">{smogExtra.proQty} Total</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Smog Pending Qty Card */}
+                {smogExtra.smogPendingQty !== 0 && (
+                  <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-900/90 border border-slate-800/90 shadow-sm relative overflow-hidden group hover:border-rose-500/40 transition-all">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] sm:text-[11px] font-mono text-rose-400 uppercase tracking-wider block font-bold">
+                        SMOG PENDING QTY
+                      </span>
+                      <Hourglass className="w-3.5 h-3.5 text-rose-400/80" />
+                    </div>
+                    <div className="flex items-baseline gap-2 mt-1.5">
+                      <span className="text-2xl sm:text-3xl font-black text-rose-400 font-mono">
+                        {smogExtra.smogPendingQty}
+                      </span>
+                      <span className="text-[10px] sm:text-xs text-slate-400 font-mono">Pending</span>
+                    </div>
+                    <div className="mt-2 text-[9px] sm:text-[10px] text-slate-400 font-mono flex items-center justify-between">
+                      <span>Inspection Queue</span>
+                      <span className="text-rose-400 font-semibold">{smogExtra.smogPendingQty} Remaining</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         ) : (
-          /* Standard 4 Cards for non-PP sections (Proto, Field, R&D, SMOG) */
+          /* Standard 4 Cards for non-PP sections (Proto, Field, R&D) */
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-3.5">
             {/* Card 1: Total Units */}
             <div className="p-3.5 sm:p-4 rounded-xl bg-gradient-to-br from-slate-900/90 via-slate-950 to-slate-950 border border-cyan-500/30 hover:border-cyan-400 shadow-[0_4px_15px_rgba(6,182,212,0.1)] hover:shadow-[0_0_20px_rgba(6,182,212,0.2)] flex flex-col justify-between relative overflow-hidden group transition-all duration-300 hover:-translate-y-0.5">

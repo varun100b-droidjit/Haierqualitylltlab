@@ -3,7 +3,7 @@ import { db, collection, doc, setDoc, deleteDoc, getDocs, onSnapshot } from './f
 export interface LeakUnitRecordForFirebase {
   id: string;
   smogPerson: string;
-  shift: 'A' | 'B' | 'C';
+  shift: 'A' | 'B' | string;
   modelName: string;
   serialNumbers: string[];
   passedSerials: string[];
