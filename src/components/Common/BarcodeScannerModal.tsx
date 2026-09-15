@@ -64,12 +64,12 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
   // Process Selector: Initial Screen
   const [selectedProcess, setSelectedProcess] = useState<ScannerProcess>('SEND_ELT');
 
-  // Dynamic Machine Rows for SEND ELT (Each row has Model Name and Series No. text boxes)
-  const [machineRows, setMachineRows] = useState<MachineEntryRow[]>([
-    { id: 'row-1', serialNumber: '', modelName: '', materialCode: '', prefix: '', matchStatus: 'idle' }
-  ]);
-  const [activeRowId, setActiveRowId] = useState<string>('row-1');
-  const activeRowIdRef = useRef<string>('row-1');
+  // Scanned Machines List
+  const [machineRows, setMachineRows] = useState<MachineEntryRow[]>([]);
+  const [manualSerialInput, setManualSerialInput] = useState<string>('');
+  const [manualModelInput, setManualModelInput] = useState<string>('');
+  const [activeRowId, setActiveRowId] = useState<string>('');
+  const activeRowIdRef = useRef<string>('');
   useEffect(() => {
     activeRowIdRef.current = activeRowId;
   }, [activeRowId]);
@@ -91,7 +91,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
   const lastScannedBarcodeRef = useRef<string>('');
   const lastScanTimeRef = useRef<number>(0);
   const isProcessingScanRef = useRef<boolean>(false);
-  const [scanFeedbackToast, setScanFeedbackToast] = useState<{ serial: string; model: string } | null>(null);
+  const [scanFeedbackToast, setScanFeedbackToast] = useState<{ serial: string; model: string; isError?: boolean } | null>(null);
   const toastTimeoutRef = useRef<any>(null);
 
   const selectedProcessRef = useRef<ScannerProcess>(selectedProcess);
@@ -145,6 +145,37 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
       osc.stop(audioCtx.currentTime + 0.15);
       if (typeof navigator !== 'undefined' && navigator.vibrate) {
         navigator.vibrate([40, 30, 40]);
+      }
+    } catch {
+      // AudioContext safe fallback
+    }
+  };
+
+  const playRejectBeep = () => {
+    try {
+      if (!audioCtxRef.current || audioCtxRef.current.state === 'closed') {
+        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+        if (AudioCtx) {
+          audioCtxRef.current = new AudioCtx();
+        }
+      }
+      const audioCtx = audioCtxRef.current;
+      if (!audioCtx) return;
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume().catch(() => {});
+      }
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(220, audioCtx.currentTime);
+      gain.gain.setValueAtTime(0.18, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.3);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.3);
+      if (typeof navigator !== 'undefined' && navigator.vibrate) {
+        navigator.vibrate([100, 50, 100]);
       }
     } catch {
       // AudioContext safe fallback
@@ -397,6 +428,8 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
     isProcessingScanRef.current = false;
     setScanFeedbackToast(null);
     if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+    setManualSerialInput('');
+    setManualModelInput('');
     setScannedSerial('');
     setDetectedModelName('');
     setDetectedPrefix('');
@@ -406,166 +439,52 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
     setBsrErrorMessage('');
     setBsrFoundRecord(null);
     setSuccessBanner(null);
-    const initialId = `row-${Date.now()}`;
-    setMachineRows([
-      { id: initialId, serialNumber: '', modelName: '', materialCode: '', prefix: '', matchStatus: 'idle' }
-    ]);
-    setActiveRowId(initialId);
-    activeRowIdRef.current = initialId;
+    setMachineRows([]);
+    setActiveRowId('');
+    activeRowIdRef.current = '';
   };
 
-  // Dynamically Add New Machine Box (+) for next machine scan
-  // Stacking: Newest at the top, older scans underneath (1st scan at the bottom)
-  const handleAddNewRow = () => {
-    // Reset scanner lock so camera can immediately scan this new slot
+  // Clear all scanned machines in current session
+  const handleClearAll = () => {
     lastScannedBarcodeRef.current = '';
     isProcessingScanRef.current = false;
-
-    // If top row is already empty, focus on it
-    if (machineRows.length > 0 && !machineRows[0].serialNumber) {
-      setActiveRowId(machineRows[0].id);
-      activeRowIdRef.current = machineRows[0].id;
-      setBatchError(null);
-      return;
-    }
-
-    const newId = `row-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    setMachineRows(prev => [
-      { id: newId, serialNumber: '', modelName: '', materialCode: '', prefix: '', matchStatus: 'idle' },
-      ...prev
-    ]);
-    setActiveRowId(newId);
-    activeRowIdRef.current = newId;
+    setScanFeedbackToast(null);
+    setMachineRows([]);
     setBatchError(null);
   };
 
-  // Remove or clear a machine row
+  // Remove individual machine row
   const handleDeleteRow = (id: string) => {
     lastScannedBarcodeRef.current = '';
     isProcessingScanRef.current = false;
-    setMachineRows(prev => {
-      if (prev.length <= 1) {
-        const freshId = `row-${Date.now()}`;
-        setActiveRowId(freshId);
-        activeRowIdRef.current = freshId;
-        return [{ id: freshId, serialNumber: '', modelName: '', materialCode: '', prefix: '', matchStatus: 'idle' }];
-      }
-      const filtered = prev.filter(r => r.id !== id);
-      if (activeRowIdRef.current === id && filtered.length > 0) {
-        const nextTarget = filtered.find(r => !r.serialNumber) || filtered[0];
-        setActiveRowId(nextTarget.id);
-        activeRowIdRef.current = nextTarget.id;
-      }
-      return filtered;
-    });
+    setMachineRows(prev => prev.filter(r => r.id !== id));
   };
 
-  // Select row as active scan target and immediately unblock camera scanner for it
-  const handleSelectActiveRow = (id: string) => {
-    setActiveRowId(id);
-    activeRowIdRef.current = id;
-    lastScannedBarcodeRef.current = '';
-    isProcessingScanRef.current = false;
-  };
-
-  // Update Series No. in a machine row (and auto-match Model Name from Model Sheet or ELT Record)
-  const handleUpdateRowSerial = (id: string, rawSerial: string) => {
+  // Add scanned machine to list (matching Smog Scanner pattern)
+  const addScannedMachine = (rawSerial: string, explicitModel?: string) => {
+    if (!rawSerial) return;
     const cleanSerial = rawSerial.trim().toUpperCase();
-    const currentProcess = selectedProcessRef.current;
+    if (!cleanSerial) return;
 
-    let modelName = '';
-    let materialCode = '';
-    let prefix = '';
-    let matchStatus: 'idle' | 'matched' | 'not_found' = 'idle';
-    let error: string | undefined = undefined;
-    let originalELTDateTime: string | undefined = undefined;
-
-    if (currentProcess === 'SEND_ELT') {
-      const prefix9 = cleanSerial.length >= 9 ? cleanSerial.slice(0, 9) : cleanSerial;
-      prefix = prefix9;
-      materialCode = prefix9;
-
-      if (cleanSerial.length >= 9) {
-        const matched = findModelByPrefix(prefix9);
-        if (matched && matched.modelName) {
-          modelName = matched.modelName;
-          matchStatus = 'matched';
-        } else {
-          matchStatus = 'not_found';
-          error = `Prefix "${prefix9}" not found in Model Sheet`;
-        }
-      }
-
-      if (cleanSerial.length > 0 && findInELTRecords(cleanSerial)) {
-        error = `Already registered in ELT Record!`;
-      }
-    } else {
-      // RETURN_BSR: Lookup machine in ELT Records
-      if (cleanSerial.length > 0) {
-        const existingInELT = findInELTRecords(cleanSerial);
-        if (existingInELT) {
-          modelName = existingInELT.modelName;
-          materialCode = existingInELT.materialCode;
-          prefix = existingInELT.materialCode;
-          matchStatus = 'matched';
-          originalELTDateTime = `${existingInELT.eltDate} ${existingInELT.eltTime}`;
-        } else {
-          matchStatus = 'not_found';
-          error = 'Serial Number not found in ELT Record';
-        }
-      }
-    }
-
-    setMachineRows(prev => prev.map(r => {
-      if (r.id === id) {
-        return {
-          ...r,
-          serialNumber: cleanSerial,
-          prefix,
-          materialCode,
-          modelName,
-          matchStatus,
-          originalELTDateTime,
-          error
-        };
-      }
-      return r;
-    }));
-  };
-
-  // Process Barcode Scanned (from camera or manual barcode input)
-  const handleBarcodeScanned = (rawBarcode: string) => {
-    if (!rawBarcode) return;
-    const cleanBarcode = rawBarcode.trim().toUpperCase();
-    if (!cleanBarcode) return;
-
-    const now = Date.now();
-
-    // 1. Prevent duplicate spam of the exact same barcode while machine remains in camera view
-    if (cleanBarcode === lastScannedBarcodeRef.current && now - lastScanTimeRef.current < 2500) {
+    // RULE: Barcode MUST start with 'A'
+    if (!cleanSerial.startsWith('A')) {
+      playRejectBeep();
+      setBatchError(`Invalid Barcode "${cleanSerial}": Only barcodes starting with 'A' are accepted.`);
+      if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+      setScanFeedbackToast({
+        serial: cleanSerial,
+        model: "Rejected: Must start with 'A'",
+        isError: true
+      });
+      toastTimeoutRef.current = setTimeout(() => {
+        setScanFeedbackToast(null);
+      }, 3000);
       return;
     }
 
-    // 2. Throttle: at least 600ms between any scans to allow state and camera decode stream to settle
-    if (isProcessingScanRef.current || now - lastScanTimeRef.current < 600) {
-      return;
-    }
-
-    isProcessingScanRef.current = true;
-    lastScanTimeRef.current = now;
-    lastScannedBarcodeRef.current = cleanBarcode;
-
-    // Release scan lock after 500ms
-    setTimeout(() => {
-      isProcessingScanRef.current = false;
-    }, 500);
-
-    playScanBeep();
-    setSuccessBanner(null);
-
     const currentProcess = selectedProcessRef.current;
 
-    let modelName = '';
+    let modelName = explicitModel?.trim() || '';
     let materialCode = '';
     let prefix = '';
     let matchStatus: 'idle' | 'matched' | 'not_found' = 'idle';
@@ -573,26 +492,28 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
     let originalELTDateTime: string | undefined = undefined;
 
     if (currentProcess === 'SEND_ELT') {
-      // 1. EXTRACT FIRST 9 CHARACTERS & LOOKUP MODEL MASTER
-      const prefix9 = cleanBarcode.length >= 9 ? cleanBarcode.slice(0, 9) : cleanBarcode;
+      const prefix9 = cleanSerial.length >= 9 ? cleanSerial.slice(0, 9) : cleanSerial;
       prefix = prefix9;
       materialCode = prefix9;
       const matched = findModelByPrefix(prefix9);
 
       if (matched && matched.modelName) {
-        modelName = matched.modelName;
+        modelName = modelName || matched.modelName;
+        materialCode = matched.materialCode || prefix9;
+        matchStatus = 'matched';
+      } else if (modelName) {
         matchStatus = 'matched';
       } else {
         matchStatus = 'not_found';
         rowError = `Prefix "${prefix9}" not in Model Sheet`;
       }
 
-      if (findInELTRecords(cleanBarcode)) {
+      if (findInELTRecords(cleanSerial)) {
         rowError = `Already in ELT Record!`;
       }
     } else {
       // RETURN BSR PROCESS: Check in ELT Records
-      const existingInELT = findInELTRecords(cleanBarcode);
+      const existingInELT = findInELTRecords(cleanSerial);
       if (existingInELT) {
         modelName = existingInELT.modelName;
         materialCode = existingInELT.materialCode;
@@ -605,64 +526,91 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
       }
     }
 
-    setMachineRows(prev => {
-      // Check duplicate within the active batch
-      if (prev.some(r => r.serialNumber === cleanBarcode)) {
-        setBatchError(`Machine ${cleanBarcode} already scanned in this list.`);
-        return prev;
-      }
-
-      // Check if activeRow is empty, or find the first empty row
-      const currentActiveId = activeRowIdRef.current;
-      let targetIndex = prev.findIndex(r => r.id === currentActiveId && !r.serialNumber);
-      if (targetIndex === -1) {
-        targetIndex = prev.findIndex(r => !r.serialNumber);
-      }
-
-      const filledRow: MachineEntryRow = {
-        id: targetIndex !== -1 ? prev[targetIndex].id : `row-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        serialNumber: cleanBarcode,
-        prefix,
-        materialCode,
-        modelName,
-        matchStatus,
-        originalELTDateTime,
-        error: rowError
-      };
-
-      // Exclude target row from existing list
-      const remainingRows = targetIndex !== -1
-        ? prev.filter((_, idx) => idx !== targetIndex)
-        : [...prev];
-
-      // Automatic next empty row for the subsequent machine scan!
-      // "Dost jab Scanner se 1st machine scan ho jaye tab automatic dusra Model Name Serial Aa jaye jisme Second Scanner ka data Capture kre"
-      // "Scanner data jo pahla Scan hoga wo niche second usme upar 3rd Uske Upar aise rahega"
-      const nextEmptyRowId = `row-${Date.now() + 1}-${Math.random().toString(36).slice(2, 6)}`;
-      const nextEmptyRow: MachineEntryRow = {
-        id: nextEmptyRowId,
-        serialNumber: '',
-        modelName: '',
-        materialCode: '',
-        prefix: '',
-        matchStatus: 'idle'
-      };
-
-      activeRowIdRef.current = nextEmptyRowId;
-      setActiveRowId(nextEmptyRowId);
-      setBatchError(null);
-
-      // Instant feedback toast over viewfinder
+    // Check duplicate in current batch
+    if (machineRows.some(r => r.serialNumber.trim().toUpperCase() === cleanSerial)) {
+      setBatchError(`Machine ${cleanSerial} already scanned in this list.`);
       if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
-      setScanFeedbackToast({ serial: cleanBarcode, model: modelName || 'Machine' });
+      setScanFeedbackToast({
+        serial: cleanSerial,
+        model: 'Duplicate in current list',
+        isError: true
+      });
+      toastTimeoutRef.current = setTimeout(() => setScanFeedbackToast(null), 2500);
+      return;
+    }
+
+    playScanBeep();
+    setSuccessBanner(null);
+    setBatchError(null);
+
+    const newItem: MachineEntryRow = {
+      id: `row-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      serialNumber: cleanSerial,
+      modelName,
+      materialCode,
+      prefix,
+      matchStatus,
+      originalELTDateTime,
+      error: rowError
+    };
+
+    setMachineRows(prev => [newItem, ...prev]);
+    setManualSerialInput('');
+    setManualModelInput('');
+
+    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+    setScanFeedbackToast({
+      serial: cleanSerial,
+      model: modelName || (currentProcess === 'SEND_ELT' ? 'ELT Unit' : 'BSR Return'),
+      isError: Boolean(rowError)
+    });
+    toastTimeoutRef.current = setTimeout(() => {
+      setScanFeedbackToast(null);
+    }, 2500);
+  };
+
+  // Process Barcode Scanned (from camera or gun)
+  const handleBarcodeScanned = (rawBarcode: string) => {
+    if (!rawBarcode) return;
+    const cleanBarcode = rawBarcode.trim().toUpperCase();
+    if (!cleanBarcode) return;
+
+    if (!cleanBarcode.startsWith('A')) {
+      playRejectBeep();
+      setBatchError(`Invalid Barcode "${cleanBarcode}": Only barcodes starting with 'A' are accepted.`);
+      if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+      setScanFeedbackToast({
+        serial: cleanBarcode,
+        model: "Rejected: Must start with 'A'",
+        isError: true
+      });
       toastTimeoutRef.current = setTimeout(() => {
         setScanFeedbackToast(null);
-      }, 2200);
+      }, 3000);
+      return;
+    }
 
-      // Stack: Next empty box at the VERY TOP (ready to scan),
-      // newly scanned unit directly below it, and earlier scans below that (1st scan at the bottom)
-      return [nextEmptyRow, filledRow, ...remainingRows];
-    });
+    const now = Date.now();
+
+    // 1. Prevent duplicate spam of the exact same barcode while in camera view
+    if (cleanBarcode === lastScannedBarcodeRef.current && now - lastScanTimeRef.current < 2200) {
+      return;
+    }
+
+    // 2. Throttle: at least 600ms between any scans
+    if (isProcessingScanRef.current || now - lastScanTimeRef.current < 600) {
+      return;
+    }
+
+    isProcessingScanRef.current = true;
+    lastScanTimeRef.current = now;
+    lastScannedBarcodeRef.current = cleanBarcode;
+
+    setTimeout(() => {
+      isProcessingScanRef.current = false;
+    }, 600);
+
+    addScannedMachine(cleanBarcode);
   };
 
   // SEND ELT: Submit all valid machines to Firebase
@@ -672,6 +620,13 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
     const filledRows = machineRows.filter(r => r.serialNumber.trim().length > 0);
     if (filledRows.length === 0) {
       setBatchError('Please scan or enter at least one machine Series No.');
+      return;
+    }
+
+    // RULE: Barcode MUST start with 'A'
+    const nonA = filledRows.find(r => !r.serialNumber.trim().toUpperCase().startsWith('A'));
+    if (nonA) {
+      setBatchError(`Machine "${nonA.serialNumber}": Only barcodes starting with 'A' are accepted.`);
       return;
     }
 
@@ -711,11 +666,9 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
       });
       if (res.success) {
         setSuccessBanner(`Successfully sent ${res.addedCount} machine(s) to ELT Record.`);
-        const freshId = `row-${Date.now()}`;
-        setMachineRows([
-          { id: freshId, serialNumber: '', modelName: '', materialCode: '', prefix: '', matchStatus: 'idle' }
-        ]);
-        setActiveRowId(freshId);
+        setMachineRows([]);
+        setManualSerialInput('');
+        setManualModelInput('');
 
         if (onSuccessNavigate) {
           setTimeout(() => {
@@ -745,6 +698,13 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
       return;
     }
 
+    // RULE: Barcode MUST start with 'A'
+    const nonA = filledRows.find(r => !r.serialNumber.trim().toUpperCase().startsWith('A'));
+    if (nonA) {
+      setBatchError(`Machine "${nonA.serialNumber}": Only barcodes starting with 'A' are accepted.`);
+      return;
+    }
+
     // Validate that all machines exist in ELT Records
     const invalidRows = filledRows.filter(r => r.matchStatus !== 'matched' || !findInELTRecords(r.serialNumber.trim().toUpperCase()));
     if (invalidRows.length > 0) {
@@ -768,11 +728,9 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
       });
       if (res.success) {
         setSuccessBanner(`Successfully returned ${res.returnedCount} machine(s) to BSR.`);
-        const freshId = `row-${Date.now()}`;
-        setMachineRows([
-          { id: freshId, serialNumber: '', modelName: '', materialCode: '', prefix: '', matchStatus: 'idle' }
-        ]);
-        setActiveRowId(freshId);
+        setMachineRows([]);
+        setManualSerialInput('');
+        setManualModelInput('');
 
         if (onSuccessNavigate) {
           setTimeout(() => {
@@ -800,16 +758,16 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-md overflow-y-auto animate-in fade-in duration-200">
-      <div className="relative w-full max-w-xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl shadow-cyan-950/40 text-slate-100 overflow-hidden my-auto max-h-[95vh] flex flex-col">
+      <div className="relative w-full max-w-xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl shadow-cyan-950/40 text-slate-100 overflow-hidden my-auto max-h-[84vh] flex flex-col">
         
         {/* Modal Top Header */}
-        <div className="flex items-center justify-between px-5 py-4 bg-slate-950/80 border-b border-slate-800 shrink-0">
+        <div className="flex items-center justify-between px-4 py-2.5 sm:px-5 sm:py-3 bg-slate-950/80 border-b border-slate-800 shrink-0">
           <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-cyan-600 to-blue-600 flex items-center justify-center text-white shadow-lg shadow-cyan-950/50">
-              <ScanBarcode className="w-5 h-5" />
+            <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-cyan-600 to-blue-600 flex items-center justify-center text-white shadow-lg shadow-cyan-950/50">
+              <ScanBarcode className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="text-base font-extrabold text-white tracking-wide flex items-center gap-2 flex-wrap">
+              <h2 className="text-sm sm:text-base font-extrabold text-white tracking-wide flex items-center gap-2 flex-wrap">
                 Barcode / QR Scanner
                 <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded-full bg-cyan-950 text-cyan-400 border border-cyan-800/80">
                   LLT Station
@@ -819,7 +777,6 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                   ID: <strong className="text-cyan-300 font-bold">{operatorUserId}</strong>
                 </span>
               </h2>
-              <p className="text-[11px] text-slate-400">Mobile real-time scanner for ELT &amp; BSR tracking</p>
             </div>
           </div>
 
@@ -833,27 +790,27 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
         </div>
 
         {/* Scrollable Content Body */}
-        <div className="p-4 sm:p-5 overflow-y-auto space-y-4 flex-1">
+        <div className="p-3 sm:p-4 overflow-y-auto space-y-3 flex-1">
           
           {/* STEP 1: Process Selection Buttons (SEND ELT vs RETURN BSR) */}
           <div>
-            <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">
+            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">
               Select Workflow Process:
             </label>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-2 gap-2.5">
               <button
                 type="button"
                 onClick={() => {
                   setSelectedProcess('SEND_ELT');
                   resetForm();
                 }}
-                className={`py-3 px-4 rounded-xl text-xs sm:text-sm font-extrabold flex items-center justify-center gap-2 transition-all cursor-pointer border ${
+                className={`py-2 px-3 rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all cursor-pointer border ${
                   selectedProcess === 'SEND_ELT'
                     ? 'bg-gradient-to-r from-cyan-600 to-blue-600 text-white border-cyan-400 shadow-lg shadow-cyan-950/80 ring-2 ring-cyan-400/40'
                     : 'bg-slate-950/80 text-slate-400 hover:text-slate-200 border-slate-800 hover:border-slate-700'
                 }`}
               >
-                <Send className="w-4 h-4 text-cyan-300" />
+                <Send className="w-3.5 h-3.5 text-cyan-300" />
                 <span>1. SEND ELT</span>
               </button>
 
@@ -863,13 +820,13 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                   setSelectedProcess('RETURN_BSR');
                   resetForm();
                 }}
-                className={`py-3 px-4 rounded-xl text-xs sm:text-sm font-extrabold flex items-center justify-center gap-2 transition-all cursor-pointer border ${
+                className={`py-2 px-3 rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all cursor-pointer border ${
                   selectedProcess === 'RETURN_BSR'
                     ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white border-emerald-400 shadow-lg shadow-emerald-950/80 ring-2 ring-emerald-400/40'
                     : 'bg-slate-950/80 text-slate-400 hover:text-slate-200 border-slate-800 hover:border-slate-700'
                 }`}
               >
-                <RotateCcw className="w-4 h-4 text-emerald-300" />
+                <RotateCcw className="w-3.5 h-3.5 text-emerald-300" />
                 <span>2. RETURN BSR</span>
               </button>
             </div>
@@ -877,62 +834,81 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
 
           {/* Success Banner Alert */}
           {successBanner && (
-            <div className="p-3 bg-emerald-950/60 border border-emerald-500/80 rounded-xl flex items-center gap-2.5 text-xs text-emerald-200 animate-in fade-in">
+            <div className="p-2.5 bg-emerald-950/60 border border-emerald-500/80 rounded-xl flex items-center gap-2 text-xs text-emerald-200 animate-in fade-in">
               <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
               <span className="font-semibold">{successBanner}</span>
             </div>
           )}
 
-          {/* Real-Time Camera Viewfinder */}
-          <div className="relative rounded-xl overflow-hidden bg-slate-950 border border-slate-800 flex flex-col items-center">
-            {/* Viewfinder Relative Container */}
-            <div className="relative w-full min-h-[210px] sm:min-h-[240px] bg-slate-950 flex items-center justify-center overflow-hidden">
-              {/* Dedicated Html5Qrcode host container - strictly NO React children inside */}
+          {/* Real-Time Camera Viewfinder with Compact Height */}
+          <div className="relative rounded-2xl overflow-hidden bg-black border border-slate-800 flex flex-col items-center">
+            <div className="relative w-full h-[145px] sm:h-[165px] min-h-[145px] sm:min-h-[165px] bg-black flex items-center justify-center overflow-hidden">
+              {/* Dedicated Html5Qrcode host container */}
               <div 
                 id={scannerContainerId} 
-                className="w-full min-h-[210px] sm:min-h-[240px]"
+                className="w-full h-[145px] sm:h-[165px] min-h-[145px] sm:min-h-[165px] flex items-center justify-center overflow-hidden"
               />
+
+              {/* Scanning visual overlay with laser */}
+              {isCameraActive && (
+                <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center">
+                  <div className="w-[80%] max-w-[280px] h-20 sm:h-22 border-2 border-dashed border-cyan-400/90 rounded-xl relative overflow-hidden shadow-[0_0_25px_rgba(6,182,212,0.3)]">
+                    <div className="w-full h-1 bg-gradient-to-r from-transparent via-cyan-400 to-transparent absolute top-0 animate-[bounce_2s_infinite]" />
+                    <div className="absolute bottom-1 right-2 text-[9px] font-mono text-cyan-400 font-bold drop-shadow">
+                      Point at Barcode (Starts with 'A')
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Instant Scan Feedback Banner over camera */}
               {scanFeedbackToast && (
-                <div className="absolute top-2.5 inset-x-3 z-20 flex items-center justify-between p-2.5 bg-emerald-950/95 border border-emerald-500 rounded-xl shadow-xl backdrop-blur-xs text-emerald-200 text-xs animate-in slide-in-from-top-2 duration-150">
+                <div className={`absolute top-2.5 inset-x-3 z-20 flex items-center justify-between p-2 rounded-xl shadow-xl backdrop-blur-xs text-xs animate-in slide-in-from-top-2 duration-150 border ${
+                  scanFeedbackToast.isError
+                    ? 'bg-rose-950/95 border-rose-500 text-rose-200'
+                    : 'bg-emerald-950/95 border-emerald-500 text-emerald-200'
+                }`}>
                   <div className="flex items-center gap-2 min-w-0">
-                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping shrink-0" />
+                    <span className={`w-2 h-2 rounded-full shrink-0 ${
+                      scanFeedbackToast.isError ? 'bg-rose-400' : 'bg-emerald-400 animate-ping'
+                    }`} />
                     <div className="truncate">
                       <span className="font-mono font-black text-white">{scanFeedbackToast.serial}</span>
-                      <span className="text-emerald-300 ml-1.5 font-semibold">({scanFeedbackToast.model})</span>
+                      <span className={`ml-1.5 font-semibold ${
+                        scanFeedbackToast.isError ? 'text-rose-300' : 'text-emerald-300'
+                      }`}>
+                        ({scanFeedbackToast.model})
+                      </span>
                     </div>
                   </div>
-                  <span className="text-[10px] font-extrabold bg-emerald-900 text-emerald-300 px-2 py-0.5 rounded-md shrink-0 border border-emerald-700">
-                    Next Ready 🎯
+                  <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-md shrink-0 border ${
+                    scanFeedbackToast.isError
+                      ? 'bg-rose-900 text-rose-300 border-rose-700'
+                      : 'bg-emerald-900 text-emerald-300 border-emerald-700'
+                  }`}>
+                    {scanFeedbackToast.isError ? 'Rejected ⚠️' : 'Scanned ✓'}
                   </span>
                 </div>
               )}
 
               {/* Status & User-Action Overlay when camera is paused/inactive */}
               {!isCameraActive && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center p-4 bg-slate-950/85 backdrop-blur-xs text-center z-10">
+                <div className="absolute inset-0 flex flex-col items-center justify-center p-3 bg-slate-950/90 backdrop-blur-xs text-center z-10">
                   {isFileScanning ? (
                     <div className="flex flex-col items-center gap-2 text-cyan-400">
-                      <RefreshCw className="w-7 h-7 animate-spin" />
+                      <RefreshCw className="w-6 h-6 animate-spin" />
                       <span className="text-xs font-semibold">Decoding photo barcode...</span>
                     </div>
                   ) : (
                     <>
-                      <div className="w-11 h-11 rounded-2xl bg-cyan-950/80 border border-cyan-800 flex items-center justify-center text-cyan-400 mb-2 shadow-lg shadow-cyan-950/50">
-                        <Camera className="w-5 h-5" />
+                      <div className="w-9 h-9 rounded-xl bg-cyan-950/80 border border-cyan-800 flex items-center justify-center text-cyan-400 mb-2 shadow-lg shadow-cyan-950/50">
+                        <Camera className="w-4 h-4" />
                       </div>
-                      <p className="text-xs font-bold text-slate-200 mb-1">
-                        {cameraError ? 'Camera Standby / Permission' : 'Live Camera Ready'}
-                      </p>
-                      <p className="text-[11px] text-slate-400 max-w-xs mb-3.5 leading-relaxed">
-                        Tap below to start the camera scanner, or snap a photo of the barcode directly.
-                      </p>
                       <div className="flex flex-wrap items-center justify-center gap-2">
                         <button
                           type="button"
                           onClick={() => startCamera()}
-                          className="px-3 py-2 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-xs font-bold shadow-lg shadow-cyan-950/50 flex items-center gap-1.5 cursor-pointer active:scale-95 transition-transform"
+                          className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-xs font-bold shadow-lg shadow-cyan-950/50 flex items-center gap-1.5 cursor-pointer active:scale-95 transition-transform"
                         >
                           <Camera className="w-3.5 h-3.5" />
                           <span>Activate Camera</span>
@@ -940,10 +916,10 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                         <button
                           type="button"
                           onClick={() => fileInputRef.current?.click()}
-                          className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-1.5 cursor-pointer border border-slate-700 active:scale-95 transition-transform"
+                          className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-1.5 cursor-pointer border border-slate-700 active:scale-95 transition-transform"
                         >
                           <Upload className="w-3.5 h-3.5 text-cyan-400" />
-                          <span>Snap / Upload Photo</span>
+                          <span>Snap Photo</span>
                         </button>
                       </div>
                     </>
@@ -963,71 +939,51 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
             />
 
             {/* Camera Controls Bar */}
-            <div className="w-full px-3 py-2 bg-slate-950/90 border-t border-slate-800/80 flex items-center justify-between text-xs gap-2">
-              <div className="flex items-center gap-2 min-w-0">
+            <div className="w-full px-2.5 py-1.5 bg-slate-950/90 border-t border-slate-800/80 flex items-center justify-between text-xs gap-2">
+              <div className="flex items-center gap-1.5 min-w-0">
                 <span className={`w-2 h-2 rounded-full shrink-0 ${isCameraActive ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
-                <span className="text-slate-400 text-[11px] truncate">
-                  {isCameraActive ? 'Live Scanner Active' : 'Camera Standby'}
+                <span className="text-slate-400 text-[10px] truncate">
+                  {isCameraActive ? 'Live Camera Active' : 'Camera Standby'}
                 </span>
               </div>
 
               <div className="flex items-center gap-1.5">
-                {/* Ready Next / Anti-Stall reset button */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    lastScannedBarcodeRef.current = '';
-                    isProcessingScanRef.current = false;
-                    setBatchError(null);
-                    if (machineRows.length > 0) {
-                      const emptyTarget = machineRows.find(r => !r.serialNumber) || machineRows[0];
-                      setActiveRowId(emptyTarget.id);
-                      activeRowIdRef.current = emptyTarget.id;
-                    }
-                  }}
-                  className="px-2 py-1 rounded-lg bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-800 text-cyan-300 text-[11px] font-semibold flex items-center gap-1 transition-colors cursor-pointer"
-                  title="Ready for next scan / unblock scanner"
-                >
-                  <RefreshCw className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Ready Next</span>
-                </button>
-
                 {availableCameras.length > 1 && (
                   <button
                     type="button"
                     onClick={switchCamera}
-                    className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+                    className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-semibold flex items-center gap-1 transition-colors cursor-pointer"
                     title="Switch Lens"
                   >
-                    <SwitchCamera className="w-3.5 h-3.5 text-cyan-400" />
-                    <span className="hidden sm:inline">Switch</span>
+                    <SwitchCamera className="w-3 h-3 text-cyan-400" />
+                    <span>Switch</span>
                   </button>
                 )}
 
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+                  className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-semibold flex items-center gap-1 transition-colors cursor-pointer"
                   title="Take photo of barcode"
                 >
-                  <Upload className="w-3.5 h-3.5 text-cyan-400" />
-                  <span>Snap Photo</span>
+                  <Upload className="w-3 h-3 text-cyan-400" />
+                  <span>Snap</span>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => (isCameraActive ? stopCamera() : startCamera())}
-                  className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                  className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] font-semibold flex items-center gap-1 transition-colors cursor-pointer"
                 >
                   {isCameraActive ? (
                     <>
-                      <CameraOff className="w-3.5 h-3.5 text-rose-400" />
+                      <CameraOff className="w-3 h-3 text-rose-400" />
                       <span>Pause</span>
                     </>
                   ) : (
                     <>
-                      <Camera className="w-3.5 h-3.5 text-cyan-400" />
-                      <span>Restart</span>
+                      <Camera className="w-3 h-3 text-cyan-400" />
+                      <span>Start</span>
                     </>
                   )}
                 </button>
@@ -1037,379 +993,182 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
 
           {/* Camera Error / Permission Fallback Note */}
           {cameraError && (
-            <div className="p-3 bg-amber-950/40 border border-amber-800/60 rounded-xl text-xs text-amber-300 flex items-start justify-between gap-2.5">
+            <div className="p-2.5 bg-amber-950/40 border border-amber-800/60 rounded-xl text-xs text-amber-300 flex items-start justify-between gap-2">
               <div className="flex items-start gap-2">
                 <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
                 <div>
                   <p className="font-semibold">{cameraError}</p>
-                  <p className="text-[11px] text-amber-400/80 mt-0.5">
-                    You can also type the barcode into the textbox below or scan with a USB/Bluetooth scanner.
+                  <p className="text-[10px] text-amber-400/80 mt-0.5">
+                    You can type the barcode into the textbox below or scan with a USB/Bluetooth scanner.
                   </p>
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => startCamera()}
-                className="shrink-0 px-2.5 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/40 rounded-lg text-[11px] font-bold cursor-pointer transition-colors"
+                className="shrink-0 px-2 py-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/40 rounded-lg text-[10px] font-bold cursor-pointer transition-colors"
               >
                 Retry
               </button>
             </div>
           )}
 
-          {/* =================================================================
-              PROCESS 1: SEND ELT - DYNAMIC MACHINE BOXES
-              "jab bhi + ke button per click hoga tab model Name aur Serial No. 
-               Ka Text Box Add hoga agli machine Scanner ka data Capture krne ke liye"
-              ================================================================= */}
-          {selectedProcess === 'SEND_ELT' && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-extrabold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-                    <Layers className="w-3.5 h-3.5 text-cyan-400" />
-                    Machines to Send ({machineRows.length})
-                  </span>
-                  <span className="text-[10px] text-slate-500">
-                    Tap a box to make it the scan target
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleAddNewRow}
-                  className="px-2.5 py-1 bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 border border-cyan-500/40 rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer transition-colors"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Add Machine (+)</span>
-                </button>
+          {/* MANUAL / GUN SCANNER INPUT (Pattern identical to Smog Scanner) */}
+          <div className="p-3 rounded-2xl bg-slate-950/95 border border-slate-800 space-y-2 shadow-inner">
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+              Series No. (Barcode / Gun Input - Must start with 'A'):
+            </label>
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <input
+                  type="text"
+                  value={manualSerialInput}
+                  onChange={(e) => setManualSerialInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      addScannedMachine(manualSerialInput, manualModelInput);
+                    }
+                  }}
+                  placeholder="Scan with gun or type (e.g. A010834A0001)..."
+                  className="w-full pl-8 pr-3 py-2 bg-slate-900 border border-slate-800 rounded-xl font-mono text-xs text-white placeholder-slate-500 focus:border-cyan-500 focus:outline-none"
+                />
+                <ScanBarcode className="w-3.5 h-3.5 text-cyan-400 absolute left-2.5 top-2.5 pointer-events-none" />
               </div>
 
-              {/* Dynamic Machine Rows List */}
-              <div className="space-y-3 max-h-[380px] overflow-y-auto pr-1">
-                {machineRows.map((row, index) => {
-                  const isTarget = row.id === activeRowId;
-                  const filledBelow = machineRows.slice(index + 1).filter(r => r.serialNumber.trim()).length;
-                  const scanNumber = filledBelow + 1;
-                  const isFilled = Boolean(row.serialNumber.trim());
+              {selectedProcess === 'SEND_ELT' && (
+                <input
+                  type="text"
+                  value={manualModelInput}
+                  onChange={(e) => setManualModelInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      addScannedMachine(manualSerialInput, manualModelInput);
+                    }
+                  }}
+                  placeholder="Model (optional)"
+                  className="w-32 px-2.5 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:border-cyan-500 focus:outline-none hidden sm:block"
+                />
+              )}
 
-                  return (
-                    <div
-                      key={row.id}
-                      onClick={() => handleSelectActiveRow(row.id)}
-                      className={`p-3.5 rounded-xl border transition-all space-y-2.5 cursor-pointer ${
-                        isTarget
-                          ? 'bg-slate-950/90 border-cyan-500/80 ring-2 ring-cyan-500/20 shadow-lg shadow-cyan-950/40'
-                          : 'bg-slate-950/50 border-slate-800/80 hover:border-slate-700'
-                      }`}
-                    >
-                      {/* Row Header with Machine #, Scan Target badge, and Action (+) & Trash buttons */}
-                      <div className="flex items-center justify-between text-xs">
-                        <div className="flex items-center gap-2">
-                          <span className={`font-extrabold px-2 py-0.5 rounded-md text-[11px] border ${
-                            isFilled
-                              ? 'bg-slate-900 border-slate-800 text-white'
-                              : 'bg-cyan-950/70 border-cyan-800 text-cyan-300'
-                          }`}>
-                            {isFilled ? `Machine #${scanNumber}` : `Next Machine`}
+              <button
+                type="button"
+                onClick={() => addScannedMachine(manualSerialInput, manualModelInput)}
+                className="px-4 py-2 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-md shadow-cyan-950/50 transition-all cursor-pointer active:scale-95 shrink-0"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Add</span>
+              </button>
+            </div>
+          </div>
+
+          {/* SCANNED MACHINES LIST (Matching Smog Scanner UI with prominent Sr. No. display) */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-extrabold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                <Layers className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Scanned Machines ({machineRows.length} Units)</span>
+              </h3>
+              {machineRows.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleClearAll}
+                  className="text-[10px] text-slate-400 hover:text-rose-400 transition-colors cursor-pointer flex items-center gap-1 font-semibold"
+                >
+                  <Trash2 className="w-3 h-3" />
+                  Clear All
+                </button>
+              )}
+            </div>
+
+            {machineRows.length === 0 ? (
+              <div className="p-5 text-center rounded-2xl bg-slate-950/50 border border-dashed border-slate-800 text-slate-500 text-xs">
+                No machines scanned yet. Aim camera at machine barcode or enter Series No. above.
+              </div>
+            ) : (
+              <div className="space-y-2 max-h-44 sm:max-h-52 overflow-y-auto pr-1">
+                {machineRows.map((m, idx) => (
+                  <div
+                    key={m.id}
+                    className={`p-2.5 sm:p-3 rounded-xl bg-slate-950 border transition-all flex items-center justify-between gap-3 text-xs ${
+                      m.error
+                        ? 'border-rose-800/80 bg-rose-950/20'
+                        : selectedProcess === 'SEND_ELT'
+                        ? 'border-cyan-900/60 hover:border-cyan-700/80'
+                        : 'border-emerald-900/60 hover:border-emerald-700/80'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <span className="w-6 h-6 rounded-lg bg-slate-900 border border-slate-800 text-slate-400 font-mono text-[10px] font-bold flex items-center justify-center shrink-0">
+                        {idx + 1}
+                      </span>
+                      <div className="min-w-0">
+                        {/* Prominent Sr. No. display matching user request */}
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-wider">
+                            Sr. No:
                           </span>
-                          {isTarget && (
-                            <span className="font-bold text-cyan-400 text-[10px] flex items-center gap-1">
-                              <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping inline-block" />
-                              <span>{isFilled ? 'Active Target 🎯' : 'Ready for Scan 🎯'}</span>
+                          <span className={`font-mono font-black text-sm tracking-wide ${
+                            m.error
+                              ? 'text-rose-300'
+                              : selectedProcess === 'SEND_ELT'
+                              ? 'text-cyan-300'
+                              : 'text-emerald-300'
+                          }`}>
+                            {m.serialNumber}
+                          </span>
+                          <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded border ${
+                            m.error
+                              ? 'bg-rose-950 border-rose-800 text-rose-400'
+                              : selectedProcess === 'SEND_ELT'
+                              ? 'bg-cyan-950 border-cyan-800 text-cyan-400'
+                              : 'bg-emerald-950 border-emerald-800 text-emerald-400'
+                          }`}>
+                            {m.error ? 'Error ⚠️' : selectedProcess === 'SEND_ELT' ? 'Ready to ELT' : 'Ready to BSR'}
+                          </span>
+                        </div>
+
+                        {/* Model & Prefix Information */}
+                        <div className="flex items-center gap-2 text-[11px] text-slate-400 mt-0.5 flex-wrap">
+                          <span>
+                            Model: <strong className="text-slate-200 font-medium">{m.modelName || '—'}</strong>
+                          </span>
+                          {m.materialCode && (
+                            <span className="font-mono text-[10px] text-slate-400 bg-slate-900 px-1 py-0.2 rounded border border-slate-800">
+                              Prefix: {m.materialCode}
+                            </span>
+                          )}
+                          {m.originalELTDateTime && (
+                            <span className="font-mono text-[10px] text-emerald-400 bg-emerald-950/60 px-1 py-0.2 rounded border border-emerald-800/60">
+                              ELT: {m.originalELTDateTime}
                             </span>
                           )}
                         </div>
 
-                        <div className="flex items-center gap-1.5">
-                          {/* (+) Button to add next machine row right from here */}
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleAddNewRow();
-                            }}
-                            title="Add next machine (+)"
-                            className="p-1 rounded-lg bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-800 text-cyan-300 hover:text-white transition-colors cursor-pointer"
-                          >
-                            <Plus className="w-3.5 h-3.5" />
-                          </button>
-
-                          {/* Trash button to delete/clear this row */}
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleDeleteRow(row.id);
-                            }}
-                            title={machineRows.length > 1 ? 'Remove this machine' : 'Clear'}
-                            className="p-1 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-950/40 transition-colors cursor-pointer"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* 1. Model Name Field (Auto-extracted from Model Sheet) */}
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-                          Model Name:
-                        </label>
-                        <div className="relative">
-                          <input
-                            type="text"
-                            readOnly
-                            value={row.modelName || (row.matchStatus === 'not_found' ? 'Model Not Found in Sheet' : '—')}
-                            placeholder="Automatically extracted from Model Sheet..."
-                            className={`w-full px-3 py-2 rounded-xl font-semibold text-xs border bg-slate-900 ${
-                              row.modelName
-                                ? 'text-cyan-300 border-cyan-800/80 bg-cyan-950/30'
-                                : row.matchStatus === 'not_found'
-                                ? 'text-rose-400 border-rose-800 bg-rose-950/30'
-                                : 'text-slate-500 border-slate-800'
-                            }`}
-                          />
-                          {row.modelName && (
-                            <div className="absolute right-2.5 top-2 flex items-center gap-1 text-[10px] font-mono text-cyan-400">
-                              <Check className="w-3 h-3" />
-                              <span>Matched</span>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* 2. Series No. / Barcode Input with (+) Button */}
-                      <div className="space-y-1">
-                        <div className="flex items-center justify-between">
-                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                            Series No. (Barcode):
-                          </label>
-                          {row.materialCode && (
-                            <span className="text-[9px] font-mono text-cyan-400 bg-cyan-950/80 border border-cyan-800 px-1.5 py-0.2 rounded">
-                              Prefix: {row.materialCode}
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex gap-2">
-                          <input
-                            type="text"
-                            value={row.serialNumber}
-                            onFocus={() => setActiveRowId(row.id)}
-                            onChange={(e) => handleUpdateRowSerial(row.id, e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                e.preventDefault();
-                                handleAddNewRow();
-                              }
-                            }}
-                            placeholder="Scan barcode or type Series No..."
-                            className="flex-1 px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl font-mono text-xs text-white placeholder-slate-500 focus:border-cyan-500 focus:outline-none"
-                          />
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleAddNewRow();
-                            }}
-                            title="Add next machine (+)"
-                            className="px-3 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl font-bold text-xs flex items-center gap-1 shadow-md shadow-cyan-950/50 transition-all cursor-pointer active:scale-95 shrink-0"
-                          >
-                            <Plus className="w-3.5 h-3.5" />
-                            <span className="hidden sm:inline">Add</span>
-                          </button>
-                        </div>
-                        {row.error && (
-                          <p className="text-[10px] text-rose-400 font-semibold mt-0.5">{row.error}</p>
+                        {m.error && (
+                          <p className="text-[10px] text-rose-400 font-semibold mt-0.5">{m.error}</p>
                         )}
                       </div>
                     </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
 
-          {/* =================================================================
-              PROCESS 2: RETURN BSR - DYNAMIC MULTI-MACHINE BATCH RETURN
-              ================================================================= */}
-          {selectedProcess === 'RETURN_BSR' && (
-            <div className="space-y-3">
-              {/* Header with Title & Top (+) Button */}
-              <div className="flex items-center justify-between">
-                <div className="flex flex-col">
-                  <span className="text-xs font-extrabold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-                    <RotateCcw className="w-3.5 h-3.5 text-emerald-400" />
-                    Machines to Return ({machineRows.length})
-                  </span>
-                  <span className="text-[10px] text-slate-500">
-                    Tap a box to make it the scan target
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleAddNewRow}
-                  className="px-2.5 py-1 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer transition-colors"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Add Machine (+)</span>
-                </button>
-              </div>
-
-              {/* Dynamic Machine Rows List */}
-              <div className="space-y-3 max-h-[380px] overflow-y-auto pr-1">
-                {machineRows.map((row, index) => {
-                  const isTarget = row.id === activeRowId;
-                  const isMatched = row.matchStatus === 'matched';
-                  const isNotFound = row.matchStatus === 'not_found';
-                  const filledBelow = machineRows.slice(index + 1).filter(r => r.serialNumber.trim()).length;
-                  const scanNumber = filledBelow + 1;
-                  const isFilled = Boolean(row.serialNumber.trim());
-
-                  return (
-                    <div
-                      key={row.id}
-                      onClick={() => setActiveRowId(row.id)}
-                      className={`p-3.5 rounded-xl border transition-all space-y-2.5 cursor-pointer ${
-                        isTarget
-                          ? 'bg-slate-950/90 border-emerald-500/80 ring-2 ring-emerald-500/20 shadow-lg shadow-emerald-950/40'
-                          : 'bg-slate-950/50 border-slate-800/80 hover:border-slate-700'
-                      }`}
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteRow(m.id)}
+                      className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-slate-900 rounded-lg transition-colors cursor-pointer shrink-0"
+                      title="Remove machine"
                     >
-                      {/* Row Header with Machine #, Scan Target badge, and Action (+) & Trash buttons */}
-                      <div className="flex items-center justify-between text-xs">
-                        <div className="flex items-center gap-2">
-                          <span className={`font-extrabold px-2 py-0.5 rounded-md text-[11px] border ${
-                            isFilled
-                              ? 'bg-slate-900 border-slate-800 text-white'
-                              : 'bg-emerald-950/70 border-emerald-800 text-emerald-300'
-                          }`}>
-                            {isFilled ? `Machine #${scanNumber}` : `Next Machine`}
-                          </span>
-                          {isTarget && (
-                            <span className="font-bold text-emerald-400 text-[10px] flex items-center gap-1">
-                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping inline-block" />
-                              <span>{isFilled ? 'Active Target 🎯' : 'Ready for Scan 🎯'}</span>
-                            </span>
-                          )}
-                        </div>
-
-                        <div className="flex items-center gap-1.5">
-                          {/* (+) Button to add next machine row right from here */}
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleAddNewRow();
-                            }}
-                            title="Add next machine (+)"
-                            className="p-1 rounded-lg bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-800 text-emerald-300 hover:text-white transition-colors cursor-pointer"
-                          >
-                            <Plus className="w-3.5 h-3.5" />
-                          </button>
-
-                          {/* Trash button to delete/clear this row */}
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleDeleteRow(row.id);
-                            }}
-                            title={machineRows.length > 1 ? 'Remove this machine' : 'Clear'}
-                            className="p-1 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-950/40 transition-colors cursor-pointer"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* 1. Model Name Field (Auto-retrieved from ELT Record upon scan) */}
-                      <div className="space-y-1">
-                        <div className="flex items-center justify-between">
-                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-                            Model Name:
-                          </label>
-                          {row.originalELTDateTime && (
-                            <span className="text-[9px] font-mono text-emerald-400 bg-emerald-950/80 border border-emerald-800/80 px-1.5 py-0.2 rounded">
-                              ELT: {row.originalELTDateTime}
-                            </span>
-                          )}
-                        </div>
-                        <div className="relative">
-                          <input
-                            type="text"
-                            readOnly
-                            value={row.modelName || (isNotFound ? 'Serial Number Not Found in ELT' : '—')}
-                            placeholder="Auto-retrieved from ELT Record upon scan..."
-                            className={`w-full px-3 py-2 rounded-xl font-semibold text-xs border bg-slate-900 ${
-                              isMatched
-                                ? 'text-emerald-300 border-emerald-800/80 bg-emerald-950/30'
-                                : isNotFound
-                                ? 'text-rose-400 border-rose-800 bg-rose-950/30'
-                                : 'text-slate-500 border-slate-800'
-                            }`}
-                          />
-                          {isMatched && (
-                            <div className="absolute right-2.5 top-2 flex items-center gap-1 text-[10px] font-mono text-emerald-400">
-                              <Check className="w-3 h-3" />
-                              <span>Found in ELT</span>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* 2. Series No. / Barcode Input with (+) Button */}
-                      <div className="space-y-1">
-                        <div className="flex items-center justify-between">
-                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                            Series No. (Barcode):
-                          </label>
-                          {row.materialCode && (
-                            <span className="text-[9px] font-mono text-emerald-400 bg-emerald-950/80 border border-emerald-800 px-1.5 py-0.2 rounded">
-                              Prefix: {row.materialCode}
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex gap-2">
-                          <input
-                            type="text"
-                            value={row.serialNumber}
-                            onFocus={() => setActiveRowId(row.id)}
-                            onChange={(e) => handleUpdateRowSerial(row.id, e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                e.preventDefault();
-                                handleAddNewRow();
-                              }
-                            }}
-                            placeholder="Scan barcode or type Series No..."
-                            className="flex-1 px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl font-mono text-xs text-white placeholder-slate-500 focus:border-emerald-500 focus:outline-none"
-                          />
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleAddNewRow();
-                            }}
-                            title="Add next machine (+)"
-                            className="px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold text-xs flex items-center gap-1 shadow-md shadow-emerald-950/50 transition-all cursor-pointer active:scale-95 shrink-0"
-                          >
-                            <Plus className="w-3.5 h-3.5" />
-                            <span className="hidden sm:inline">Add</span>
-                          </button>
-                        </div>
-                        {row.error && (
-                          <p className="text-[10px] text-rose-400 font-semibold mt-0.5">{row.error}</p>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
           {/* Batch Error Banner */}
           {batchError && (
-            <div className="p-3 bg-rose-950/50 border border-rose-800/80 rounded-xl text-xs text-rose-200 flex items-center gap-2">
+            <div className="p-2.5 bg-rose-950/50 border border-rose-800/80 rounded-xl text-xs text-rose-200 flex items-center gap-2">
               <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
               <span>{batchError}</span>
             </div>
@@ -1418,11 +1177,11 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
         </div>
 
         {/* Modal Bottom Action Footer */}
-        <div className="p-4 bg-slate-950/90 border-t border-slate-800 flex items-center justify-between gap-3 shrink-0">
+        <div className="p-3 sm:p-3.5 bg-slate-950/90 border-t border-slate-800 flex items-center justify-between gap-3 shrink-0">
           <button
             type="button"
             onClick={handleCloseModal}
-            className="px-4 py-2.5 rounded-xl border border-slate-800 hover:bg-slate-800 text-slate-300 font-semibold text-xs transition-colors cursor-pointer"
+            className="px-4 py-2 rounded-xl border border-slate-800 hover:bg-slate-800 text-slate-300 font-semibold text-xs transition-colors cursor-pointer"
           >
             Cancel
           </button>
@@ -1430,9 +1189,9 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
           {selectedProcess === 'SEND_ELT' ? (
             <button
               type="button"
-              disabled={isSubmittingELT || machineRows.filter(r => r.serialNumber.trim().length > 0).length === 0}
+              disabled={isSubmittingELT || machineRows.filter(r => r.serialNumber.trim().length > 0 && !r.error).length === 0}
               onClick={handleSendELT}
-              className="flex-1 sm:flex-initial px-6 py-2.5 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-extrabold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-cyan-950/80 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer active:scale-95"
+              className="flex-1 sm:flex-initial px-6 py-2 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-extrabold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-cyan-950/80 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer active:scale-95"
             >
               {isSubmittingELT ? (
                 <>
@@ -1443,7 +1202,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                 <>
                   <Send className="w-4 h-4" />
                   <span>
-                    SEND ELT ({machineRows.filter(r => r.serialNumber.trim().length > 0).length || 1} Machine{machineRows.filter(r => r.serialNumber.trim().length > 0).length > 1 ? 's' : ''})
+                    SEND ELT ({machineRows.filter(r => r.serialNumber.trim().length > 0 && !r.error).length} Unit{machineRows.filter(r => r.serialNumber.trim().length > 0 && !r.error).length === 1 ? '' : 's'})
                   </span>
                 </>
               )}
@@ -1451,9 +1210,9 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
           ) : (
             <button
               type="button"
-              disabled={isSubmittingBSR || machineRows.filter(r => r.serialNumber.trim().length > 0 && r.matchStatus === 'matched').length === 0}
+              disabled={isSubmittingBSR || machineRows.filter(r => r.serialNumber.trim().length > 0 && r.matchStatus === 'matched' && !r.error).length === 0}
               onClick={handleReturnBSR}
-              className="flex-1 sm:flex-initial px-6 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-extrabold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/80 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer active:scale-95"
+              className="flex-1 sm:flex-initial px-6 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-extrabold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/80 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer active:scale-95"
             >
               {isSubmittingBSR ? (
                 <>
@@ -1464,7 +1223,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                 <>
                   <RotateCcw className="w-4 h-4" />
                   <span>
-                    BSR RETURN ({machineRows.filter(r => r.serialNumber.trim().length > 0 && r.matchStatus === 'matched').length || 1} Machine{machineRows.filter(r => r.serialNumber.trim().length > 0 && r.matchStatus === 'matched').length > 1 ? 's' : ''})
+                    BSR RETURN ({machineRows.filter(r => r.serialNumber.trim().length > 0 && r.matchStatus === 'matched' && !r.error).length} Unit{machineRows.filter(r => r.serialNumber.trim().length > 0 && r.matchStatus === 'matched' && !r.error).length === 1 ? '' : 's'})
                   </span>
                 </>
               )}

@@ -783,11 +783,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     <span className="text-xs font-extrabold text-white tracking-wide block truncate">Pending</span>
                     <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
                   </div>
-                  <span className="text-[10px] font-mono text-rose-400/80 block truncate">Unmatched Sets</span>
+                  <span className="text-[10px] font-mono text-rose-400/80 block truncate">Finished / Pending Sets</span>
                 </div>
                 <div className="z-10 mt-3 flex items-center justify-between gap-2">
-                  <div className="text-2xl sm:text-3xl font-black text-rose-400 font-mono tracking-tight drop-shadow-[0_2px_8px_rgba(244,63,94,0.4)]">
-                    {ppMetrics.pendingQty}
+                  <div className="flex items-baseline gap-1 font-mono tracking-tight drop-shadow-[0_2px_8px_rgba(244,63,94,0.4)]">
+                    <span className="text-2xl sm:text-3xl font-black text-emerald-400" title="Testing Finished Qty">
+                      {ppMetrics.finishedQty}
+                    </span>
+                    <span className="text-xl sm:text-2xl font-bold text-slate-500">/</span>
+                    <span className="text-2xl sm:text-3xl font-black text-rose-400" title="Testing Pending Qty">
+                      {ppMetrics.pendingQty}
+                    </span>
                   </div>
                   <CircularProgressRing
                     percentage={ppMetrics.bothQty > 0 ? (ppMetrics.pendingQty / ppMetrics.bothQty) * 100 : 0}

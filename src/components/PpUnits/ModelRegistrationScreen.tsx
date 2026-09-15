@@ -21,7 +21,9 @@ import {
   subscribePpUnitStore, 
   addPpUnit, 
   deletePpUnit,
-  updatePpUnitQuantity
+  updatePpUnitQuantity,
+  isModelListEntry,
+  isUnitTestingEntry
 } from '../../services/ppUnitStore';
 import { IduOduMatchingSection } from './IduOduMatchingSection';
 
@@ -42,6 +44,7 @@ export const ModelRegistrationScreen: React.FC<ModelRegistrationScreenProps> = (
   const [modelName, setModelName] = useState('');
   const [materialCode, setMaterialCode] = useState('');
   const [version, setVersion] = useState('V1.0');
+  const [quantity, setQuantity] = useState<number>(1);
   
   const [searchTerm, setSearchTerm] = useState('');
   const [savedSuccessMsg, setSavedSuccessMsg] = useState('');
@@ -59,8 +62,10 @@ export const ModelRegistrationScreen: React.FC<ModelRegistrationScreenProps> = (
     };
   }, []);
 
+  const modelListUnits = allUnits.filter(isModelListEntry);
+
   // Filter units matching selectedType (IDU, ODU, or BOTH)
-  const filteredModels = allUnits.filter(u => {
+  const filteredModels = modelListUnits.filter(u => {
     let matchesType = false;
     if (selectedType === 'IDU') {
       matchesType = u.unitType === 'IDU' || Boolean(u.iduSerialNumber && !u.oduSerialNumber);
@@ -83,6 +88,11 @@ export const ModelRegistrationScreen: React.FC<ModelRegistrationScreenProps> = (
     );
   });
 
+  const totalMachines = filteredModels.reduce(
+    (sum, m) => sum + (typeof m.quantity === 'number' ? Math.max(1, m.quantity) : 1), 
+    0
+  );
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!modelName.trim()) return;
@@ -90,9 +100,10 @@ export const ModelRegistrationScreen: React.FC<ModelRegistrationScreenProps> = (
     const formattedMatCode = materialCode.trim() || `MAT-${Math.floor(10000 + Math.random() * 90000)}`;
     const formattedVer = version.trim() || 'V1.0';
     const nameTrimmed = modelName.trim();
+    const qtyVal = Math.max(1, Number(quantity) || 1);
 
     // Check duplicate: match unitType, modelName (case-insensitive) and version (case-insensitive)
-    const isDuplicate = allUnits.some(
+    const isDuplicate = modelListUnits.some(
       u => (u.unitType === selectedType || (!u.unitType && selectedType === 'IDU')) &&
            u.modelName.trim().toLowerCase() === nameTrimmed.toLowerCase() &&
            (u.version || 'V1.0').trim().toLowerCase() === formattedVer.toLowerCase()
@@ -111,7 +122,7 @@ export const ModelRegistrationScreen: React.FC<ModelRegistrationScreenProps> = (
       unitType: selectedType,
       materialCode: formattedMatCode,
       version: formattedVer,
-      quantity: 1,
+      quantity: qtyVal,
       station: 'Station 01',
       iduSerialNumber: (selectedType === 'IDU' || selectedType === 'BOTH') ? `IDU-${Math.floor(10000 + Math.random() * 90000)}` : '',
       oduSerialNumber: (selectedType === 'ODU' || selectedType === 'BOTH') ? `ODU-${Math.floor(10000 + Math.random() * 90000)}` : '',
@@ -123,14 +134,15 @@ export const ModelRegistrationScreen: React.FC<ModelRegistrationScreenProps> = (
       status: 'live',
       entrySource: 'model_list',
       isModelOnly: true,
-      observations: [{ id: `obs-${Date.now()}`, text: `Model ${nameTrimmed} registered with Version ${formattedVer}.`, timestamp: new Date().toISOString() }],
+      observations: [{ id: `obs-${Date.now()}`, text: `Model ${nameTrimmed} registered with Version ${formattedVer} (Qty: ${qtyVal}).`, timestamp: new Date().toISOString() }],
     });
 
-    setSavedSuccessMsg(`${selectedType} Model "${newUnit.modelName}" (${formattedVer}) saved successfully!`);
+    setSavedSuccessMsg(`${selectedType} Model "${newUnit.modelName}" (${formattedVer}) saved successfully with ${qtyVal} machine(s)!`);
     setErrorMsg('');
     setModelName('');
     setMaterialCode('');
     setVersion('V1.0');
+    setQuantity(1);
 
     setTimeout(() => {
       setSavedSuccessMsg('');
@@ -152,6 +164,56 @@ export const ModelRegistrationScreen: React.FC<ModelRegistrationScreenProps> = (
   const handleQtyChange = (id: string, currentQty: number | undefined, delta: number) => {
     const qty = typeof currentQty === 'number' ? currentQty : 1;
     updatePpUnitQuantity(id, qty + delta);
+  };
+
+  const getTestingStatusForModel = (item: PpUnit) => {
+    const testingUnits = allUnits.filter(isUnitTestingEntry);
+    const normalizeVer = (v?: string) => (v || '').toLowerCase().replace(/[^a-z0-9]/g, '').replace(/^v/, '');
+    const itemVer = normalizeVer(item.version);
+    const itemNameNorm = (item.modelName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+    const matchingTest = testingUnits.find(tu => {
+      const tuNameNorm = (tu.modelName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      const isNameMatch = tuNameNorm === itemNameNorm || tuNameNorm.includes(itemNameNorm) || itemNameNorm.includes(tuNameNorm);
+      if (!isNameMatch) return false;
+
+      const tuVer = normalizeVer(tu.version);
+      if (tuVer && itemVer) {
+        return tuVer === itemVer;
+      }
+      return true;
+    });
+
+    if (!matchingTest) {
+      return { 
+        status: 'pending', 
+        label: 'Testing Pending', 
+        badgeClass: 'bg-rose-950/70 text-rose-300 border-rose-800/80',
+        cardBorder: 'border-rose-500/30 hover:border-rose-400' 
+      };
+    }
+    if (matchingTest.status === 'live') {
+      return { 
+        status: 'live', 
+        label: `Live (Stn ${matchingTest.station || '01'})`, 
+        badgeClass: 'bg-amber-950/90 text-amber-300 border-amber-500/60',
+        cardBorder: 'border-amber-500/40 hover:border-amber-400' 
+      };
+    }
+    if (matchingTest.status === 'stopped') {
+      return { 
+        status: 'stopped', 
+        label: 'Testing Stopped', 
+        badgeClass: 'bg-orange-950/90 text-orange-300 border-orange-500/60',
+        cardBorder: 'border-orange-500/40 hover:border-orange-400' 
+      };
+    }
+    return { 
+      status: 'finished', 
+      label: 'Testing Finished', 
+      badgeClass: 'bg-emerald-950/90 text-emerald-300 border-emerald-500/60',
+      cardBorder: 'border-emerald-500/40 hover:border-emerald-400' 
+    };
   };
 
   return (
@@ -236,7 +298,7 @@ export const ModelRegistrationScreen: React.FC<ModelRegistrationScreenProps> = (
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-5">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               {/* 1. Model Name */}
               <div>
                 <label className="block text-xs font-bold text-slate-300 mb-1.5 flex items-center gap-1.5">
@@ -282,6 +344,22 @@ export const ModelRegistrationScreen: React.FC<ModelRegistrationScreenProps> = (
                   className="w-full px-4 py-3 bg-slate-950 border border-slate-700/80 rounded-2xl text-xs text-emerald-300 font-mono font-bold placeholder-slate-600 focus:outline-none focus:border-emerald-500 transition-all shadow-inner"
                 />
               </div>
+
+              {/* 4. Quantity (Machines) */}
+              <div>
+                <label className="block text-xs font-bold text-slate-300 mb-1.5 flex items-center gap-1.5">
+                  <Box className="w-3.5 h-3.5 text-blue-400" />
+                  <span>Machines Qty *</span>
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  required
+                  value={quantity}
+                  onChange={(e) => setQuantity(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                  className="w-full px-4 py-3 bg-slate-950 border border-slate-700/80 rounded-2xl text-xs text-cyan-300 font-mono font-bold placeholder-slate-600 focus:outline-none focus:border-blue-500 transition-all shadow-inner"
+                />
+              </div>
             </div>
 
             {/* SAVE BUTTON */}
@@ -315,10 +393,12 @@ export const ModelRegistrationScreen: React.FC<ModelRegistrationScreenProps> = (
                     Saved {selectedType} Models
                   </h3>
                   <span className="px-2 py-0.5 text-xs font-mono font-extrabold rounded-md bg-cyan-950 text-cyan-300 border border-cyan-800">
-                    {filteredModels.length}
+                    {filteredModels.length} Models • {totalMachines} Machines
                   </span>
                 </div>
-                <p className="text-[11px] text-slate-400">Master database record entries</p>
+                <p className="text-xs text-slate-400">
+                  {selectedType} machines available in laboratory master list
+                </p>
               </div>
             </div>
 
@@ -348,23 +428,37 @@ export const ModelRegistrationScreen: React.FC<ModelRegistrationScreenProps> = (
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {filteredModels.map((item) => (
-                <div 
-                  key={item.id}
-                  className="bg-slate-900/90 hover:bg-slate-900 p-5 rounded-2xl border border-slate-800/90 hover:border-slate-700 shadow-xl transition-all duration-200 flex flex-col justify-between group relative overflow-hidden"
-                >
-                  <div className="absolute top-0 left-0 w-1 h-full bg-cyan-500" />
+              {filteredModels.map((item) => {
+                const testInfo = getTestingStatusForModel(item);
+                return (
+                  <div 
+                    key={item.id}
+                    className={`bg-slate-900/90 hover:bg-slate-900 p-5 rounded-2xl border ${testInfo.cardBorder} shadow-xl transition-all duration-200 flex flex-col justify-between group relative overflow-hidden`}
+                  >
+                    <div className={`absolute top-0 left-0 w-1.5 h-full ${
+                      testInfo.status === 'finished' ? 'bg-emerald-500' :
+                      testInfo.status === 'live' ? 'bg-amber-500' :
+                      testInfo.status === 'stopped' ? 'bg-orange-500' : 'bg-rose-500'
+                    }`} />
 
-                  <div className="space-y-3">
-                    {/* Top Bar Badge */}
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="px-2.5 py-0.5 text-[10px] font-black rounded-md bg-cyan-950 text-cyan-300 border border-cyan-800">
-                        {item.unitType || selectedType}
-                      </span>
-                      <span className="text-[10px] font-mono font-bold text-slate-500">
-                        ID: {item.id.slice(0, 8)}
-                      </span>
-                    </div>
+                    <div className="space-y-3">
+                      {/* Top Bar Badges */}
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5">
+                          <span className="px-2.5 py-0.5 text-[10px] font-black rounded-md bg-cyan-950 text-cyan-300 border border-cyan-800">
+                            {item.unitType || selectedType}
+                          </span>
+                          <span className={`px-2 py-0.5 text-[10px] font-bold rounded-md border flex items-center gap-1 ${testInfo.badgeClass}`}>
+                            {testInfo.status === 'live' && <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" />}
+                            {testInfo.status === 'finished' && <CheckCircle2 className="w-3 h-3 text-emerald-400" />}
+                            {testInfo.status === 'pending' && <span className="w-1.5 h-1.5 rounded-full bg-rose-400" />}
+                            {testInfo.label}
+                          </span>
+                        </div>
+                        <span className="text-[10px] font-mono font-bold text-slate-500">
+                          ID: {item.id.slice(0, 8)}
+                        </span>
+                      </div>
 
                     {/* Model Name Title */}
                     <div>
@@ -387,6 +481,36 @@ export const ModelRegistrationScreen: React.FC<ModelRegistrationScreenProps> = (
                         <span className="font-mono font-bold text-emerald-300 truncate block">
                           {item.version || 'V1.0'}
                         </span>
+                      </div>
+                    </div>
+
+                    {/* Machine Quantity Stepper */}
+                    <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-950/90 border border-slate-800">
+                      <div className="flex items-center gap-1.5">
+                        <Box className="w-3.5 h-3.5 text-cyan-400" />
+                        <span className="text-[11px] font-bold text-slate-300">Machines:</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleQtyChange(item.id, item.quantity, -1)}
+                          disabled={(item.quantity || 1) <= 1}
+                          className="w-5 h-5 rounded flex items-center justify-center bg-slate-800 hover:bg-slate-700 text-slate-300 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                          title="Decrease machine count"
+                        >
+                          <Minus className="w-3 h-3" />
+                        </button>
+                        <span className="font-mono font-black text-xs text-cyan-300 min-w-[24px] text-center bg-cyan-950/60 px-1.5 py-0.5 rounded border border-cyan-800/60">
+                          {item.quantity || 1}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleQtyChange(item.id, item.quantity, 1)}
+                          className="w-5 h-5 rounded flex items-center justify-center bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors"
+                          title="Increase machine count"
+                        >
+                          <Plus className="w-3 h-3" />
+                        </button>
                       </div>
                     </div>
                   </div>
@@ -420,8 +544,9 @@ export const ModelRegistrationScreen: React.FC<ModelRegistrationScreenProps> = (
                     </div>
                   </div>
                 </div>
-              ))}
-            </div>
+              );
+            })}
+          </div>
           )}
         </div>
       )}

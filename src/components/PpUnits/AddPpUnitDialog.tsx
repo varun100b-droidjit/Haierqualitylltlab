@@ -21,7 +21,7 @@ import {
   Calendar
 } from 'lucide-react';
 import { PpUnit, ProtoUnitParts, ProtoUnitPhotos, ReportDetails, NamePlateDetails } from '../../types';
-import { addPpUnit, generatePp5DigitSerial, getPpUnits } from '../../services/ppUnitStore';
+import { addPpUnit, generatePp5DigitSerial, getPpUnits, isModelListEntry } from '../../services/ppUnitStore';
 import { ALL_STATIONS, getOccupiedStations } from '../../utils/stationManager';
 import { PhotoUploadSection } from '../Common/PhotoUploadSection';
 import { compressImageFile } from '../../services/photoSettingsStore';
@@ -124,11 +124,13 @@ export const AddPpUnitDialog: React.FC<AddPpUnitDialogProps> = ({
 
   // Image Modal preview
   const [previewImage, setPreviewImage] = useState<{ url: string; title: string } | null>(null);
+  const [registeredModels, setRegisteredModels] = useState<PpUnit[]>([]);
 
   useEffect(() => {
     if (isOpen) {
       // Find occupied stations in live section
       const ppUnits = getPpUnits();
+      setRegisteredModels(ppUnits.filter(isModelListEntry));
       const liveOccupied = new Set<string>();
       ppUnits.forEach(u => {
         if (u.status === 'live' && u.station) {
