@@ -21,7 +21,7 @@ import {
   Calendar
 } from 'lucide-react';
 import { PpUnit, ProtoUnitParts, ProtoUnitPhotos, ReportDetails, NamePlateDetails } from '../../types';
-import { addPpUnit, generatePp5DigitSerial, getPpUnits, isModelListEntry } from '../../services/ppUnitStore';
+import { addPpUnit, updatePpUnit, generatePp5DigitSerial, getPpUnits, isModelListEntry } from '../../services/ppUnitStore';
 import { ALL_STATIONS, getOccupiedStations } from '../../utils/stationManager';
 import { PhotoUploadSection } from '../Common/PhotoUploadSection';
 import { compressImageFile } from '../../services/photoSettingsStore';
@@ -31,6 +31,7 @@ interface AddPpUnitDialogProps {
   onClose: () => void;
   onSuccess: (status?: 'live' | 'stopped' | 'finished') => void;
   initialUnitType?: 'IDU' | 'ODU' | 'BOTH';
+  initialUnit?: PpUnit | null;
 }
 
 export const AddPpUnitDialog: React.FC<AddPpUnitDialogProps> = ({
@@ -38,6 +39,7 @@ export const AddPpUnitDialog: React.FC<AddPpUnitDialogProps> = ({
   onClose,
   onSuccess,
   initialUnitType = 'BOTH',
+  initialUnit,
 }) => {
   // Basic Information
   const [modelName, setModelName] = useState('');
@@ -139,34 +141,109 @@ export const AddPpUnitDialog: React.FC<AddPpUnitDialogProps> = ({
       });
       setLiveOccupiedStations(liveOccupied);
 
-      // Auto generate initial 5-digit serials
-      setIduSerialNumber(generatePp5DigitSerial());
-      setOduSerialNumber(generatePp5DigitSerial());
-      
-      // Auto select first available station
-      const availableStation = ALL_STATIONS.find(s => !liveOccupied.has(s));
-      if (availableStation) {
-        setStation(availableStation);
+      if (initialUnit) {
+        setModelName(initialUnit.modelName || '');
+        setSampleType(initialUnit.sampleType || '');
+        setUnitType(initialUnit.unitType || initialUnitType || 'BOTH');
+        setMaterialCode(initialUnit.materialCode || '');
+        setVersion(initialUnit.version || 'V1.0');
+        setStation(initialUnit.station || ALL_STATIONS[0]);
+        setIduSerialNumber(initialUnit.iduSerialNumber || '');
+        setOduSerialNumber(initialUnit.oduSerialNumber || '');
+        setRequestBy(initialUnit.requestBy || '');
+        setTestPurpose(initialUnit.testPurpose || '');
+        setRequiredHour(String(initialUnit.requiredHour ?? 72));
+        setDoneHour(String(initialUnit.doneHour ?? 0));
+
+        setReportNo(initialUnit.reportDetails?.reportNo || '');
+        setSampleReceived(initialUnit.reportDetails?.sampleReceived || '');
+        setTestCommenced(initialUnit.reportDetails?.testCommenced || '');
+        setTestCompleted(initialUnit.reportDetails?.testCompleted || '');
+
+        setCoolingCapacity(initialUnit.namePlate?.coolingCapacity || '');
+        setRatedPower(initialUnit.namePlate?.ratedPower || '');
+        setRatedCurrent(initialUnit.namePlate?.ratedCurrent || '');
+        setVoltage(initialUnit.namePlate?.voltage || '');
+        setIseer(initialUnit.namePlate?.iseer || '');
+        setGasQty(initialUnit.namePlate?.gasQty || '');
+        setGasInjectionVolume(initialUnit.namePlate?.gasInjectionVolume || '');
+        setPowerMode(initialUnit.namePlate?.powerMode || '');
+        setRefrigerant(initialUnit.namePlate?.refrigerant || '');
+        setMainProgramChecksumIdu(initialUnit.namePlate?.mainProgramChecksumIdu || '');
+        setMainProgramChecksumOdu(initialUnit.namePlate?.mainProgramChecksumOdu || '');
+        setEeChecksumIdu(initialUnit.namePlate?.eeChecksumIdu || '');
+        setEeChecksumOdu(initialUnit.namePlate?.eeChecksumOdu || '');
+
+        setIduMotorSpec(initialUnit.partsInfo?.iduMotorSpec || '');
+        setIduMotorPartCode(initialUnit.partsInfo?.iduMotorPartCode || '');
+        setIduMotorSupplier(initialUnit.partsInfo?.iduMotorSupplier || '');
+        setIduPcbPartCode(initialUnit.partsInfo?.iduPcbPartCode || '');
+        setIduPcbSupplier(initialUnit.partsInfo?.iduPcbSupplier || '');
+
+        setOduMotorSpec(initialUnit.partsInfo?.oduMotorSpec || '');
+        setOduMotorPartCode(initialUnit.partsInfo?.oduMotorPartCode || '');
+        setOduMotorSupplier(initialUnit.partsInfo?.oduMotorSupplier || '');
+        setOduPcbPartCode(initialUnit.partsInfo?.oduPcbPartCode || '');
+        setOduPcbSupplier(initialUnit.partsInfo?.oduPcbSupplier || '');
+
+        setCompressorSpec(initialUnit.partsInfo?.compressorSpec || '');
+        setCompressorPartCode(initialUnit.partsInfo?.compressorPartCode || '');
+        setCompressorSupplier(initialUnit.partsInfo?.compressorSupplier || '');
+
+        setEevSpec(initialUnit.partsInfo?.eevSpec || '');
+        setEevPartCode(initialUnit.partsInfo?.eevPartCode || '');
+        setEevSupplier(initialUnit.partsInfo?.eevSupplier || '');
+
+        setFourWaySwing(initialUnit.fourWaySwing || '');
+        setRpm(initialUnit.rpm || '');
+
+        setPhotos(initialUnit.photos || {
+          indoorUnitPhoto: '',
+          productPhoto: '',
+          packingBoxPhoto: '',
+          iduNameplatePhoto: '',
+          oduNameplatePhoto: '',
+          iduPcbPhoto: '',
+          iduMotorPhoto: '',
+          oduPcbPhoto: '',
+          oduMotorPhoto: '',
+          oduCompressorPhoto: '',
+          oduEevPhoto: '',
+          stickerPhoto: '',
+        });
+
+        setRemarks(initialUnit.remarks || '');
+        setErrors({});
       } else {
-        setStation(ALL_STATIONS[0]);
+        // Auto generate initial 5-digit serials
+        setIduSerialNumber(generatePp5DigitSerial());
+        setOduSerialNumber(generatePp5DigitSerial());
+        
+        // Auto select first available station
+        const availableStation = ALL_STATIONS.find(s => !liveOccupied.has(s));
+        if (availableStation) {
+          setStation(availableStation);
+        } else {
+          setStation(ALL_STATIONS[0]);
+        }
+
+        // Auto-set Dates
+        const today = new Date().toISOString().split('T')[0];
+        setSampleReceived(today);
+        setTestCommenced(today);
+
+        setDoneHour('0');
+        const hours = 72;
+        const compDate = new Date(Date.now() + hours * 3600 * 1000);
+        setTestCompleted(compDate.toISOString().split('T')[0]);
+        setRequiredHour('72');
+        setFourWaySwing('');
+        setRpm('');
+        setUnitType(initialUnitType);
+        setErrors({});
       }
-
-      // Auto-set Dates
-      const today = new Date().toISOString().split('T')[0];
-      setSampleReceived(today);
-      setTestCommenced(today);
-
-      setDoneHour('0');
-      const hours = 72;
-      const compDate = new Date(Date.now() + hours * 3600 * 1000);
-      setTestCompleted(compDate.toISOString().split('T')[0]);
-      setRequiredHour('72');
-      setFourWaySwing('');
-      setRpm('');
-      setUnitType(initialUnitType);
-      setErrors({});
     }
-  }, [isOpen, initialUnitType]);
+  }, [isOpen, initialUnit, initialUnitType]);
 
   const handleRequiredHourChange = (val: string) => {
     setRequiredHour(val);
@@ -328,30 +405,57 @@ export const AddPpUnitDialog: React.FC<AddPpUnitDialogProps> = ({
       oduEevPartCode: val(eevPartCode),
     };
 
-    addPpUnit({
-      modelName: val(modelName),
-      sampleType: val(sampleType),
-      unitType,
-      materialCode: val(materialCode) === 'NA' ? `MAT-${Math.floor(1000 + Math.random() * 9000)}` : val(materialCode),
-      version: val(version) === 'NA' ? 'V1.0' : val(version),
-      station: station || ALL_STATIONS[0],
-      iduSerialNumber: val(iduSerialNumber),
-      oduSerialNumber: val(oduSerialNumber),
-      requestBy: val(requestBy),
-      testPurpose: val(testPurpose),
-      requiredHour: Number(requiredHour) || 72,
-      doneHour: Number(doneHour) || 0,
-      reportDetails,
-      namePlate,
-      partsInfo,
-      photos,
-      fourWaySwing: val(fourWaySwing),
-      rpm: val(rpm),
-      remarks: val(remarks),
-      status: targetStatus,
-      entrySource: 'unit_testing',
-      isModelOnly: false,
-    });
+    if (initialUnit) {
+      updatePpUnit(initialUnit.id, {
+        modelName: val(modelName),
+        sampleType: val(sampleType),
+        unitType,
+        materialCode: val(materialCode) === 'NA' ? `MAT-${Math.floor(1000 + Math.random() * 9000)}` : val(materialCode),
+        version: val(version) === 'NA' ? 'V1.0' : val(version),
+        station: station || ALL_STATIONS[0],
+        iduSerialNumber: val(iduSerialNumber),
+        oduSerialNumber: val(oduSerialNumber),
+        requestBy: val(requestBy),
+        testPurpose: val(testPurpose),
+        requiredHour: Number(requiredHour) || 72,
+        doneHour: Number(doneHour) || 0,
+        reportDetails,
+        namePlate,
+        partsInfo,
+        photos,
+        fourWaySwing: val(fourWaySwing),
+        rpm: val(rpm),
+        remarks: val(remarks),
+        status: targetStatus,
+        entrySource: 'unit_testing',
+        isModelOnly: false,
+      });
+    } else {
+      addPpUnit({
+        modelName: val(modelName),
+        sampleType: val(sampleType),
+        unitType,
+        materialCode: val(materialCode) === 'NA' ? `MAT-${Math.floor(1000 + Math.random() * 9000)}` : val(materialCode),
+        version: val(version) === 'NA' ? 'V1.0' : val(version),
+        station: station || ALL_STATIONS[0],
+        iduSerialNumber: val(iduSerialNumber),
+        oduSerialNumber: val(oduSerialNumber),
+        requestBy: val(requestBy),
+        testPurpose: val(testPurpose),
+        requiredHour: Number(requiredHour) || 72,
+        doneHour: Number(doneHour) || 0,
+        reportDetails,
+        namePlate,
+        partsInfo,
+        photos,
+        fourWaySwing: val(fourWaySwing),
+        rpm: val(rpm),
+        remarks: val(remarks),
+        status: targetStatus,
+        entrySource: 'unit_testing',
+        isModelOnly: false,
+      });
+    }
 
     onSuccess(targetStatus);
     onClose();
@@ -388,8 +492,12 @@ export const AddPpUnitDialog: React.FC<AddPpUnitDialogProps> = ({
               <Cpu className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-white">New PP Unit Testing Entry</h2>
-              <p className="text-xs text-slate-400">Enter pre-production unit technical parameters, component specifications & photos</p>
+              <h2 className="text-lg font-bold text-white">
+                {initialUnit ? 'Edit PP Unit (Draft)' : 'New PP Unit Testing Entry'}
+              </h2>
+              <p className="text-xs text-slate-400">
+                {initialUnit ? 'Update pre-production unit technical parameters, component specifications & photos' : 'Enter pre-production unit technical parameters, component specifications & photos'}
+              </p>
             </div>
           </div>
           <button
@@ -1191,14 +1299,14 @@ export const AddPpUnitDialog: React.FC<AddPpUnitDialogProps> = ({
                 className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-xs font-bold text-amber-300 bg-amber-950/80 border border-amber-800/80 hover:bg-amber-900 shadow-sm transition-all active:scale-95 cursor-pointer"
               >
                 <Save className="w-4 h-4 text-amber-400" />
-                <span>Save to Stop List</span>
+                <span>Save Draft</span>
               </button>
               <button
                 type="submit"
                 className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-xs font-bold text-slate-900 bg-gradient-to-r from-cyan-400 to-emerald-400 hover:from-cyan-300 hover:to-emerald-300 shadow-md shadow-cyan-950/50 hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer"
               >
                 <CheckCircle2 className="w-4 h-4" />
-                <span>Save & Start Live</span>
+                <span>{initialUnit ? 'Update & Start Live' : 'Save & Start Live'}</span>
               </button>
             </div>
           </div>

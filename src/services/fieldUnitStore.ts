@@ -121,12 +121,10 @@ if (db) {
             list.push(data);
           }
         });
-        if (list.length > 0) {
-          list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-          fieldUnitsCache = list;
-          try { localStorage.setItem(STORAGE_KEY_FIELD_UNITS, JSON.stringify(list)); } catch {}
-          notifySubscribers();
-        }
+        list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+        fieldUnitsCache = list;
+        try { localStorage.setItem(STORAGE_KEY_FIELD_UNITS, JSON.stringify(list)); } catch {}
+        notifySubscribers();
       }
     }, (err: any) => {
       console.warn('[FieldUnitStore] Real-time listener error:', err);
@@ -285,6 +283,35 @@ export function updateFieldUnitStatus(id: string, status: FieldUnit['status'], d
   return updatedUnit;
 }
 
+export function updateFieldUnit(id: string, updates: Partial<FieldUnit>): FieldUnit | null {
+  if (!requireOnlineForSave(`Update Field Unit (${id})`)) {
+    return null;
+  }
+  const formattedDate = getFormattedNow();
+  let updatedUnit: FieldUnit | null = null;
+
+  const updated = fieldUnitsCache.map(u => {
+    if (u.id === id) {
+      updatedUnit = {
+        ...u,
+        ...updates,
+        updatedAt: formattedDate,
+      };
+      return updatedUnit;
+    }
+    return u;
+  });
+
+  saveLocalFieldUnits(updated);
+
+  if (updatedUnit) {
+    syncFieldUnitToSupabase(updatedUnit);
+    syncFieldUnitToFirestore(updatedUnit);
+  }
+
+  return updatedUnit;
+}
+
 export function addFieldUnitObservation(id: string, text: string): FieldUnit | null {
   if (!requireOnlineForSave(`Add Observation to Field Unit (${id})`)) {
     return null;
@@ -351,15 +378,12 @@ export function deleteFieldUnitObservation(id: string, obsId: string): FieldUnit
 }
 
 export function deleteFieldUnit(id: string) {
-  if (!requireOnlineForSave(`Delete Field Unit (${id})`)) {
-    return;
-  }
   const updated = fieldUnitsCache.filter(u => u.id !== id);
   saveLocalFieldUnits(updated);
 
-  // Delete from Supabase & Firestore
-  deleteFieldUnitFromSupabase(id);
-  deleteFieldUnitFromFirestore(id);
+  // Delete from Supabase & Firestore asynchronously
+  deleteFieldUnitFromSupabase(id).catch(err => console.warn('[FieldUnitStore] Supabase delete note:', err));
+  deleteFieldUnitFromFirestore(id).catch(err => console.warn('[FieldUnitStore] Firestore delete note:', err));
 }
 
 export function getAllFieldUnits(): FieldUnit[] {

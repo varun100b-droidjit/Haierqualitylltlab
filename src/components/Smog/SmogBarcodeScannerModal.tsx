@@ -57,7 +57,6 @@ export function getNextDayISO(dateStr: string): string {
 }
 
 const STORAGE_KEY_PROD_DATE = 'smog_scanner_production_date';
-const STORAGE_KEY_SMOG_DATE = 'smog_scanner_smog_date';
 const STORAGE_KEY_SHIFT = 'smog_scanner_shift';
 const STORAGE_KEY_LEAK_LOCATION = 'smog_scanner_leak_location';
 const STORAGE_KEY_LEAK_QTY = 'smog_scanner_leak_qty';
@@ -99,15 +98,6 @@ export const SmogBarcodeScannerModal: React.FC<SmogBarcodeScannerModalProps> = (
     return new Date().toISOString().split('T')[0];
   });
 
-  const [smogDate, setSmogDate] = useState<string>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY_SMOG_DATE);
-      if (saved && saved.trim()) return saved.trim();
-    } catch {}
-    const today = new Date().toISOString().split('T')[0];
-    return getNextDayISO(today);
-  });
-
   // Leak Unit Location & Qty - Required to open scanner
   const [leakLocation, setLeakLocation] = useState<string>(() => {
     try {
@@ -141,10 +131,6 @@ export const SmogBarcodeScannerModal: React.FC<SmogBarcodeScannerModalProps> = (
         const savedProd = localStorage.getItem(STORAGE_KEY_PROD_DATE);
         if (savedProd && savedProd.trim()) {
           setProductionDate(savedProd.trim());
-        }
-        const savedSmog = localStorage.getItem(STORAGE_KEY_SMOG_DATE);
-        if (savedSmog && savedSmog.trim()) {
-          setSmogDate(savedSmog.trim());
         }
         // Shift is auto-detected: 7AM-7PM = Shift A, 7PM-7AM = Shift B
         setShift(getAutoSmogShift());
@@ -255,15 +241,6 @@ export const SmogBarcodeScannerModal: React.FC<SmogBarcodeScannerModalProps> = (
     setProductionDate(trimmed);
     try {
       localStorage.setItem(STORAGE_KEY_PROD_DATE, trimmed);
-    } catch {}
-  };
-
-  // Synchronize and persist Smog Date - stays locked until operator manually changes it
-  const handleSmogDateChange = (newSmogDate: string) => {
-    const trimmed = newSmogDate.trim();
-    setSmogDate(trimmed);
-    try {
-      localStorage.setItem(STORAGE_KEY_SMOG_DATE, trimmed);
     } catch {}
   };
 
@@ -650,13 +627,12 @@ export const SmogBarcodeScannerModal: React.FC<SmogBarcodeScannerModalProps> = (
       passedSerials: [], // Initially 0 passed
       suspectCount: 1,   // Each unit is 1 suspect, sum equals auto-filled Qty
       actualCount: 0,
-      date: smogDate,    // Categorized under Smog Date
-      month: smogDate.substring(0, 7),
+      date: productionDate,
+      month: productionDate.substring(0, 7),
       time: timeStr,
       createdAt: now.toISOString(),
-      notes: `Scanned via Smog Barcode Scanner [Prod: ${productionDate} | Smog: ${smogDate} | Shift: ${autoShift}${leakLocation.trim() ? ` | Loc: ${leakLocation.trim()}` : ''} | Batch Qty: ${finalBatchQty}]`,
+      notes: `Scanned via Smog Barcode Scanner [Date: ${productionDate} | Shift: ${autoShift}${leakLocation.trim() ? ` | Loc: ${leakLocation.trim()}` : ''} | Batch Qty: ${finalBatchQty}]`,
       productionDate,
-      smogDate,
       operatorUserId,
       location: leakLocation.trim() || 'General Location',
       qty: 1
@@ -702,14 +678,14 @@ export const SmogBarcodeScannerModal: React.FC<SmogBarcodeScannerModalProps> = (
           
           {/* ULTRA-COMPACT SECTION 1: DATE SETUP (Shift is auto-detected: 7AM-7PM Shift A, 7PM-7AM Shift B) */}
           <div className="p-2.5 sm:p-3 rounded-2xl bg-slate-950/95 border border-slate-800 space-y-2 shadow-inner">
-            {/* Compact 2-column Date row on mobile and desktop */}
-            <div className="grid grid-cols-2 gap-2">
-              {/* Production Date */}
+            {/* Single Date row */}
+            <div>
+              {/* Date */}
               <div className="p-1.5 px-2.5 rounded-xl bg-slate-900/90 border border-slate-800 focus-within:border-cyan-500/60 transition-colors">
                 <div className="flex items-center justify-between text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-0.5">
                   <span className="flex items-center gap-1">
                     <Calendar className="w-2.5 h-2.5 text-cyan-400" />
-                    <span>Prod Date</span>
+                    <span>Date</span>
                   </span>
                   <span className="text-[9px] text-cyan-400 font-mono font-bold">Locked</span>
                 </div>
@@ -718,23 +694,6 @@ export const SmogBarcodeScannerModal: React.FC<SmogBarcodeScannerModalProps> = (
                   value={productionDate}
                   onChange={(e) => handleProductionDateChange(e.target.value)}
                   className="w-full bg-transparent text-xs font-mono font-bold text-white focus:outline-none cursor-pointer p-0"
-                />
-              </div>
-
-              {/* Smog Date */}
-              <div className="p-1.5 px-2.5 rounded-xl bg-slate-900/90 border border-emerald-900/60 focus-within:border-emerald-500/60 transition-colors">
-                <div className="flex items-center justify-between text-[10px] text-emerald-400 font-bold uppercase tracking-wider mb-0.5">
-                  <span className="flex items-center gap-1">
-                    <Calendar className="w-2.5 h-2.5 text-emerald-400" />
-                    <span>Smog Date</span>
-                  </span>
-                  <span className="text-[9px] text-emerald-400 font-mono font-bold">Locked</span>
-                </div>
-                <input
-                  type="date"
-                  value={smogDate}
-                  onChange={(e) => handleSmogDateChange(e.target.value)}
-                  className="w-full bg-transparent text-xs font-mono font-bold text-emerald-300 focus:outline-none cursor-pointer p-0"
                 />
               </div>
             </div>

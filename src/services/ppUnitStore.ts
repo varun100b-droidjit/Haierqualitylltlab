@@ -116,13 +116,11 @@ if (db) {
             list.push(data);
           }
         });
-        if (list.length > 0) {
-          // Sort by creation date descending
-          list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-          ppUnitsCache = list;
-          try { localStorage.setItem(STORAGE_KEY_PP_UNITS, JSON.stringify(list)); } catch {}
-          notifyListeners();
-        }
+        // Sort by creation date descending
+        list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+        ppUnitsCache = list;
+        try { localStorage.setItem(STORAGE_KEY_PP_UNITS, JSON.stringify(list)); } catch {}
+        notifyListeners();
       }
     }, (err: any) => {
       console.warn('[PPUnitStore] Real-time listener error:', err);
@@ -401,15 +399,12 @@ export function passPpUnitWithDetails(
 }
 
 export function deletePpUnit(id: string): void {
-  if (!requireOnlineForSave(`Delete PP Unit (${id})`)) {
-    return;
-  }
   const updated = ppUnitsCache.filter(u => u.id !== id);
   saveLocalPpUnits(updated);
 
-  // Delete from Supabase & Firestore
-  deletePpUnitFromSupabase(id);
-  deletePpUnitFromFirestore(id);
+  // Delete from Supabase & Firestore asynchronously
+  deletePpUnitFromSupabase(id).catch(err => console.warn('[PPUnitStore] Supabase delete note:', err));
+  deletePpUnitFromFirestore(id).catch(err => console.warn('[PPUnitStore] Firestore delete note:', err));
 }
 
 export function addPpUnitObservation(id: string, text: string): PpUnit | null {

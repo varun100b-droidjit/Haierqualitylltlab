@@ -1,18 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import { X, Plus, Cpu, Clock, Calendar, User, FileText, Activity, Save, Tag } from 'lucide-react';
-import { addFieldUnit, addFieldUnitObservation } from '../../services/fieldUnitStore';
+import { addFieldUnit, updateFieldUnit, addFieldUnitObservation } from '../../services/fieldUnitStore';
 import { ALL_STATIONS, getOccupiedStations } from '../../utils/stationManager';
+import { FieldUnit } from '../../types';
 
 interface AddFieldUnitDialogProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: (status?: 'live' | 'stopped') => void;
+  initialUnit?: FieldUnit | null;
 }
 
 export const AddFieldUnitDialog: React.FC<AddFieldUnitDialogProps> = ({
   isOpen,
   onClose,
   onSuccess,
+  initialUnit,
 }) => {
   const [modelName, setModelName] = useState('');
   const [productType, setProductType] = useState<'IDU' | 'ODU' | 'BOTH'>('BOTH');
@@ -34,16 +37,41 @@ export const AddFieldUnitDialog: React.FC<AddFieldUnitDialogProps> = ({
 
   useEffect(() => {
     if (isOpen) {
-      const occupied = getOccupiedStations();
-      const firstAvailable = ALL_STATIONS.find(s => !occupied.has(s)) || ALL_STATIONS[0];
-      setStation(firstAvailable);
+      if (initialUnit) {
+        setModelName(initialUnit.modelName || '');
+        setProductType(initialUnit.productType || 'BOTH');
+        setIduSerialNumber(initialUnit.iduSerialNumber || '');
+        setOduSerialNumber(initialUnit.oduSerialNumber || '');
+        setRequestBy(initialUnit.requestBy || '');
+        setStation(initialUnit.station || 'Station 01');
+        if (initialUnit.startDateTime) {
+          setStartDateTime(initialUnit.startDateTime.replace(' ', 'T').slice(0, 16));
+        }
+        setRequiredHour(initialUnit.requiredHour ?? 48);
+        setDoneHour(initialUnit.doneHour ?? 0);
+        setRemarks(initialUnit.remarks || '');
+        setObservation('');
+      } else {
+        const occupied = getOccupiedStations();
+        const firstAvailable = ALL_STATIONS.find(s => !occupied.has(s)) || ALL_STATIONS[0];
+        setStation(firstAvailable);
 
-      // Refresh startDateTime to exact current time when dialog opens
-      const now = new Date();
-      const isoStr = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
-      setStartDateTime(isoStr);
+        // Refresh startDateTime to exact current time when dialog opens
+        const now = new Date();
+        const isoStr = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+        setStartDateTime(isoStr);
+        setModelName('');
+        setProductType('BOTH');
+        setIduSerialNumber('');
+        setOduSerialNumber('');
+        setObservation('');
+        setRequestBy('');
+        setRequiredHour(48);
+        setDoneHour(0);
+        setRemarks('');
+      }
     }
-  }, [isOpen]);
+  }, [isOpen, initialUnit]);
 
   if (!isOpen) return null;
 
@@ -81,24 +109,45 @@ export const AddFieldUnitDialog: React.FC<AddFieldUnitDialogProps> = ({
     // Format start date time display (e.g. 2026-07-30 14:30)
     const formattedStartDateTime = startDateTime.replace('T', ' ');
 
-    const newUnit = addFieldUnit({
-      modelName: modelName.trim(),
-      productType,
-      iduSerialNumber: productType !== 'ODU' ? iduSerialNumber.trim() : undefined,
-      oduSerialNumber: productType !== 'IDU' ? oduSerialNumber.trim() : undefined,
-      serialNumber: serialDisplay,
-      requestBy: requestBy.trim() || 'R&D Field Engineer',
-      station: station.trim() || 'Station 01',
-      startDateTime: formattedStartDateTime,
-      requiredHour: Number(requiredHour) || 24,
-      doneHour: Number(doneHour) || 0,
-      status: targetStatus,
-      remarks: remarks.trim()
-    });
+    if (initialUnit) {
+      updateFieldUnit(initialUnit.id, {
+        modelName: modelName.trim(),
+        productType,
+        iduSerialNumber: productType !== 'ODU' ? iduSerialNumber.trim() : undefined,
+        oduSerialNumber: productType !== 'IDU' ? oduSerialNumber.trim() : undefined,
+        serialNumber: serialDisplay,
+        requestBy: requestBy.trim() || 'R&D Field Engineer',
+        station: station.trim() || 'Station 01',
+        startDateTime: formattedStartDateTime,
+        requiredHour: Number(requiredHour) || 24,
+        doneHour: Number(doneHour) || 0,
+        status: targetStatus,
+        remarks: remarks.trim()
+      });
 
-    // If observation text was entered, add initial observation
-    if (observation.trim() && newUnit?.id) {
-      addFieldUnitObservation(newUnit.id, observation.trim());
+      if (observation.trim()) {
+        addFieldUnitObservation(initialUnit.id, observation.trim());
+      }
+    } else {
+      const newUnit = addFieldUnit({
+        modelName: modelName.trim(),
+        productType,
+        iduSerialNumber: productType !== 'ODU' ? iduSerialNumber.trim() : undefined,
+        oduSerialNumber: productType !== 'IDU' ? oduSerialNumber.trim() : undefined,
+        serialNumber: serialDisplay,
+        requestBy: requestBy.trim() || 'R&D Field Engineer',
+        station: station.trim() || 'Station 01',
+        startDateTime: formattedStartDateTime,
+        requiredHour: Number(requiredHour) || 24,
+        doneHour: Number(doneHour) || 0,
+        status: targetStatus,
+        remarks: remarks.trim()
+      });
+
+      // If observation text was entered, add initial observation
+      if (observation.trim() && newUnit?.id) {
+        addFieldUnitObservation(newUnit.id, observation.trim());
+      }
     }
 
     // Reset form
@@ -133,8 +182,12 @@ export const AddFieldUnitDialog: React.FC<AddFieldUnitDialogProps> = ({
               <Cpu className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-base font-black text-white tracking-wide">Add Field Unit</h2>
-              <p className="text-xs text-slate-400">Register new field testing unit into Live monitoring</p>
+              <h2 className="text-base font-black text-white tracking-wide">
+                {initialUnit ? 'Edit Field Unit (Draft)' : 'Add Field Unit'}
+              </h2>
+              <p className="text-xs text-slate-400">
+                {initialUnit ? 'Update draft field testing unit parameters' : 'Register new field testing unit into Live monitoring'}
+              </p>
             </div>
           </div>
           <button
@@ -378,7 +431,7 @@ export const AddFieldUnitDialog: React.FC<AddFieldUnitDialogProps> = ({
               className="px-5 py-2.5 rounded-xl text-xs font-extrabold text-slate-950 bg-gradient-to-r from-cyan-400 to-emerald-400 hover:from-cyan-300 hover:to-emerald-300 shadow-lg shadow-cyan-950/50 hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer flex items-center gap-1.5"
             >
               <Plus className="w-4 h-4 stroke-[3]" />
-              <span>Submit</span>
+              <span>{initialUnit ? 'Update & Start Live' : 'Submit'}</span>
             </button>
           </div>
 

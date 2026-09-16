@@ -11,7 +11,8 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(express.json());
+  app.use(express.json({ limit: '30mb' }));
+  app.use(express.urlencoded({ limit: '30mb', extended: true }));
 
   // Initialize Gemini Client safely
   const getGenAI = () => {
@@ -247,6 +248,108 @@ If no shift change, unit action, or UI command is requested, set those action fi
     } catch (err: any) {
       console.error('Megha AI route error:', err);
       return res.json({ reply: null, error: err.message });
+    }
+  });
+
+  // Smog Section OCR: Extract Models starting with "HSO" and their Quantities
+  app.post('/api/smog/extract-hso-models', async (req, res) => {
+    try {
+      const { imageBase64, mimeType = 'image/jpeg' } = req.body;
+      if (!imageBase64) {
+        return res.status(400).json({ success: false, error: 'Photo or imageBase64 is required.' });
+      }
+
+      const ai = getGenAI();
+      if (!ai) {
+        return res.status(503).json({ 
+          success: false, 
+          error: 'Gemini AI API key is not configured on server. Please check server settings.' 
+        });
+      }
+
+      // Clean base64 string
+      const cleanBase64 = imageBase64.replace(/^data:[^;]+;base64,/, '').trim();
+
+      const prompt = `You are an expert OCR vision specialist analyzing an industrial/manufacturing spreadsheet or filter screen.
+Examine this image carefully.
+Look at the list of models and their associated quantities (e.g. inside parentheses like "(900)" or in adjoining text/columns).
+
+STRICT FILTERING REQUIREMENT:
+- Extract ONLY the models whose model name starts with "HSO" (case-insensitive, e.g. "HSO17-3NB-I:AC", "HSO18-3NB-I:AC", "HSO19-5NB-I:AC", "HSO52-3NB-I:AC", "HSO52-5NB-I:AC", etc.).
+- Completely IGNORE all other models such as those starting with "HSI" (e.g. HSI17N, HSI18CP, HSI19GHD, HSI52VP) or "HTO" or "(All)". ONLY EXTRACT MODELS STARTING WITH "HSO".
+- For each matching HSO model, parse:
+  1. "modelName": Exact model string starting with HSO (e.g. "HSO17-3NB-I:AC").
+  2. "qty": The numerical quantity (integer) associated with that model, such as the number in parentheses (e.g., if it says "(900)", qty is 900; "(460)" -> 460).
+
+OUTPUT FORMAT:
+Return ONLY a valid JSON array of objects:
+[
+  { "modelName": "HSO17-3NB-I:AC", "qty": 900 },
+  { "modelName": "HSO18-3NB-I:AC", "qty": 460 }
+]
+No backticks, no markdown, just clean raw JSON array.`;
+
+      const imagePart = {
+        inlineData: {
+          mimeType: mimeType || 'image/jpeg',
+          data: cleanBase64
+        }
+      };
+      const textPart = {
+        text: prompt
+      };
+
+      const modelsToTry = ['gemini-2.5-flash', 'gemini-2.0-flash'];
+      let extractedData: Array<{ modelName: string; qty: number }> = [];
+      let lastError: string | null = null;
+
+      for (const model of modelsToTry) {
+        try {
+          const response = await ai.models.generateContent({
+            model,
+            contents: { parts: [imagePart, textPart] },
+            config: {
+              responseMimeType: 'application/json'
+            }
+          });
+
+          if (response && response.text) {
+            let cleaned = response.text.trim();
+            if (cleaned.startsWith('```json')) {
+              cleaned = cleaned.replace(/^```json/i, '').replace(/```$/g, '').trim();
+            } else if (cleaned.startsWith('```')) {
+              cleaned = cleaned.replace(/^```/g, '').replace(/```$/g, '').trim();
+            }
+
+            const parsed = JSON.parse(cleaned);
+            if (Array.isArray(parsed)) {
+              extractedData = parsed
+                .filter(item => item && typeof item.modelName === 'string' && item.modelName.trim().toUpperCase().startsWith('HSO'))
+                .map(item => ({
+                  modelName: item.modelName.trim(),
+                  qty: Math.max(1, parseInt(String(item.qty), 10) || 0)
+                }));
+              break;
+            }
+          }
+        } catch (err: any) {
+          console.warn(`[Smog OCR] Model ${model} attempt note:`, err?.message || err);
+          lastError = err?.message || 'OCR attempt failed';
+        }
+      }
+
+      const totalQty = extractedData.reduce((sum, item) => sum + (Number(item.qty) || 0), 0);
+
+      return res.json({
+        success: true,
+        items: extractedData,
+        totalCount: extractedData.length,
+        totalQty,
+        note: extractedData.length === 0 ? (lastError || 'No models starting with HSO found in the photo.') : undefined
+      });
+    } catch (err: any) {
+      console.error('Smog OCR extraction error:', err);
+      return res.status(500).json({ success: false, error: err.message || 'Error processing photo' });
     }
   });
 

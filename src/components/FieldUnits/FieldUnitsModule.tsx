@@ -10,7 +10,8 @@ import {
   Activity,
   PauseCircle,
   User,
-  Trash2
+  Trash2,
+  Edit
 } from 'lucide-react';
 import { FieldUnit } from '../../types';
 import { formatShortDateTime } from '../../utils/dateFormatter';
@@ -22,6 +23,7 @@ import {
 } from '../../services/fieldUnitStore';
 import { AddFieldUnitDialog } from './AddFieldUnitDialog';
 import { FieldUnitDetailsDialog } from './FieldUnitDetailsDialog';
+import { DeleteUnitConfirmModal } from '../Common/DeleteUnitConfirmModal';
 import { 
   calculateShiftElapsedExactHours, 
   formatHoursToHHMM, 
@@ -62,7 +64,20 @@ export const FieldUnitsModule: React.FC<FieldUnitsModuleProps> = ({
 
   
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [editingUnit, setEditingUnit] = useState<FieldUnit | null>(null);
   const [selectedUnit, setSelectedUnit] = useState<FieldUnit | null>(null);
+  const [unitToDelete, setUnitToDelete] = useState<FieldUnit | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const handleEdit = (unit: FieldUnit) => {
+    setEditingUnit(unit);
+    setIsAddModalOpen(true);
+  };
+
+  const handleOpenAdd = () => {
+    setEditingUnit(null);
+    setIsAddModalOpen(true);
+  };
 
   useEffect(() => {
     const unsubscribe = subscribeFieldUnitStore(() => {
@@ -85,10 +100,17 @@ export const FieldUnitsModule: React.FC<FieldUnitsModuleProps> = ({
     updateFieldUnitStatus(id, 'live');
   };
 
-  const handleDelete = (id: string, modelName: string) => {
-    if (window.confirm(`Are you sure you want to delete Field Unit record for "${modelName}"?`)) {
-      deleteFieldUnit(id);
-    }
+  const handlePromptDelete = (unit: FieldUnit) => {
+    setUnitToDelete(unit);
+  };
+
+  const handleConfirmDelete = () => {
+    if (!unitToDelete) return;
+    const deletedName = unitToDelete.modelName;
+    deleteFieldUnit(unitToDelete.id);
+    setToastMessage(`Field Unit "${deletedName}" deleted successfully`);
+    setTimeout(() => setToastMessage(null), 3500);
+    setUnitToDelete(null);
   };
 
   const liveCount = fieldUnits.filter(u => u.status === 'live').length;
@@ -313,7 +335,7 @@ export const FieldUnitsModule: React.FC<FieldUnitsModuleProps> = ({
           </div>
 
           <button
-            onClick={() => setIsAddModalOpen(true)}
+            onClick={handleOpenAdd}
             className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl font-extrabold text-xs text-slate-950 bg-gradient-to-r from-cyan-400 to-emerald-400 hover:from-cyan-300 hover:to-emerald-300 shadow-md shadow-cyan-950/50 hover:scale-[1.02] active:scale-[0.98] transition-all shrink-0 cursor-pointer whitespace-nowrap"
           >
             <Plus className="w-4 h-4 stroke-[3]" />
@@ -370,13 +392,27 @@ export const FieldUnitsModule: React.FC<FieldUnitsModuleProps> = ({
 
 
                       {unit.status === 'stopped' && (
-                        <button
-                          onClick={() => handleDelete(unit.id, unit.modelName)}
-                          className="p-1.5 text-rose-400 hover:text-rose-200 bg-rose-950/80 hover:bg-rose-900 border border-rose-800 hover:border-rose-600 rounded-xl transition-all shadow-sm active:scale-95 cursor-pointer flex items-center justify-center"
-                          title="Delete Card & Database Record"
-                        >
-                          <Trash2 className="w-3.5 h-3.5 text-rose-400" />
-                        </button>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            onClick={() => handleEdit(unit)}
+                            className="p-1.5 text-amber-300 hover:text-white bg-amber-950 border border-amber-800 hover:border-amber-600 hover:bg-amber-900 rounded-xl transition-all shadow-sm active:scale-95 cursor-pointer flex items-center justify-center"
+                            title="Edit Draft Field Unit"
+                          >
+                            <Edit className="w-3.5 h-3.5 text-amber-400" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              e.preventDefault();
+                              handlePromptDelete(unit);
+                            }}
+                            className="p-1.5 text-rose-400 hover:text-rose-200 bg-rose-950/80 hover:bg-rose-900 border border-rose-800 hover:border-rose-600 rounded-xl transition-all shadow-sm active:scale-95 cursor-pointer flex items-center justify-center"
+                            title="Delete Card & Database Record"
+                          >
+                            <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                          </button>
+                        </div>
                       )}
                     </div>
                   </div>
@@ -476,14 +512,24 @@ export const FieldUnitsModule: React.FC<FieldUnitsModuleProps> = ({
                   )}
 
                   {unit.status === 'stopped' && (
-                    <button
-                      onClick={() => handleResume(unit.id)}
-                      className="flex-1 flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl text-xs font-extrabold text-cyan-300 bg-cyan-950/90 hover:bg-cyan-900 border border-cyan-800/80 transition-all cursor-pointer active:scale-95 shadow-sm"
-                      title="Resume Field Test"
-                    >
-                      <Activity className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-                      <span>Resume</span>
-                    </button>
+                    <>
+                      <button
+                        onClick={() => handleEdit(unit)}
+                        className="flex-1 flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl text-xs font-extrabold text-amber-300 bg-amber-950/90 hover:bg-amber-900 border border-amber-800/80 transition-all cursor-pointer active:scale-95 shadow-sm"
+                        title="Edit Draft Field Unit"
+                      >
+                        <Edit className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                        <span>Edit</span>
+                      </button>
+                      <button
+                        onClick={() => handleResume(unit.id)}
+                        className="flex-1 flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl text-xs font-extrabold text-cyan-300 bg-cyan-950/90 hover:bg-cyan-900 border border-cyan-800/80 transition-all cursor-pointer active:scale-95 shadow-sm"
+                        title="Resume Field Test"
+                      >
+                        <Activity className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                        <span>Resume</span>
+                      </button>
+                    </>
                   )}
 
                   {unit.status !== 'finished' && (
@@ -522,7 +568,7 @@ export const FieldUnitsModule: React.FC<FieldUnitsModuleProps> = ({
             {searchTerm ? `No units match your search "${searchTerm}".` : 'No field units in this status section yet.'}
           </p>
           <button
-            onClick={() => setIsAddModalOpen(true)}
+            onClick={handleOpenAdd}
             className="mt-2 inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold text-slate-950 bg-cyan-400 hover:bg-cyan-300 transition-colors cursor-pointer"
           >
             <Plus className="w-4 h-4" />
@@ -534,7 +580,11 @@ export const FieldUnitsModule: React.FC<FieldUnitsModuleProps> = ({
       {/* Add Modal */}
       <AddFieldUnitDialog
         isOpen={isAddModalOpen}
-        onClose={() => setIsAddModalOpen(false)}
+        initialUnit={editingUnit}
+        onClose={() => {
+          setIsAddModalOpen(false);
+          setEditingUnit(null);
+        }}
         onSuccess={(status) => {
           setFieldUnits(getFieldUnits());
           setActiveTab(status === 'stopped' ? 'stopped' : 'live');
@@ -548,6 +598,25 @@ export const FieldUnitsModule: React.FC<FieldUnitsModuleProps> = ({
         onClose={() => setSelectedUnit(null)}
         onStatusChanged={() => setFieldUnits(getFieldUnits())}
       />
+
+      {/* Delete Confirmation Modal */}
+      <DeleteUnitConfirmModal
+        isOpen={!!unitToDelete}
+        onClose={() => setUnitToDelete(null)}
+        onConfirm={handleConfirmDelete}
+        unitType="Field Unit"
+        modelName={unitToDelete?.modelName || ''}
+        station={unitToDelete?.station}
+        serialNumber={unitToDelete?.serialNumber}
+      />
+
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 z-[9999] bg-rose-600 text-white font-bold text-xs py-3 px-4 rounded-2xl shadow-2xl flex items-center gap-2.5 border border-rose-400 animate-in fade-in slide-in-from-bottom-4 duration-200">
+          <Trash2 className="w-4 h-4 shrink-0 text-white" />
+          <span>{toastMessage}</span>
+        </div>
+      )}
 
     </div>
   );

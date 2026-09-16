@@ -117,12 +117,10 @@ if (db) {
             list.push(data);
           }
         });
-        if (list.length > 0) {
-          list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-          protoUnitsCache = list;
-          try { localStorage.setItem(STORAGE_KEY_PROTO_UNITS, JSON.stringify(list)); } catch {}
-          notifyListeners();
-        }
+        list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+        protoUnitsCache = list;
+        try { localStorage.setItem(STORAGE_KEY_PROTO_UNITS, JSON.stringify(list)); } catch {}
+        notifyListeners();
       }
     }, (err: any) => {
       console.warn('[ProtoUnitStore] Real-time listener error:', err);
@@ -338,15 +336,12 @@ export function updateProtoUnit(id: string, updates: Partial<ProtoUnit>): ProtoU
 }
 
 export function deleteProtoUnit(id: string): void {
-  if (!requireOnlineForSave(`Delete Proto Unit (${id})`)) {
-    return;
-  }
   const updated = protoUnitsCache.filter(u => u.id !== id);
   saveLocalProtoUnits(updated);
 
-  // Delete from Supabase & Firestore
-  deleteProtoUnitFromSupabase(id);
-  deleteProtoUnitFromFirestore(id);
+  // Delete from Supabase & Firestore asynchronously
+  deleteProtoUnitFromSupabase(id).catch(err => console.warn('[ProtoUnitStore] Supabase delete note:', err));
+  deleteProtoUnitFromFirestore(id).catch(err => console.warn('[ProtoUnitStore] Firestore delete note:', err));
 }
 
 export function addProtoUnitObservation(id: string, text: string): ProtoUnit | null {

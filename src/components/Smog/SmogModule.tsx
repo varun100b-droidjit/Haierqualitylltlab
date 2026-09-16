@@ -567,7 +567,7 @@ export const SmogModule: React.FC<SmogModuleProps> = ({
 
     // Auto-align view to the newly scanned units' Date & Shift
     if (newRecords.length > 0) {
-      const savedDate = newRecords[0].smogDate || newRecords[0].date;
+      const savedDate = newRecords[0].productionDate || newRecords[0].date;
       const savedShift = resolveRecordShift(newRecords[0]);
 
       if (selectedDate && selectedDate !== savedDate) {
@@ -587,7 +587,7 @@ export const SmogModule: React.FC<SmogModuleProps> = ({
     setSupabaseStatus('connected');
 
     const first = newRecords[0];
-    setToastNotification(`✓ Added ${newRecords.length} Leak Unit(s) to Shift ${first?.shift || ''} [Date: ${first?.smogDate || ''}]`);
+    setToastNotification(`✓ Added ${newRecords.length} Leak Unit(s) to Shift ${first?.shift || ''} [Date: ${first?.productionDate || first?.date || ''}]`);
     setTimeout(() => setToastNotification(null), 3500);
   };
 
@@ -691,17 +691,16 @@ export const SmogModule: React.FC<SmogModuleProps> = ({
 
     const matchDate = !selectedDate || 
       record.date === selectedDate || 
-      record.smogDate === selectedDate || 
       record.productionDate === selectedDate;
 
     return matchSearch && matchShift && matchDate;
   });
 
-  const todayCount = leakRecords.filter(r => r.date === todayStr || r.smogDate === todayStr).length;
+  const todayCount = leakRecords.filter(r => r.date === todayStr || r.productionDate === todayStr).length;
 
   // Date-wise active records for Dashboard calculations
   const activeRecordsForMetrics = selectedDate
-    ? leakRecords.filter(r => r.date === selectedDate || r.smogDate === selectedDate || r.productionDate === selectedDate)
+    ? leakRecords.filter(r => r.date === selectedDate || r.productionDate === selectedDate)
     : leakRecords;
 
   const displayLeakCount = activeRecordsForMetrics.length;
@@ -884,48 +883,44 @@ export const SmogModule: React.FC<SmogModuleProps> = ({
           </div>
         </div>
 
-        {/* ROW 3: Pro. Qty & Smog Pending Qty (Hides if 0, Shows if non-zero) */}
+        {/* ROW 3: Pro. Qty & Smog Pending Qty (Hides if both 0, Shows if either is non-zero) */}
         {(extraMetrics.proQty !== 0 || extraMetrics.smogPendingQty !== 0) && (
-          <div className={`grid ${extraMetrics.proQty !== 0 && extraMetrics.smogPendingQty !== 0 ? 'grid-cols-2' : 'grid-cols-1'} gap-3 animate-in fade-in duration-200`}>
+          <div className="grid grid-cols-2 gap-3 animate-in fade-in duration-200">
             {/* Pro. Qty Card */}
-            {extraMetrics.proQty !== 0 && (
-              <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800/90 shadow-sm relative overflow-hidden group">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-mono text-blue-400 uppercase tracking-wider block font-bold">
-                    Pro. Qty
-                  </span>
-                  <Boxes className="w-3.5 h-3.5 text-blue-400/80" />
-                </div>
-                <div className="flex items-baseline gap-2 mt-1">
-                  <span className="text-2xl font-black text-blue-400 font-mono">{extraMetrics.proQty}</span>
-                  <span className="text-[10px] text-slate-400 font-mono">Units</span>
-                </div>
-                <div className="mt-1.5 text-[9px] text-slate-400 font-mono flex items-center justify-between">
-                  <span>Production Qty</span>
-                  <span className="text-blue-400 font-semibold">{extraMetrics.proQty} Total</span>
-                </div>
+            <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800/90 shadow-sm relative overflow-hidden group">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-mono text-blue-400 uppercase tracking-wider block font-bold">
+                  Pro. Qty
+                </span>
+                <Boxes className="w-3.5 h-3.5 text-blue-400/80" />
               </div>
-            )}
+              <div className="flex items-baseline gap-2 mt-1">
+                <span className="text-2xl font-black text-blue-400 font-mono">{extraMetrics.proQty}</span>
+                <span className="text-[10px] text-slate-400 font-mono">Units</span>
+              </div>
+              <div className="mt-1.5 text-[9px] text-slate-400 font-mono flex items-center justify-between">
+                <span>Production Qty</span>
+                <span className="text-blue-400 font-semibold">{extraMetrics.proQty} Total</span>
+              </div>
+            </div>
 
             {/* Smog Pending Qty Card */}
-            {extraMetrics.smogPendingQty !== 0 && (
-              <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800/90 shadow-sm relative overflow-hidden group">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-mono text-rose-400 uppercase tracking-wider block font-bold">
-                    Smog Pending Qty
-                  </span>
-                  <Hourglass className="w-3.5 h-3.5 text-rose-400/80" />
-                </div>
-                <div className="flex items-baseline gap-2 mt-1">
-                  <span className="text-2xl font-black text-rose-400 font-mono">{extraMetrics.smogPendingQty}</span>
-                  <span className="text-[10px] text-slate-400 font-mono">Pending</span>
-                </div>
-                <div className="mt-1.5 text-[9px] text-slate-400 font-mono flex items-center justify-between">
-                  <span>Inspection Queue</span>
-                  <span className="text-rose-400 font-semibold">{extraMetrics.smogPendingQty} Remaining</span>
-                </div>
+            <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800/90 shadow-sm relative overflow-hidden group">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-mono text-rose-400 uppercase tracking-wider block font-bold">
+                  Smog Pending Qty
+                </span>
+                <Hourglass className="w-3.5 h-3.5 text-rose-400/80" />
               </div>
-            )}
+              <div className="flex items-baseline gap-2 mt-1">
+                <span className="text-2xl font-black text-rose-400 font-mono">{extraMetrics.smogPendingQty}</span>
+                <span className="text-[10px] text-slate-400 font-mono">Pending</span>
+              </div>
+              <div className="mt-1.5 text-[9px] text-slate-400 font-mono flex items-center justify-between">
+                <span>Inspection Queue</span>
+                <span className="text-rose-400 font-semibold">{extraMetrics.smogPendingQty} Remaining</span>
+              </div>
+            </div>
           </div>
         )}
       </div>
@@ -1036,12 +1031,10 @@ export const SmogModule: React.FC<SmogModuleProps> = ({
         const shiftBSummaries = getShiftModelSummaries(shiftBRecords);
 
         const latestTimeA = shiftARecords[0]?.time;
-        const latestProdA = shiftARecords[0]?.productionDate || (selectedDate || todayStr);
-        const latestSmogA = shiftARecords[0]?.smogDate || shiftARecords[0]?.date || (selectedDate || todayStr);
+        const latestProdA = shiftARecords[0]?.productionDate || shiftARecords[0]?.date || (selectedDate || todayStr);
 
         const latestTimeB = shiftBRecords[0]?.time;
-        const latestProdB = shiftBRecords[0]?.productionDate || (selectedDate || todayStr);
-        const latestSmogB = shiftBRecords[0]?.smogDate || shiftBRecords[0]?.date || (selectedDate || todayStr);
+        const latestProdB = shiftBRecords[0]?.productionDate || shiftBRecords[0]?.date || (selectedDate || todayStr);
 
         const totalSuspectA = shiftARecords.reduce((sum, r) => sum + r.suspectCount, 0);
         const totalActualA = shiftARecords.reduce((sum, r) => sum + r.actualCount, 0);
@@ -1146,16 +1139,11 @@ export const SmogModule: React.FC<SmogModuleProps> = ({
                       )}
                     </div>
 
-                    {/* Production & Smog Date Badges below Table */}
+                    {/* Date Badge below Table */}
                     <div className="flex flex-wrap items-center gap-2 pt-0.5 text-[10px] font-mono">
                       {latestProdA && (
                         <span className="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-slate-300">
-                          Prod: <strong className="text-white">{latestProdA}</strong>
-                        </span>
-                      )}
-                      {latestSmogA && (
-                        <span className="px-2.5 py-1 rounded-lg bg-emerald-950/70 border border-emerald-800/80 text-emerald-400">
-                          Smog: <strong className="text-emerald-300">{latestSmogA}</strong>
+                          Date: <strong className="text-white">{latestProdA}</strong>
                         </span>
                       )}
                       {shiftARecords.length > 0 && shiftARecords[0].smogPerson && (
@@ -1296,16 +1284,11 @@ export const SmogModule: React.FC<SmogModuleProps> = ({
                       )}
                     </div>
 
-                    {/* Production & Smog Date Badges below Table */}
+                    {/* Date Badge below Table */}
                     <div className="flex flex-wrap items-center gap-2 pt-0.5 text-[10px] font-mono">
                       {latestProdB && (
                         <span className="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-slate-300">
-                          Prod: <strong className="text-white">{latestProdB}</strong>
-                        </span>
-                      )}
-                      {latestSmogB && (
-                        <span className="px-2.5 py-1 rounded-lg bg-emerald-950/70 border border-emerald-800/80 text-emerald-400">
-                          Smog: <strong className="text-emerald-300">{latestSmogB}</strong>
+                          Date: <strong className="text-white">{latestProdB}</strong>
                         </span>
                       )}
                       {shiftBRecords.length > 0 && shiftBRecords[0].smogPerson && (
@@ -1583,14 +1566,9 @@ export const SmogModule: React.FC<SmogModuleProps> = ({
                     <span className="text-slate-500">•</span>
                     <span>Shift {selectedRecordForDetails.shift}</span>
                   </p>
-                  {(selectedRecordForDetails.productionDate || selectedRecordForDetails.smogDate) && (
+                  {(selectedRecordForDetails.productionDate || selectedRecordForDetails.date) && (
                     <div className="flex items-center gap-2 pt-1 text-[10px] font-mono text-slate-400">
-                      {selectedRecordForDetails.productionDate && (
-                        <span>Prod: <strong className="text-white">{selectedRecordForDetails.productionDate}</strong></span>
-                      )}
-                      {selectedRecordForDetails.smogDate && (
-                        <span className="text-emerald-400">Smog: <strong className="text-emerald-300">{selectedRecordForDetails.smogDate}</strong></span>
-                      )}
+                      <span>Date: <strong className="text-white">{selectedRecordForDetails.productionDate || selectedRecordForDetails.date}</strong></span>
                     </div>
                   )}
                 </div>
@@ -2009,7 +1987,6 @@ export const SmogModule: React.FC<SmogModuleProps> = ({
               return whatsAppReportParams?.date || selectedDate || new Date().toISOString().split('T')[0];
             }
           })()}
-          smogDate={whatsAppReportParams?.date || selectedDate || new Date().toISOString().split('T')[0]}
           shift={whatsAppReportParams?.shift || (shiftFilter === 'all' ? 'A' : shiftFilter)}
           smogQty={whatsAppReportParams?.smogQty ?? (currentSmogQty || 0)}
           records={leakRecords}

@@ -20,7 +20,7 @@ export interface SmogWhatsAppReportModalProps {
   isOpen: boolean;
   onClose: () => void;
   productionDate: string;
-  smogDate: string;
+  smogDate?: string;
   shift: 'A' | 'B' | 'all';
   smogQty: number;
   records: LeakUnitRecord[];
@@ -30,7 +30,6 @@ export const SmogWhatsAppReportModal: React.FC<SmogWhatsAppReportModalProps> = (
   isOpen,
   onClose,
   productionDate,
-  smogDate,
   shift,
   smogQty,
   records
@@ -45,7 +44,7 @@ export const SmogWhatsAppReportModal: React.FC<SmogWhatsAppReportModalProps> = (
   const filteredRecords = records.filter(r => {
     const recordShift = resolveRecordShift(r);
     const shiftMatch = shift === 'all' || recordShift === shift;
-    const dateMatch = !smogDate || r.smogDate === smogDate || r.date === smogDate;
+    const dateMatch = !productionDate || r.productionDate === productionDate || r.date === productionDate;
     return shiftMatch && dateMatch;
   });
 
@@ -86,8 +85,7 @@ export const SmogWhatsAppReportModal: React.FC<SmogWhatsAppReportModalProps> = (
     let text = `🚨 *SMOG & LEAK OPERATION REPORT* 🚨\n`;
     text += `━━━━━━━━━━━━━━━━━━━━━\n`;
     text += `⚙️ *Operation Status:* OPERATION CLOSED\n`;
-    text += `📅 *Production Date:* ${productionDate || 'N/A'}\n`;
-    text += `📅 *Smog Date:* ${smogDate || 'N/A'}\n`;
+    text += `📅 *Date:* ${productionDate || 'N/A'}\n`;
     text += `⏰ *Shift:* Shift ${shift === 'all' ? 'All' : shift}\n`;
     text += `🕒 *Closed Time:* ${nowStr}\n`;
     text += `━━━━━━━━━━━━━━━━━━━━━\n`;
@@ -210,16 +208,14 @@ export const SmogWhatsAppReportModal: React.FC<SmogWhatsAppReportModalProps> = (
       ctx.lineTo(width - 50, 215);
       ctx.stroke();
 
-      // 3. Info Parameters Grid (Prod Date, Smog Date, Shift)
+      // 3. Info Parameters Grid (Date, Shift)
       const cardY = 240;
-      const colW = (width - 100 - 40) / 3;
+      const colW = (width - 100 - 20) / 2;
 
       // Card 1: Production Date
-      drawParamCard(ctx, 50, cardY, colW, 90, 'PRODUCTION DATE', productionDate || 'N/A', '#38bdf8');
-      // Card 2: Smog Date
-      drawParamCard(ctx, 50 + colW + 20, cardY, colW, 90, 'SMOG DATE', smogDate || 'N/A', '#34d399');
-      // Card 3: Shift
-      drawParamCard(ctx, 50 + (colW + 20) * 2, cardY, colW, 90, 'SHIFT', `SHIFT ${shift === 'all' ? 'ALL' : shift}`, '#fbbf24');
+      drawParamCard(ctx, 50, cardY, colW, 90, 'DATE', productionDate || 'N/A', '#38bdf8');
+      // Card 2: Shift
+      drawParamCard(ctx, 50 + colW + 20, cardY, colW, 90, 'SHIFT', `SHIFT ${shift === 'all' ? 'ALL' : shift}`, '#fbbf24');
 
       // 4. Primary Metric Highlights (Smog Qty, Leak Qty, Passed)
       const metricY = 355;
@@ -349,7 +345,7 @@ export const SmogWhatsAppReportModal: React.FC<SmogWhatsAppReportModalProps> = (
     } finally {
       setIsGenerating(false);
     }
-  }, [isOpen, productionDate, smogDate, shift, smogQty, filteredRecords.length]);
+  }, [isOpen, productionDate, shift, smogQty, filteredRecords.length]);
 
   // Helper to draw parameter cards
   function drawParamCard(
@@ -418,7 +414,7 @@ export const SmogWhatsAppReportModal: React.FC<SmogWhatsAppReportModalProps> = (
   // Handle WhatsApp Share
   const handleShareWhatsApp = async () => {
     const text = generateWhatsAppTextMessage();
-    const fileName = `Smog_Report_${smogDate || 'Today'}_Shift_${shift}.png`;
+    const fileName = `Smog_Report_${productionDate || 'Today'}_Shift_${shift}.png`;
 
     try {
       if (generatedImageUrl) {
@@ -453,7 +449,7 @@ export const SmogWhatsAppReportModal: React.FC<SmogWhatsAppReportModalProps> = (
     if (!generatedImageUrl) return;
     const a = document.createElement('a');
     a.href = generatedImageUrl;
-    a.download = `Smog_Operation_Report_${smogDate || 'date'}_Shift_${shift}.png`;
+    a.download = `Smog_Operation_Report_${productionDate || 'date'}_Shift_${shift}.png`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -489,7 +485,7 @@ export const SmogWhatsAppReportModal: React.FC<SmogWhatsAppReportModalProps> = (
                 </span>
               </h3>
               <p className="text-[11px] font-mono text-slate-400">
-                Production Date, Smog Date, Shift, Leak Qty, Smog Qty & Locations
+                Date, Shift, Leak Qty, Smog Qty & Locations
               </p>
             </div>
           </div>

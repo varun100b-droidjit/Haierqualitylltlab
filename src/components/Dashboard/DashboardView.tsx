@@ -354,14 +354,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       };
     } else {
       // Smog Section
-      const filtered = filterListByYearMonth(smogUnits, ['date', 'smogDate', 'productionDate', 'createdAt'], selectedYear, selectedMonth);
+      const filtered = filterListByYearMonth(smogUnits, ['date', 'productionDate', 'createdAt'], selectedYear, selectedMonth);
       const totalSuspect = filtered.reduce((sum: number, r: any) => sum + (r.suspectCount || (r.serialNumbers ? r.serialNumbers.length : 0)), 0);
       const totalActual = filtered.reduce((sum: number, r: any) => sum + (r.actualCount || (r.passedSerials ? r.passedSerials.length : 0)), 0);
       const filteredQty = filterListByYearMonth(smogQtyRecords, ['date', 'createdAt'], selectedYear, selectedMonth);
       const totalSmogQty = filteredQty.reduce((sum: number, r: any) => sum + (Number(r.smogQty) || 0), 0);
 
       const monthly = months.map(m => {
-        const mList = filterListByYearMonth(smogUnits, ['date', 'smogDate', 'productionDate', 'createdAt'], selectedYear, m);
+        const mList = filterListByYearMonth(smogUnits, ['date', 'productionDate', 'createdAt'], selectedYear, m);
         const mQtyList = filterListByYearMonth(smogQtyRecords, ['date', 'createdAt'], selectedYear, m);
         const mSuspect = mList.reduce((sum: number, r: any) => sum + (r.suspectCount || (r.serialNumbers ? r.serialNumbers.length : 0)), 0);
         const mActual = mList.reduce((sum: number, r: any) => sum + (r.actualCount || (r.passedSerials ? r.passedSerials.length : 0)), 0);
@@ -394,7 +394,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   }, [activeSection, selectedYear, selectedMonth, protoUnits, ppUnits, fieldUnits, smogUnits, smogQtyRecords, validUnits, onNavigateToProtoUnits, onNavigateToPpUnits, onNavigateToFieldUnits, onNavigateToRDUnits, onNavigateToSmog]);
 
   const smogSectionMetrics = useMemo(() => {
-    const filtered = filterListByYearMonth(smogUnits, ['date', 'smogDate', 'productionDate', 'createdAt'], selectedYear, selectedMonth);
+    const filtered = filterListByYearMonth(smogUnits, ['date', 'productionDate', 'createdAt'], selectedYear, selectedMonth);
     const totalSuspect = filtered.reduce((sum: number, r: any) => sum + (r.suspectCount || (r.serialNumbers ? r.serialNumbers.length : 0)), 0);
     const totalActual = filtered.reduce((sum: number, r: any) => sum + (r.actualCount || (r.passedSerials ? r.passedSerials.length : 0)), 0);
 
@@ -962,8 +962,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         ) : activeSection === 'smog' ? (
           /* Smog Section Cards (TOTAL SUSPECT, TOTAL LEAK, MODEL QTY, SMOG QTY, PRO. QTY, SMOG PENDING QTY) */
           <div className="space-y-3">
-            {/* Row 1 & 2: Primary Smog KPI Cards */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-3.5">
+            <div className={`grid grid-cols-2 ${(smogExtra.proQty !== 0 || smogExtra.smogPendingQty !== 0) ? 'lg:grid-cols-3' : 'lg:grid-cols-4'} gap-3 sm:gap-3.5`}>
               {/* Card 1: TOTAL SUSPECT */}
               <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-900/90 border border-slate-800/90 shadow-sm relative overflow-hidden group hover:border-amber-500/40 transition-all">
                 <div className="absolute top-0 right-0 w-20 h-20 bg-amber-500/10 rounded-full blur-xl pointer-events-none" />
@@ -1056,14 +1055,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   </span>
                 </div>
               </div>
-            </div>
 
-            {/* Row 3: Pro. Qty & Smog Pending Qty (Hides if 0, Shows if non-zero) */}
-            {(smogExtra.proQty !== 0 || smogExtra.smogPendingQty !== 0) && (
-              <div className={`grid ${smogExtra.proQty !== 0 && smogExtra.smogPendingQty !== 0 ? 'grid-cols-2' : 'grid-cols-1'} gap-3 sm:gap-3.5 animate-in fade-in duration-200`}>
-                {/* Pro. Qty Card */}
-                {smogExtra.proQty !== 0 && (
-                  <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-900/90 border border-slate-800/90 shadow-sm relative overflow-hidden group hover:border-blue-500/40 transition-all">
+              {/* Cards 5 & 6: PRO. QTY & SMOG PENDING QTY (Show when either is non-zero, Hide when both 0) */}
+              {(smogExtra.proQty !== 0 || smogExtra.smogPendingQty !== 0) && (
+                <>
+                  {/* Card 5: PRO. QTY */}
+                  <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-900/90 border border-slate-800/90 shadow-sm relative overflow-hidden group hover:border-blue-500/40 transition-all animate-in fade-in duration-200">
                     <div className="flex items-center justify-between">
                       <span className="text-[10px] sm:text-[11px] font-mono text-blue-400 uppercase tracking-wider block font-bold">
                         PRO. QTY
@@ -1081,11 +1078,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       <span className="text-blue-400 font-semibold">{smogExtra.proQty} Total</span>
                     </div>
                   </div>
-                )}
 
-                {/* Smog Pending Qty Card */}
-                {smogExtra.smogPendingQty !== 0 && (
-                  <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-900/90 border border-slate-800/90 shadow-sm relative overflow-hidden group hover:border-rose-500/40 transition-all">
+                  {/* Card 6: SMOG PENDING QTY */}
+                  <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-900/90 border border-slate-800/90 shadow-sm relative overflow-hidden group hover:border-rose-500/40 transition-all animate-in fade-in duration-200">
                     <div className="flex items-center justify-between">
                       <span className="text-[10px] sm:text-[11px] font-mono text-rose-400 uppercase tracking-wider block font-bold">
                         SMOG PENDING QTY
@@ -1103,9 +1098,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       <span className="text-rose-400 font-semibold">{smogExtra.smogPendingQty} Remaining</span>
                     </div>
                   </div>
-                )}
-              </div>
-            )}
+                </>
+              )}
+            </div>
           </div>
         ) : (
           /* Standard 4 Cards for non-PP sections (Proto, Field, R&D) */

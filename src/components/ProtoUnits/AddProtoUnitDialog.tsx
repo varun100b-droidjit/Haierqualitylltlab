@@ -22,7 +22,7 @@ import {
   Sliders
 } from 'lucide-react';
 import { ProtoUnit, ProtoUnitParts, ProtoUnitPhotos, ReportDetails, NamePlateDetails } from '../../types';
-import { addProtoUnit, generate5DigitSerial, getProtoUnits } from '../../services/protoUnitStore';
+import { addProtoUnit, updateProtoUnit, generate5DigitSerial, getProtoUnits } from '../../services/protoUnitStore';
 import { ALL_STATIONS, getOccupiedStations } from '../../utils/stationManager';
 import { PhotoUploadSection } from '../Common/PhotoUploadSection';
 import { compressImageFile } from '../../services/photoSettingsStore';
@@ -31,12 +31,14 @@ interface AddProtoUnitDialogProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: (status?: 'live' | 'stopped' | 'finished') => void;
+  initialUnit?: ProtoUnit | null;
 }
 
 export const AddProtoUnitDialog: React.FC<AddProtoUnitDialogProps> = ({
   isOpen,
   onClose,
   onSuccess,
+  initialUnit,
 }) => {
   // Basic Information
   const [modelName, setModelName] = useState('');
@@ -119,31 +121,97 @@ export const AddProtoUnitDialog: React.FC<AddProtoUnitDialogProps> = ({
   // Compute live occupied stations across Proto & Field units
   const liveOccupiedStations = getOccupiedStations();
 
-  // Auto generate 5 digit serials, set default station, and auto detect start/completed dates when modal opens
+  // Auto generate 5 digit serials, set default station, or load initialUnit when modal opens
   useEffect(() => {
     if (isOpen) {
-      setIduSerialNumber(generate5DigitSerial());
-      setOduSerialNumber(generate5DigitSerial());
-      setErrors({});
-      
-      const occupied = getOccupiedStations();
-      const firstAvailable = ALL_STATIONS.find(s => !occupied.has(s)) || ALL_STATIONS[0];
-      setStation(firstAvailable);
+      if (initialUnit) {
+        setModelName(initialUnit.modelName || '');
+        setSampleType(initialUnit.sampleType || '');
+        setStation(initialUnit.station || ALL_STATIONS[0]);
+        setIduSerialNumber(initialUnit.iduSerialNumber || '');
+        setOduSerialNumber(initialUnit.oduSerialNumber || '');
+        setRequestBy(initialUnit.requestBy || '');
+        setTestPurpose(initialUnit.testPurpose || '');
+        setRequiredHour(String(initialUnit.requiredHour ?? 72));
+        setDoneHour(String(initialUnit.doneHour ?? 0));
 
-      // Auto-detect Start Date for Sample Received & Test Commenced (Same Date)
-      const todayStr = new Date().toISOString().split('T')[0];
-      setSampleReceived(todayStr);
-      setTestCommenced(todayStr);
-      setDoneHour('0');
+        setReportNo(initialUnit.reportDetails?.reportNo || '');
+        setSampleReceived(initialUnit.reportDetails?.sampleReceived || '');
+        setTestCommenced(initialUnit.reportDetails?.testCommenced || '');
+        setTestCompleted(initialUnit.reportDetails?.testCompleted || '');
 
-      // Auto-calculate Test Complete Date (Start Date + Pending Hours)
-      const req = Number(requiredHour) || 72;
-      const done = 0;
-      const pending = Math.max(0, req - done);
-      const compDate = new Date(Date.now() + pending * 3600 * 1000);
-      setTestCompleted(compDate.toISOString().split('T')[0]);
+        setCoolingCapacity(initialUnit.namePlate?.coolingCapacity || '');
+        setRatedCoolingPower(initialUnit.namePlate?.ratedCoolingPower || '');
+        setMainProgramChecksumIdu(initialUnit.namePlate?.mainProgramChecksumIdu || '');
+        setMainProgramChecksumOdu(initialUnit.namePlate?.mainProgramChecksumOdu || '');
+        setGasInjectionVolume(initialUnit.namePlate?.gasInjectionVolume || '');
+        setPowerMode(initialUnit.namePlate?.powerMode || '');
+        setEeChecksumIdu(initialUnit.namePlate?.eeChecksumIdu || '');
+        setEeChecksumOdu(initialUnit.namePlate?.eeChecksumOdu || '');
+        setRefrigerant(initialUnit.namePlate?.refrigerant || '');
+        setIseer(initialUnit.namePlate?.iseer || '');
+
+        setIduMotorSpec(initialUnit.partsInfo?.iduMotorSpec || '');
+        setIduMotorPartCode(initialUnit.partsInfo?.iduMotorPartCode || '');
+        setIduMotorSupplier(initialUnit.partsInfo?.iduMotorSupplier || '');
+        setIduPcbPartCode(initialUnit.partsInfo?.iduPcbPartCode || '');
+        setIduPcbSupplier(initialUnit.partsInfo?.iduPcbSupplier || '');
+
+        setOduMotorSpec(initialUnit.partsInfo?.oduMotorSpec || '');
+        setOduMotorPartCode(initialUnit.partsInfo?.oduMotorPartCode || '');
+        setOduMotorSupplier(initialUnit.partsInfo?.oduMotorSupplier || '');
+        setOduPcbPartCode(initialUnit.partsInfo?.oduPcbPartCode || '');
+        setOduPcbSupplier(initialUnit.partsInfo?.oduPcbSupplier || '');
+
+        setCompressorSpec(initialUnit.partsInfo?.compressorSpec || '');
+        setCompressorPartCode(initialUnit.partsInfo?.compressorPartCode || '');
+        setCompressorSupplier(initialUnit.partsInfo?.compressorSupplier || '');
+
+        setEevSpec(initialUnit.partsInfo?.eevSpec || '');
+        setEevPartCode(initialUnit.partsInfo?.eevPartCode || '');
+        setEevSupplier(initialUnit.partsInfo?.eevSupplier || '');
+
+        setPhotos(initialUnit.photos || {
+          indoorUnitPhoto: '',
+          productPhoto: '',
+          packingBoxPhoto: '',
+          iduNameplatePhoto: '',
+          oduNameplatePhoto: '',
+          iduPcbPhoto: '',
+          iduMotorPhoto: '',
+          oduPcbPhoto: '',
+          oduMotorPhoto: '',
+          oduCompressorPhoto: '',
+          oduEevPhoto: '',
+          stickerPhoto: '',
+        });
+
+        setRemarks(initialUnit.remarks || '');
+        setErrors({});
+      } else {
+        setIduSerialNumber(generate5DigitSerial());
+        setOduSerialNumber(generate5DigitSerial());
+        setErrors({});
+        
+        const occupied = getOccupiedStations();
+        const firstAvailable = ALL_STATIONS.find(s => !occupied.has(s)) || ALL_STATIONS[0];
+        setStation(firstAvailable);
+
+        // Auto-detect Start Date for Sample Received & Test Commenced (Same Date)
+        const todayStr = new Date().toISOString().split('T')[0];
+        setSampleReceived(todayStr);
+        setTestCommenced(todayStr);
+        setDoneHour('0');
+
+        // Auto-calculate Test Complete Date (Start Date + Pending Hours)
+        const req = Number(requiredHour) || 72;
+        const done = 0;
+        const pending = Math.max(0, req - done);
+        const compDate = new Date(Date.now() + pending * 3600 * 1000);
+        setTestCompleted(compDate.toISOString().split('T')[0]);
+      }
     }
-  }, [isOpen]);
+  }, [isOpen, initialUnit]);
 
   const handleSampleReceivedChange = (dateVal: string) => {
     setSampleReceived(dateVal);
@@ -309,23 +377,43 @@ export const AddProtoUnitDialog: React.FC<AddProtoUnitDialogProps> = ({
       oduEevPartCode: val(eevPartCode),
     };
 
-    addProtoUnit({
-      modelName: val(modelName),
-      sampleType: val(sampleType),
-      station: station || ALL_STATIONS[0],
-      iduSerialNumber: val(iduSerialNumber),
-      oduSerialNumber: val(oduSerialNumber),
-      requestBy: val(requestBy),
-      testPurpose: val(testPurpose),
-      requiredHour: Number(requiredHour) || 72,
-      doneHour: Number(doneHour) || 0,
-      reportDetails,
-      namePlate,
-      partsInfo,
-      photos,
-      remarks: val(remarks),
-      status: targetStatus,
-    });
+    if (initialUnit) {
+      updateProtoUnit(initialUnit.id, {
+        modelName: val(modelName),
+        sampleType: val(sampleType),
+        station: station || ALL_STATIONS[0],
+        iduSerialNumber: val(iduSerialNumber),
+        oduSerialNumber: val(oduSerialNumber),
+        requestBy: val(requestBy),
+        testPurpose: val(testPurpose),
+        requiredHour: Number(requiredHour) || 72,
+        doneHour: Number(doneHour) || 0,
+        reportDetails,
+        namePlate,
+        partsInfo,
+        photos,
+        remarks: val(remarks),
+        status: targetStatus,
+      });
+    } else {
+      addProtoUnit({
+        modelName: val(modelName),
+        sampleType: val(sampleType),
+        station: station || ALL_STATIONS[0],
+        iduSerialNumber: val(iduSerialNumber),
+        oduSerialNumber: val(oduSerialNumber),
+        requestBy: val(requestBy),
+        testPurpose: val(testPurpose),
+        requiredHour: Number(requiredHour) || 72,
+        doneHour: Number(doneHour) || 0,
+        reportDetails,
+        namePlate,
+        partsInfo,
+        photos,
+        remarks: val(remarks),
+        status: targetStatus,
+      });
+    }
 
     // Reset Form
     setModelName('');
@@ -422,8 +510,12 @@ export const AddProtoUnitDialog: React.FC<AddProtoUnitDialogProps> = ({
               <Cpu className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-white">New Proto Unit Entry</h2>
-              <p className="text-xs text-slate-400">Enter proto unit technical parameters, component info & photos</p>
+              <h2 className="text-lg font-bold text-white">
+                {initialUnit ? 'Edit Proto Unit (Draft)' : 'New Proto Unit Entry'}
+              </h2>
+              <p className="text-xs text-slate-400">
+                {initialUnit ? 'Update proto unit technical parameters, component info & photos' : 'Enter proto unit technical parameters, component info & photos'}
+              </p>
             </div>
           </div>
           <button
@@ -1117,7 +1209,7 @@ export const AddProtoUnitDialog: React.FC<AddProtoUnitDialogProps> = ({
               className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-xs font-extrabold text-slate-900 bg-gradient-to-r from-cyan-400 to-emerald-400 hover:from-cyan-300 hover:to-emerald-300 shadow-lg shadow-cyan-950/50 hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer"
             >
               <CheckCircle2 className="w-4 h-4" />
-              <span>Submit Proto Unit</span>
+              <span>{initialUnit ? 'Update & Start Live' : 'Submit Proto Unit'}</span>
             </button>
           </div>
 

@@ -11,7 +11,8 @@ import {
   PauseCircle,
   Play,
   Check,
-  FileText
+  FileText,
+  Edit
 } from 'lucide-react';
 import { ProtoUnit } from '../../types';
 import { formatShortDateTime } from '../../utils/dateFormatter';
@@ -25,6 +26,7 @@ import {
 import { findSavedReportForUnit } from '../../services/reportRoomStore';
 import { AddProtoUnitDialog } from './AddProtoUnitDialog';
 import { ProtoUnitDetailsDialog } from './ProtoUnitDetailsDialog';
+import { DeleteUnitConfirmModal } from '../Common/DeleteUnitConfirmModal';
 import { 
   calculateShiftElapsedExactHours, 
   formatHoursToHHMM, 
@@ -58,8 +60,11 @@ export const ProtoUnitsModule: React.FC<ProtoUnitsModuleProps> = ({
 
   // Dialog States
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const [editingUnit, setEditingUnit] = useState<ProtoUnit | null>(null);
   const [selectedUnit, setSelectedUnit] = useState<ProtoUnit | null>(null);
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
+  const [unitToDelete, setUnitToDelete] = useState<ProtoUnit | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // Live timer tick every 1 sec for running mode actual live time
   useEffect(() => {
@@ -79,11 +84,17 @@ export const ProtoUnitsModule: React.FC<ProtoUnitsModuleProps> = ({
   }, []);
 
   const handleOpenAdd = () => {
+    setEditingUnit(null);
     if (onOpenAddModal) {
       onOpenAddModal();
     } else {
       setIsAddDialogOpen(true);
     }
+  };
+
+  const handleEditUnit = (unit: ProtoUnit) => {
+    setEditingUnit(unit);
+    setIsAddDialogOpen(true);
   };
 
   const handleAddSuccess = (status?: 'live' | 'stopped' | 'finished') => {
@@ -102,10 +113,17 @@ export const ProtoUnitsModule: React.FC<ProtoUnitsModuleProps> = ({
     updateProtoUnitStatus(id, 'live');
   };
 
-  const handleDelete = (id: string, modelName: string) => {
-    if (window.confirm(`Are you sure you want to delete Proto Unit record for "${modelName}"?`)) {
-      deleteProtoUnit(id);
-    }
+  const handlePromptDelete = (unit: ProtoUnit) => {
+    setUnitToDelete(unit);
+  };
+
+  const handleConfirmDelete = () => {
+    if (!unitToDelete) return;
+    const deletedName = unitToDelete.modelName;
+    deleteProtoUnit(unitToDelete.id);
+    setToastMessage(`Proto Unit "${deletedName}" deleted successfully`);
+    setTimeout(() => setToastMessage(null), 3500);
+    setUnitToDelete(null);
   };
 
   // Filter units based on section and search term
@@ -315,15 +333,29 @@ export const ProtoUnitsModule: React.FC<ProtoUnitsModuleProps> = ({
                       </span>
 
 
-                      {/* Delete icon shown only in Stop section / status */}
+                      {/* Edit & Delete icons shown in Stop section / status */}
                       {unit.status === 'stopped' && (
-                        <button
-                          onClick={() => handleDelete(unit.id, unit.modelName)}
-                          className="p-1.5 text-rose-300 hover:text-white bg-rose-950 border border-rose-800 hover:border-rose-600 hover:bg-rose-900 rounded-xl transition-all shadow-md active:scale-95 cursor-pointer flex items-center justify-center shrink-0"
-                          title="Delete Card & Database Record"
-                        >
-                          <Trash2 className="w-4 h-4 text-rose-400" />
-                        </button>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            onClick={() => handleEditUnit(unit)}
+                            className="p-1.5 text-amber-300 hover:text-white bg-amber-950 border border-amber-800 hover:border-amber-600 hover:bg-amber-900 rounded-xl transition-all shadow-md active:scale-95 cursor-pointer flex items-center justify-center shrink-0"
+                            title="Edit Draft Unit Form"
+                          >
+                            <Edit className="w-4 h-4 text-amber-400" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              e.preventDefault();
+                              handlePromptDelete(unit);
+                            }}
+                            className="p-1.5 text-rose-300 hover:text-white bg-rose-950 border border-rose-800 hover:border-rose-600 hover:bg-rose-900 rounded-xl transition-all shadow-md active:scale-95 cursor-pointer flex items-center justify-center shrink-0"
+                            title="Delete Card & Database Record"
+                          >
+                            <Trash2 className="w-4 h-4 text-rose-400" />
+                          </button>
+                        </div>
                       )}
                     </div>
                   </div>
@@ -508,14 +540,24 @@ export const ProtoUnitsModule: React.FC<ProtoUnitsModuleProps> = ({
                       <span>Stop</span>
                     </button>
                   ) : (
-                    <button
-                      onClick={() => handleResumeUnit(unit.id)}
-                      className="flex-1 flex items-center justify-center gap-1 py-2 px-2.5 rounded-xl text-xs font-bold text-cyan-200 bg-cyan-950/90 hover:bg-cyan-900 border border-cyan-800/80 transition-all shadow-sm cursor-pointer"
-                      title="Resume to Live"
-                    >
-                      <Play className="w-3.5 h-3.5 text-cyan-400 shrink-0 fill-cyan-400" />
-                      <span>Resume</span>
-                    </button>
+                    <>
+                      <button
+                        onClick={() => handleEditUnit(unit)}
+                        className="flex-1 flex items-center justify-center gap-1 py-2 px-2.5 rounded-xl text-xs font-bold text-amber-200 bg-amber-950/90 hover:bg-amber-900 border border-amber-800/80 transition-all shadow-sm cursor-pointer"
+                        title="Edit Draft Unit Form"
+                      >
+                        <Edit className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                        <span>Edit</span>
+                      </button>
+                      <button
+                        onClick={() => handleResumeUnit(unit.id)}
+                        className="flex-1 flex items-center justify-center gap-1 py-2 px-2.5 rounded-xl text-xs font-bold text-cyan-200 bg-cyan-950/90 hover:bg-cyan-900 border border-cyan-800/80 transition-all shadow-sm cursor-pointer"
+                        title="Resume to Live"
+                      >
+                        <Play className="w-3.5 h-3.5 text-cyan-400 shrink-0 fill-cyan-400" />
+                        <span>Resume</span>
+                      </button>
+                    </>
                   )}
 
                   {/* Pass Button */}
@@ -565,7 +607,11 @@ export const ProtoUnitsModule: React.FC<ProtoUnitsModuleProps> = ({
       {/* Add Dialog */}
       <AddProtoUnitDialog
         isOpen={isAddDialogOpen}
-        onClose={() => setIsAddDialogOpen(false)}
+        initialUnit={editingUnit}
+        onClose={() => {
+          setIsAddDialogOpen(false);
+          setEditingUnit(null);
+        }}
         onSuccess={handleAddSuccess}
       />
 
@@ -581,6 +627,25 @@ export const ProtoUnitsModule: React.FC<ProtoUnitsModuleProps> = ({
           setProtoUnits(getProtoUnits());
         }}
       />
+
+      {/* Delete Confirmation Modal */}
+      <DeleteUnitConfirmModal
+        isOpen={!!unitToDelete}
+        onClose={() => setUnitToDelete(null)}
+        onConfirm={handleConfirmDelete}
+        unitType="Proto Unit"
+        modelName={unitToDelete?.modelName || ''}
+        station={unitToDelete?.station}
+        serialNumber={unitToDelete?.iduSerialNumber || unitToDelete?.oduSerialNumber}
+      />
+
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 z-[9999] bg-rose-600 text-white font-bold text-xs py-3 px-4 rounded-2xl shadow-2xl flex items-center gap-2.5 border border-rose-400 animate-in fade-in slide-in-from-bottom-4 duration-200">
+          <Trash2 className="w-4 h-4 shrink-0 text-white" />
+          <span>{toastMessage}</span>
+        </div>
+      )}
 
     </div>
   );

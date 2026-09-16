@@ -1,11 +1,17 @@
 // Smog Qty Entry Store & Synchronization Service with Firebase Firestore Persistence
 import { db, collection, doc, setDoc, deleteDoc, getDocs, onSnapshot } from './firebase';
 
+export interface SmogModelQtyItem {
+  modelName: string;
+  qty: number;
+}
+
 export interface SmogQtyRecord {
   id: string;
   date: string;       // YYYY-MM-DD
   shift: 'A' | 'B';
   smogQty: number;
+  models?: SmogModelQtyItem[];
   notes?: string;
   createdAt: string;
   updatedAt?: string;
@@ -168,6 +174,7 @@ export function saveSmogQtyRecord(data: {
   date: string;
   shift: 'A' | 'B' | string;
   smogQty: number;
+  models?: SmogModelQtyItem[];
   notes?: string;
 }): SmogQtyRecord {
   const current = getSmogQtyRecords();
@@ -190,6 +197,7 @@ export function saveSmogQtyRecord(data: {
       ...existing,
       shift: normalizedShift,
       smogQty: Number(data.smogQty),
+      models: data.models !== undefined ? data.models : existing.models,
       notes: data.notes || existing.notes,
       updatedAt: new Date().toISOString()
     };
@@ -201,6 +209,7 @@ export function saveSmogQtyRecord(data: {
       date: targetDate,
       shift: normalizedShift,
       smogQty: Number(data.smogQty),
+      models: data.models || [],
       notes: data.notes || '',
       createdAt: new Date().toISOString()
     };
