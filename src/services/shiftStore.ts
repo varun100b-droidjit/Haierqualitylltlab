@@ -72,13 +72,16 @@ export const LAB_SHIFTS: Record<LabShift, ShiftInfo> = {
 
 const STORAGE_KEY = 'llt_active_lab_shift';
 
-let currentShift: LabShift = 'GENERAL';
+let currentShift: LabShift = 'SHIFT_ABC';
 
 // Load stored shift locally first for instant UI render
 if (typeof window !== 'undefined') {
   const saved = localStorage.getItem(STORAGE_KEY);
-  if (saved && saved in LAB_SHIFTS) {
+  if (saved && saved in LAB_SHIFTS && saved !== 'GENERAL') {
     currentShift = saved as LabShift;
+  } else {
+    currentShift = 'SHIFT_ABC';
+    try { localStorage.setItem(STORAGE_KEY, 'SHIFT_ABC'); } catch {}
   }
 }
 

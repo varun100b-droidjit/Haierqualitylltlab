@@ -26,6 +26,8 @@ import { addProtoUnit, updateProtoUnit, generate5DigitSerial, getProtoUnits } fr
 import { ALL_STATIONS, getOccupiedStations } from '../../utils/stationManager';
 import { PhotoUploadSection } from '../Common/PhotoUploadSection';
 import { compressImageFile } from '../../services/photoSettingsStore';
+import { PHOTO_FIELD_DEFINITIONS } from '../../utils/photoManager';
+import { PICTURE_NOT_AVAILABLE_IMAGE } from '../../utils/placeholderImage';
 
 interface AddProtoUnitDialogProps {
   isOpen: boolean;
@@ -377,6 +379,16 @@ export const AddProtoUnitDialog: React.FC<AddProtoUnitDialogProps> = ({
       oduEevPartCode: val(eevPartCode),
     };
 
+    // Automatically apply Picture Not Available placeholder for any unuploaded photos
+    const completePhotos: ProtoUnitPhotos = { ...photos };
+    PHOTO_FIELD_DEFINITIONS.forEach(def => {
+      const existing = (completePhotos as any)[def.photoKey] || (completePhotos as any)[def.id];
+      if (!existing || existing === 'NA' || String(existing).trim() === '') {
+        (completePhotos as any)[def.photoKey] = PICTURE_NOT_AVAILABLE_IMAGE;
+        (completePhotos as any)[def.id] = PICTURE_NOT_AVAILABLE_IMAGE;
+      }
+    });
+
     if (initialUnit) {
       updateProtoUnit(initialUnit.id, {
         modelName: val(modelName),
@@ -391,7 +403,7 @@ export const AddProtoUnitDialog: React.FC<AddProtoUnitDialogProps> = ({
         reportDetails,
         namePlate,
         partsInfo,
-        photos,
+        photos: completePhotos,
         remarks: val(remarks),
         status: targetStatus,
       });
@@ -409,7 +421,7 @@ export const AddProtoUnitDialog: React.FC<AddProtoUnitDialogProps> = ({
         reportDetails,
         namePlate,
         partsInfo,
-        photos,
+        photos: completePhotos,
         remarks: val(remarks),
         status: targetStatus,
       });

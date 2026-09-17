@@ -33,6 +33,7 @@ import {
   getPhotosGroupedBySection
 } from '../../utils/photoManager';
 import { compressImageFile, CompressionResult } from '../../services/photoSettingsStore';
+import { PICTURE_NOT_AVAILABLE_IMAGE } from '../../utils/placeholderImage';
 
 export interface PhotoFieldConfig {
   key: string;
@@ -569,9 +570,9 @@ export const PhotoUploadSection: React.FC<PhotoUploadSectionProps> = ({
                       Uploaded
                     </span>
                   ) : (
-                    <span className="inline-flex items-center gap-1 text-[10px] text-slate-400 bg-slate-800/60 border border-slate-700/60 px-2 py-0.5 rounded-full">
-                      <span className="w-1.5 h-1.5 rounded-full bg-slate-500" />
-                      Not Uploaded
+                    <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-300 bg-amber-950/60 border border-amber-800/60 px-2 py-0.5 rounded-full">
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                      Auto Placeholder
                     </span>
                   )}
                 </div>
@@ -705,48 +706,62 @@ export const PhotoUploadSection: React.FC<PhotoUploadSectionProps> = ({
                   )}
                 </div>
               ) : (
-                /* Empty state - Upload Zone */
-                <div className="space-y-3">
+                /* Auto-Applied Default: Picture Not Available Placeholder with Upload overlay */
+                <div className="space-y-2.5">
                   <div
                     onClick={() => !readOnly && fileInputRefs.current[config.key]?.click()}
-                    className={`w-full h-28 border border-dashed rounded-lg flex flex-col items-center justify-center gap-1.5 p-3 text-center transition-all ${
+                    className={`relative group w-full h-36 bg-white rounded-lg border border-slate-700/80 overflow-hidden flex items-center justify-center transition-all ${
                       readOnly 
-                        ? 'border-slate-800 bg-slate-950/40 text-slate-500 cursor-not-allowed'
-                        : 'border-slate-700/80 bg-slate-950/50 hover:bg-slate-950/80 hover:border-purple-500/60 text-slate-400 cursor-pointer group'
+                        ? 'cursor-default opacity-90' 
+                        : 'hover:border-cyan-500 hover:ring-2 hover:ring-cyan-500/20 cursor-pointer shadow-md'
                     }`}
+                    title={readOnly ? 'Picture Not Available' : 'Click or Drag photo here to replace placeholder'}
                   >
-                    <div className="p-2 rounded-full bg-slate-900 group-hover:bg-purple-950/60 group-hover:text-purple-300 text-slate-400 transition-colors">
-                      <Upload className="w-4 h-4" />
-                    </div>
-                    <span className="text-xs font-medium text-slate-300 group-hover:text-white">
-                      Click or Drag photo here
-                    </span>
-                    <span className="text-[10px] text-slate-500">
-                      Auto-converts to 6cm × 4cm standard
-                    </span>
+                    <img
+                      src={PICTURE_NOT_AVAILABLE_IMAGE}
+                      alt="Picture Not Available"
+                      className="w-full h-full object-contain p-1.5 transition-transform group-hover:scale-105"
+                      loading="lazy"
+                    />
+
+                    {/* Hover overlay with Upload invitation */}
+                    {!readOnly && (
+                      <div className="absolute inset-0 bg-slate-950/80 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1.5 p-2 backdrop-blur-[2px]">
+                        <div className="p-2 rounded-full bg-cyan-600 text-white shadow-md">
+                          <Upload className="w-4 h-4" />
+                        </div>
+                        <span className="text-xs font-bold text-white">Click or Drag to Upload</span>
+                        <span className="text-[10px] text-slate-300">Auto Default: Picture Not Available</span>
+                      </div>
+                    )}
                   </div>
 
                   {/* Upload Action Buttons */}
                   {!readOnly && (
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => fileInputRefs.current[config.key]?.click()}
-                        className="flex-1 py-1.5 px-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 shadow-sm transition-all cursor-pointer"
-                      >
-                        <Upload className="w-3.5 h-3.5" />
-                        <span>Upload Photo</span>
-                      </button>
+                    <div className="flex items-center justify-between gap-2 pt-1">
+                      <div className="flex items-center gap-1.5 flex-1">
+                        <button
+                          type="button"
+                          onClick={() => fileInputRefs.current[config.key]?.click()}
+                          className="flex-1 py-1 px-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                        >
+                          <Upload className="w-3.5 h-3.5" />
+                          <span>Upload Photo</span>
+                        </button>
 
-                      <button
-                        type="button"
-                        onClick={() => cameraInputRefs.current[config.key]?.click()}
-                        className="py-1.5 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 border border-slate-700 transition-all cursor-pointer"
-                        title="Open Camera on Mobile"
-                      >
-                        <Camera className="w-3.5 h-3.5 text-purple-400" />
-                        <span>Camera</span>
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() => cameraInputRefs.current[config.key]?.click()}
+                          className="py-1 px-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 border border-slate-700 transition-all cursor-pointer"
+                          title="Open Camera on Mobile"
+                        >
+                          <Camera className="w-3.5 h-3.5 text-purple-400" />
+                          <span>Camera</span>
+                        </button>
+                      </div>
+                      <span className="text-[10px] font-mono text-amber-300 bg-amber-950/60 border border-amber-800/60 px-2 py-0.5 rounded shrink-0">
+                        Default
+                      </span>
                     </div>
                   )}
                 </div>

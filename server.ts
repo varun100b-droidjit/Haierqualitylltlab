@@ -45,7 +45,7 @@ async function startServer() {
       const cleanText = text.replace(/[*_~#`]/g, '').trim();
 
       // Generate female voice audio if supported by Gemini API, with clean fallback
-      const modelsToTry = ['gemini-2.5-flash', 'gemini-2.0-flash'];
+      const modelsToTry = ['gemini-3.1-flash-tts-preview', 'gemini-3.6-flash', 'gemini-3.8-flash'];
       let response: any = null;
 
       for (const model of modelsToTry) {
@@ -191,7 +191,7 @@ Specify "uiAction": "scroll_down" | "scroll_up" | "scroll_top" | "scroll_bottom"
 If no shift change, unit action, or UI command is requested, set those action fields to null.`;
 
       let responseText = "";
-      const modelsToTry = ['gemini-2.5-flash', 'gemini-2.0-flash'];
+      const modelsToTry = ['gemini-3.6-flash', 'gemini-3.8-flash', 'gemini-flash-latest'];
       for (const model of modelsToTry) {
         try {
           const response = await ai.models.generateContent({
@@ -299,7 +299,7 @@ No backticks, no markdown, just clean raw JSON array.`;
         text: prompt
       };
 
-      const modelsToTry = ['gemini-2.5-flash', 'gemini-2.0-flash'];
+      const modelsToTry = ['gemini-3.6-flash', 'gemini-3.8-flash', 'gemini-flash-latest'];
       let extractedData: Array<{ modelName: string; qty: number }> = [];
       let lastError: string | null = null;
 

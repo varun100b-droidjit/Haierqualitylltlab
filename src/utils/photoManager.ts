@@ -2,6 +2,7 @@
  * Standard Photo Field Mapping and Management Module
  * Maps UI Photo inputs to Word Report Picture Content Controls and handles storage/retrieval.
  */
+import { PICTURE_NOT_AVAILABLE_IMAGE } from './placeholderImage';
 
 export type ReportSectionCategory = 'packaging' | 'idu' | 'odu' | 'refrigeration';
 
@@ -430,6 +431,18 @@ export function getPhotoUrlForContentControl(photos: any, searchKey: string): st
   }
 
   return null;
+}
+
+/**
+ * Retrieves the image URL for a content control, automatically falling back to the 
+ * "Picture Not Available" placeholder if the photo was not uploaded.
+ */
+export function getPhotoUrlWithPlaceholder(photos: any, searchKey: string): string {
+  const url = getPhotoUrlForContentControl(photos, searchKey);
+  if (!url || url === 'NA' || url.trim() === '') {
+    return PICTURE_NOT_AVAILABLE_IMAGE;
+  }
+  return url.trim();
 }
 
 /**

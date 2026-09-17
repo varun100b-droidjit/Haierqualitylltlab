@@ -25,6 +25,8 @@ import { addPpUnit, updatePpUnit, generatePp5DigitSerial, getPpUnits, isModelLis
 import { ALL_STATIONS, getOccupiedStations } from '../../utils/stationManager';
 import { PhotoUploadSection } from '../Common/PhotoUploadSection';
 import { compressImageFile } from '../../services/photoSettingsStore';
+import { PHOTO_FIELD_DEFINITIONS } from '../../utils/photoManager';
+import { PICTURE_NOT_AVAILABLE_IMAGE } from '../../utils/placeholderImage';
 
 interface AddPpUnitDialogProps {
   isOpen: boolean;
@@ -405,6 +407,16 @@ export const AddPpUnitDialog: React.FC<AddPpUnitDialogProps> = ({
       oduEevPartCode: val(eevPartCode),
     };
 
+    // Automatically apply Picture Not Available placeholder for any unuploaded photos
+    const completePhotos: ProtoUnitPhotos = { ...photos };
+    PHOTO_FIELD_DEFINITIONS.forEach(def => {
+      const existing = (completePhotos as any)[def.photoKey] || (completePhotos as any)[def.id];
+      if (!existing || existing === 'NA' || String(existing).trim() === '') {
+        (completePhotos as any)[def.photoKey] = PICTURE_NOT_AVAILABLE_IMAGE;
+        (completePhotos as any)[def.id] = PICTURE_NOT_AVAILABLE_IMAGE;
+      }
+    });
+
     if (initialUnit) {
       updatePpUnit(initialUnit.id, {
         modelName: val(modelName),
@@ -422,7 +434,7 @@ export const AddPpUnitDialog: React.FC<AddPpUnitDialogProps> = ({
         reportDetails,
         namePlate,
         partsInfo,
-        photos,
+        photos: completePhotos,
         fourWaySwing: val(fourWaySwing),
         rpm: val(rpm),
         remarks: val(remarks),
@@ -447,7 +459,7 @@ export const AddPpUnitDialog: React.FC<AddPpUnitDialogProps> = ({
         reportDetails,
         namePlate,
         partsInfo,
-        photos,
+        photos: completePhotos,
         fourWaySwing: val(fourWaySwing),
         rpm: val(rpm),
         remarks: val(remarks),

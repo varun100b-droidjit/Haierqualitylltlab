@@ -21,6 +21,7 @@ import { formatShortDateTime } from '../../utils/dateFormatter';
 import { updateProtoUnitStatus, addProtoUnitObservation, deleteProtoUnitObservation } from '../../services/protoUnitStore';
 import { exportUnitToPDF } from '../../utils/pdfExport';
 import { useIsShiftActiveNow } from '../../services/shiftStore';
+import { PICTURE_NOT_AVAILABLE_IMAGE, isPhotoMissing } from '../../utils/placeholderImage';
 
 
 interface ProtoUnitDetailsDialogProps {
@@ -75,7 +76,7 @@ export const ProtoUnitDetailsDialog: React.FC<ProtoUnitDetailsDialogProps> = ({
     }
   };
 
-  const photoList: { label: string; url?: string }[] = [
+  const photoDefinitions = [
     { label: 'Indoor Unit', url: currentUnit.photos?.PHOTO_Indoor_Unit || currentUnit.photos?.indoorUnitPhoto },
     { label: '1. Product Packing', url: currentUnit.photos?.PHOTO_Product_Packing || currentUnit.photos?.productPhoto },
     { label: '2. Packing Box', url: currentUnit.photos?.PHOTO_Packing_Box || currentUnit.photos?.packingBoxPhoto },
@@ -88,7 +89,16 @@ export const ProtoUnitDetailsDialog: React.FC<ProtoUnitDetailsDialogProps> = ({
     { label: '9. ODU PCB', url: currentUnit.photos?.PHOTO_ODU_PCB || currentUnit.photos?.oduPcbPhoto },
     { label: '10. Electronic Expansion Valve', url: currentUnit.photos?.PHOTO_Electronic_Expansion_Valve || currentUnit.photos?.PHOTO_EEV || currentUnit.photos?.oduEevPhoto || currentUnit.photos?.eevPhoto },
     { label: '11. ODU Compressor', url: currentUnit.photos?.PHOTO_ODU_Compressor || currentUnit.photos?.PHOTO_Compressor || currentUnit.photos?.oduCompressorPhoto || currentUnit.photos?.compressorPhoto },
-  ].filter(p => Boolean(p.url));
+  ];
+
+  const photoList: { label: string; url: string; isPlaceholder: boolean }[] = photoDefinitions.map(p => {
+    const isMissing = isPhotoMissing(p.url);
+    return {
+      label: p.label,
+      url: isMissing ? PICTURE_NOT_AVAILABLE_IMAGE : p.url!.trim(),
+      isPlaceholder: isMissing
+    };
+  });
 
   const observationsList = currentUnit.observations || [];
 
@@ -112,14 +122,12 @@ export const ProtoUnitDetailsDialog: React.FC<ProtoUnitDetailsDialogProps> = ({
                 )}
                 <span className={`px-2.5 py-0.5 text-[10px] font-bold rounded-full border ${
                   unit.status === 'live' 
-                    ? isShiftActive 
-                      ? 'bg-emerald-950 text-emerald-300 border-emerald-800 animate-pulse' 
-                      : 'bg-amber-950 text-amber-300 border-amber-800'
+                    ? 'bg-emerald-950 text-emerald-300 border-emerald-800 animate-pulse' 
                     : unit.status === 'stopped'
                     ? 'bg-amber-950 text-amber-300 border-amber-800'
                     : 'bg-slate-800 text-slate-300 border-slate-700'
                 }`}>
-                  {unit.status === 'live' ? (isShiftActive ? '🟢 LIVE' : '⏸️ PAUSED') : unit.status === 'stopped' ? '⏸️ STOPPED' : '✅ PASSED'}
+                  {unit.status === 'live' ? '🟢 LIVE' : unit.status === 'stopped' ? '⏸️ STOPPED' : '✅ PASSED'}
                 </span>
               </div>
               <p className="text-xs text-slate-400">
@@ -371,10 +379,23 @@ export const ProtoUnitDetailsDialog: React.FC<ProtoUnitDetailsDialogProps> = ({
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                 {photoList.map((p, idx) => (
                   <div key={idx} className="bg-slate-900 border border-slate-800 rounded-xl p-3 flex flex-col items-center gap-2">
-                    <span className="text-[10px] text-slate-300 font-bold uppercase block truncate w-full text-center">{p.label}</span>
+                    <div className="flex items-center justify-between w-full gap-1">
+                      <span className="text-[10px] text-slate-300 font-bold uppercase truncate">{p.label}</span>
+                      {p.isPlaceholder ? (
+                        <span className="text-[9px] font-mono text-amber-400 bg-amber-950/60 border border-amber-800/60 px-1.5 py-0.5 rounded shrink-0">
+                          Auto
+                        </span>
+                      ) : (
+                        <span className="text-[9px] font-mono text-emerald-400 bg-emerald-950/60 border border-emerald-800/60 px-1.5 py-0.5 rounded shrink-0">
+                          ✓
+                        </span>
+                      )}
+                    </div>
                     <div 
-                      onClick={() => setSelectedPhoto({ url: p.url!, label: p.label })}
-                      className="w-[150px] h-[100px] bg-slate-950 rounded border border-slate-800 flex items-center justify-center overflow-hidden cursor-pointer relative group"
+                      onClick={() => setSelectedPhoto({ url: p.url, label: p.label })}
+                      className={`w-[150px] h-[100px] rounded border flex items-center justify-center overflow-hidden cursor-pointer relative group ${
+                        p.isPlaceholder ? 'bg-white border-slate-700' : 'bg-slate-950 border-slate-800'
+                      }`}
                     >
                       <img src={p.url} alt={p.label} className="w-full h-full object-contain p-1" />
                       <div className="absolute inset-0 bg-slate-950/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">

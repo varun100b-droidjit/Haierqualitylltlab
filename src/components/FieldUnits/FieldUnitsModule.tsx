@@ -44,7 +44,7 @@ export const FieldUnitsModule: React.FC<FieldUnitsModuleProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState<'live' | 'stopped' | 'finished'>(defaultSection);
   const [activeShift] = useActiveLabShift();
-  const isShiftActive = useIsShiftActiveNow();
+  const isShiftActive = true; // Continuous operation
   const [currentTime, setCurrentTime] = useState(Date.now());
 
   // Sync activeTab if defaultSection prop changes
@@ -367,22 +367,16 @@ export const FieldUnitsModule: React.FC<FieldUnitsModuleProps> = ({
                     <div className="flex items-center gap-1.5 shrink-0">
                       <span className={`px-2.5 py-1 text-[10px] font-extrabold rounded-full border flex items-center gap-1 ${
                         unit.status === 'live'
-                          ? isShiftActive
-                            ? 'bg-cyan-950 text-cyan-300 border-cyan-800'
-                            : 'bg-amber-950 text-amber-300 border-amber-800'
+                          ? 'bg-cyan-950 text-cyan-300 border-cyan-800'
                           : unit.status === 'stopped'
                           ? 'bg-amber-950 text-amber-300 border-amber-800'
                           : 'bg-emerald-950 text-emerald-300 border-emerald-800'
                       }`}>
                         {unit.status === 'live' ? (
-                          isShiftActive ? (
-                            <>
-                              <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping" />
-                              <span>LIVE</span>
-                            </>
-                          ) : (
-                            <span>⏸ PAUSED</span>
-                          )
+                          <>
+                            <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping" />
+                            <span>LIVE</span>
+                          </>
                         ) : unit.status === 'stopped' ? (
                           <span>⏸ STOPPED ({percent}%)</span>
                         ) : (

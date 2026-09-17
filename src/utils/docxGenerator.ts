@@ -9,6 +9,7 @@ import {
   fetchImageBinary,
   getPhotoUrlForContentControl
 } from './photoManager';
+import { getPictureNotAvailableDataUrlSync } from './placeholderImage';
 
 export interface ReportDataValues {
   [key: string]: any;
@@ -405,18 +406,21 @@ export function injectPhotosIntoZip(
 
   // 3. Process standard photo definitions
   PHOTO_FIELD_DEFINITIONS.forEach((def) => {
-    const rawUrl = getPhotoUrlForContentControl(photos, def.photoKey);
-    const foundInDb = Boolean(rawUrl && rawUrl !== 'NA' && rawUrl.trim() !== '');
+    const originalUrl = getPhotoUrlForContentControl(photos, def.photoKey);
+    const foundInDb = Boolean(originalUrl && originalUrl !== 'NA' && originalUrl.trim() !== '');
+    // If not uploaded, automatically fallback to Picture Not Available
+    const rawUrl = foundInDb ? originalUrl! : getPictureNotAvailableDataUrlSync();
 
     const logEntry: PhotoInsertionLog = {
       photoKey: def.photoKey,
       label: def.label,
       foundInDatabase: foundInDb,
-      hasImageUrl: foundInDb,
+      hasImageUrl: Boolean(rawUrl),
       imageDownloaded: false,
       contentControlFound: false,
       imageInserted: false,
-      status: 'missing'
+      status: foundInDb ? 'inserted' : 'missing',
+      details: foundInDb ? undefined : 'Automatic Picture Not Available placeholder used'
     };
 
     if (rawUrl && rawUrl !== 'NA' && rawUrl.trim() !== '') {
@@ -1671,7 +1675,10 @@ export async function generateReportBundleZip(
   const processedKeys = new Set<string>();
 
   PHOTO_FIELD_DEFINITIONS.forEach((def) => {
-    const url = getPhotoUrlForContentControl(photos, def.photoKey);
+    let url = getPhotoUrlForContentControl(photos, def.photoKey);
+    if (!url || url === 'NA' || url.trim() === '') {
+      url = getPictureNotAvailableDataUrlSync();
+    }
     if (url && url !== 'NA') {
       const bin = dataURLToBinary(url);
       if (bin) {

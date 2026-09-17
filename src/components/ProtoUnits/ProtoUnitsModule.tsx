@@ -142,7 +142,7 @@ export const ProtoUnitsModule: React.FC<ProtoUnitsModuleProps> = ({
 
   const liveCount = protoUnits.filter(u => u.status === 'live').length;
   const [activeShift] = useActiveLabShift();
-  const isShiftActive = useIsShiftActiveNow();
+  const isShiftActive = true; // Continuous operation
   const stoppedCount = protoUnits.filter(u => u.status === 'stopped').length;
   const finishedCount = protoUnits.filter(u => u.status === 'finished').length;
 
@@ -162,10 +162,8 @@ export const ProtoUnitsModule: React.FC<ProtoUnitsModuleProps> = ({
                 : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
             }`}
           >
-            <span className={`w-2 h-2 rounded-full shrink-0 ${
-              isShiftActive ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'
-            }`} />
-            <span>Live {isShiftActive ? '' : '(Paused)'}</span>
+            <span className="w-2 h-2 rounded-full shrink-0 bg-emerald-400 animate-pulse" />
+            <span>Live</span>
             <span className={`px-2 py-0.5 rounded-full text-[10px] ${
               activeSection === 'live' ? 'bg-cyan-900/80 text-cyan-200' : 'bg-slate-800 text-slate-400'
             }`}>
@@ -318,15 +316,13 @@ export const ProtoUnitsModule: React.FC<ProtoUnitsModuleProps> = ({
                     <div className="flex items-center gap-2 shrink-0">
                       <span className={`px-3 py-1.5 text-xs font-extrabold rounded-full border shadow-sm flex items-center gap-1.5 ${
                         unit.status === 'live' 
-                          ? isShiftActive 
-                            ? 'bg-emerald-950 text-emerald-300 border-emerald-800 animate-pulse' 
-                            : 'bg-amber-950 text-amber-300 border-amber-800'
+                          ? 'bg-emerald-950 text-emerald-300 border-emerald-800 animate-pulse' 
                           : unit.status === 'stopped'
                           ? 'bg-amber-950 text-amber-300 border-amber-800'
                           : 'bg-slate-800 text-slate-300 border-slate-700'
                       }`}>
                         {unit.status === 'live' 
-                          ? (isShiftActive ? '🟢 Live' : '⏸️ Paused') 
+                          ? '🟢 Live' 
                           : unit.status === 'stopped' 
                           ? '⏸️ Stopped' 
                           : '✅ Finished'}
@@ -439,9 +435,7 @@ export const ProtoUnitsModule: React.FC<ProtoUnitsModuleProps> = ({
                       </span>
                       <span className={`px-2 py-0.5 text-[10px] font-extrabold rounded-md border ${
                         unit.status === 'live'
-                          ? isShiftActive
-                            ? 'bg-cyan-950/80 text-cyan-300 border-cyan-800/80'
-                            : 'bg-amber-950/80 text-amber-300 border-amber-800/80'
+                          ? 'bg-cyan-950/80 text-cyan-300 border-cyan-800/80'
                           : unit.status === 'stopped'
                           ? 'bg-amber-950/80 text-amber-300 border-amber-800/80'
                           : 'bg-emerald-950/80 text-emerald-300 border-emerald-800/80'
@@ -450,9 +444,7 @@ export const ProtoUnitsModule: React.FC<ProtoUnitsModuleProps> = ({
                           ? `Passed (${progressPercent}%)` 
                           : unit.status === 'stopped' 
                           ? `Stopped (${progressPercent}%)` 
-                          : isShiftActive
-                          ? `Running (${progressPercent}%)`
-                          : `Paused (${progressPercent}%)`}
+                          : `Running (${progressPercent}%)`}
                       </span>
                     </div>
 
@@ -461,9 +453,7 @@ export const ProtoUnitsModule: React.FC<ProtoUnitsModuleProps> = ({
                       <div 
                         className={`h-full rounded-full transition-all duration-500 ${
                           unit.status === 'live'
-                            ? isShiftActive
-                              ? 'bg-gradient-to-r from-cyan-500 to-emerald-400 animate-pulse'
-                              : 'bg-gradient-to-r from-amber-500 to-amber-600'
+                            ? 'bg-gradient-to-r from-cyan-500 to-emerald-400 animate-pulse'
                             : unit.status === 'stopped'
                             ? 'bg-amber-500'
                             : 'bg-emerald-500'
