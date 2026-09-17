@@ -10,8 +10,39 @@ import {
 import { db, collection, doc, setDoc, deleteDoc, getDocs, onSnapshot } from './firebase';
 import { requireOnlineForSave } from './networkManager';
 import { buildNormalizedPhotos } from '../utils/photoManager';
+import { cleanForFirestore, enforceFirestoreDocSizeLimit } from './firestoreSanitizer';
+import { safeLocalStorageSet, idbSaveAll, idbGetAll } from '../lib/indexedDbStorage';
 
 const STORAGE_KEY_PROTO_UNITS = 'llt_proto_units_v1';
+const DELETED_PROTO_UNITS_KEY = 'llt_deleted_proto_units_v1';
+
+// Helper to track explicitly deleted unit IDs to prevent resurrection during sync
+function getDeletedProtoUnitIds(): Set<string> {
+  try {
+    const raw = localStorage.getItem(DELETED_PROTO_UNITS_KEY);
+    return new Set(raw ? JSON.parse(raw) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function markProtoUnitDeleted(id: string) {
+  const set = getDeletedProtoUnitIds();
+  set.add(id);
+  try {
+    localStorage.setItem(DELETED_PROTO_UNITS_KEY, JSON.stringify(Array.from(set)));
+  } catch {}
+}
+
+function unmarkProtoUnitDeleted(id: string) {
+  const set = getDeletedProtoUnitIds();
+  if (set.has(id)) {
+    set.delete(id);
+    try {
+      localStorage.setItem(DELETED_PROTO_UNITS_KEY, JSON.stringify(Array.from(set)));
+    } catch {}
+  }
+}
 
 // Helper to generate a random unique 5-digit string (e.g., "54321")
 export function generate5DigitSerial(): string {
@@ -46,17 +77,24 @@ if (typeof window !== 'undefined') {
 }
 
 // Global Supabase Realtime event listener
-subscribeToLabRealtimeEvents((event) => {
+subscribeToLabRealtimeEvents((event, payload) => {
   if (event === 'proto_units_change') {
-    initDataSync();
+    if (payload?.deletedId) {
+      markProtoUnitDeleted(payload.deletedId);
+      protoUnitsCache = protoUnitsCache.filter(u => u.id !== payload.deletedId);
+      safeLocalStorageSet(STORAGE_KEY_PROTO_UNITS, protoUnitsCache);
+      notifyListeners();
+    } else {
+      initDataSync();
+    }
   }
 });
 
-// Periodic background sync check
+// Periodic background sync: ONLY push un-synced items to Firestore, never destructively wipe
 if (typeof window !== 'undefined') {
   setInterval(() => {
-    initDataSync();
-  }, 6000);
+    pushPendingLocalUnitsToFirestore();
+  }, 15000);
 }
 
 /* ==========================================
@@ -66,8 +104,14 @@ if (typeof window !== 'undefined') {
 export async function syncProtoUnitToFirestore(unit: ProtoUnit) {
   if (!db || !unit || unit.id.startsWith('proto-101') || unit.id.startsWith('proto-102')) return;
   try {
+    const sanitized = enforceFirestoreDocSizeLimit(cleanForFirestore(unit));
     const docRef = doc(db, 'proto_units', unit.id);
-    await setDoc(docRef, { ...unit }, { merge: true });
+    await setDoc(docRef, sanitized, { merge: true });
+    // Remove local pending flag once successfully confirmed on Firestore
+    if ((unit as any)._pendingSync) {
+      delete (unit as any)._pendingSync;
+      safeLocalStorageSet(STORAGE_KEY_PROTO_UNITS, protoUnitsCache);
+    }
     console.log('Successfully synced Proto Unit to Firebase Firestore:', unit.id);
   } catch (e) {
     console.warn('Firestore Proto Unit sync note:', e);
@@ -104,6 +148,57 @@ export async function fetchProtoUnitsFromFirestore(): Promise<ProtoUnit[] | null
   }
 }
 
+/**
+ * Merges incoming remote records with the local cache in a NON-DESTRUCTIVE manner.
+ * Never drops locally created or updated units that have not finished syncing to Firestore.
+ */
+function mergeWithLocalCache(remoteUnits: ProtoUnit[]): ProtoUnit[] {
+  const deleted = getDeletedProtoUnitIds();
+  const map = new Map<string, ProtoUnit>();
+
+  // First, add all existing local units that have NOT been explicitly deleted
+  protoUnitsCache.forEach(u => {
+    if (u && u.id && !deleted.has(u.id)) {
+      map.set(u.id, u);
+    }
+  });
+
+  // Second, integrate remote units
+  remoteUnits.forEach(rem => {
+    if (!rem || !rem.id || deleted.has(rem.id)) return;
+    const local = map.get(rem.id);
+    if (!local) {
+      map.set(rem.id, rem);
+    } else {
+      // If local is currently marked as pending sync, preserve local changes
+      if ((local as any)._pendingSync) {
+        return;
+      }
+      const remTime = new Date(rem.updatedAt || rem.createdAt || 0).getTime();
+      const localTime = new Date(local.updatedAt || local.createdAt || 0).getTime();
+      if (remTime >= localTime) {
+        map.set(rem.id, rem);
+      }
+    }
+  });
+
+  const merged = Array.from(map.values());
+  merged.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+  return merged;
+}
+
+// Push any pending local units to Firestore if they aren't on the cloud yet
+function pushPendingLocalUnitsToFirestore() {
+  const deleted = getDeletedProtoUnitIds();
+  protoUnitsCache.forEach(u => {
+    if (u && !deleted.has(u.id) && !u.id.startsWith('proto-101') && !u.id.startsWith('proto-102')) {
+      if ((u as any)._pendingSync) {
+        syncProtoUnitToFirestore(u);
+      }
+    }
+  });
+}
+
 // Attach Real-Time Firestore Listener for Live Multi-Device Sync
 if (db) {
   try {
@@ -117,9 +212,12 @@ if (db) {
             list.push(data);
           }
         });
-        list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-        protoUnitsCache = list;
-        try { localStorage.setItem(STORAGE_KEY_PROTO_UNITS, JSON.stringify(list)); } catch {}
+
+        // Non-destructive merge preserves any freshly created local unit
+        const merged = mergeWithLocalCache(list);
+        protoUnitsCache = merged;
+        safeLocalStorageSet(STORAGE_KEY_PROTO_UNITS, merged);
+        idbSaveAll('proto_units', merged);
         notifyListeners();
       }
     }, (err: any) => {
@@ -139,9 +237,12 @@ async function initDataSync() {
     const firestoreData = await fetchProtoUnitsFromFirestore();
     if (firestoreData && firestoreData.length > 0) {
       const clean = firestoreData.filter(u => u && u.id !== 'proto-101' && u.id !== 'proto-102');
-      protoUnitsCache = clean;
-      try { localStorage.setItem(STORAGE_KEY_PROTO_UNITS, JSON.stringify(clean)); } catch {}
+      const merged = mergeWithLocalCache(clean);
+      protoUnitsCache = merged;
+      safeLocalStorageSet(STORAGE_KEY_PROTO_UNITS, merged);
+      idbSaveAll('proto_units', merged);
       notifyListeners();
+      pushPendingLocalUnitsToFirestore();
       return;
     }
 
@@ -149,8 +250,10 @@ async function initDataSync() {
     const remoteData = await fetchProtoUnitsFromSupabase();
     if (remoteData && remoteData.length > 0) {
       const cleanRemote = remoteData.filter(u => u && u.id !== 'proto-101' && u.id !== 'proto-102');
-      protoUnitsCache = cleanRemote;
-      try { localStorage.setItem(STORAGE_KEY_PROTO_UNITS, JSON.stringify(cleanRemote)); } catch {}
+      const merged = mergeWithLocalCache(cleanRemote);
+      protoUnitsCache = merged;
+      safeLocalStorageSet(STORAGE_KEY_PROTO_UNITS, merged);
+      idbSaveAll('proto_units', merged);
       notifyListeners();
       cleanRemote.forEach(u => syncProtoUnitToFirestore(u));
     }
@@ -173,7 +276,8 @@ export function subscribeProtoUnitStore(callback: () => void) {
 function saveLocalProtoUnits(data: ProtoUnit[]) {
   const clean = (data || []).filter(u => u && u.id !== 'proto-101' && u.id !== 'proto-102');
   protoUnitsCache = clean;
-  try { localStorage.setItem(STORAGE_KEY_PROTO_UNITS, JSON.stringify(clean)); } catch {}
+  safeLocalStorageSet(STORAGE_KEY_PROTO_UNITS, clean);
+  idbSaveAll('proto_units', clean);
   if (localProtoBus) {
     try { localProtoBus.postMessage({ timestamp: Date.now() }); } catch {}
   }
@@ -257,6 +361,8 @@ export function addProtoUnit(unit: Omit<ProtoUnit, 'id' | 'createdAt' | 'updated
     createdAt: formattedDate,
     updatedAt: formattedDate,
   };
+  (newUnit as any)._pendingSync = true;
+  unmarkProtoUnitDeleted(newUnit.id);
 
   const updated = [newUnit, ...protoUnitsCache];
   saveLocalProtoUnits(updated);
@@ -336,8 +442,11 @@ export function updateProtoUnit(id: string, updates: Partial<ProtoUnit>): ProtoU
 }
 
 export function deleteProtoUnit(id: string): void {
+  markProtoUnitDeleted(id);
   const updated = protoUnitsCache.filter(u => u.id !== id);
   saveLocalProtoUnits(updated);
+
+  broadcastLabRealtimeEvent('proto_units_change', { deletedId: id, timestamp: Date.now() });
 
   // Delete from Supabase & Firestore asynchronously
   deleteProtoUnitFromSupabase(id).catch(err => console.warn('[ProtoUnitStore] Supabase delete note:', err));

@@ -9,6 +9,7 @@ import {
 } from '../lib/supabase';
 import { db, collection, doc, setDoc, deleteDoc, getDocs, onSnapshot } from './firebase';
 import { requireOnlineForSave } from './networkManager';
+import { cleanForFirestore, enforceFirestoreDocSizeLimit } from './firestoreSanitizer';
 
 export type ReportTagType = 'C Simulation' | 'C Experience';
 export type ReportCategoryKey = 'cs-simulation' | 'cs-experience';
@@ -60,6 +61,34 @@ export interface SavedReport {
 }
 
 const STORAGE_KEY_REPORT_ROOM = 'llt_report_room_saved_reports_v1';
+const DELETED_REPORTS_KEY = 'llt_deleted_reports_v1';
+
+function getDeletedReportIds(): Set<string> {
+  try {
+    const raw = localStorage.getItem(DELETED_REPORTS_KEY);
+    return new Set(raw ? JSON.parse(raw) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function markReportDeleted(id: string) {
+  const set = getDeletedReportIds();
+  set.add(id);
+  try {
+    localStorage.setItem(DELETED_REPORTS_KEY, JSON.stringify(Array.from(set)));
+  } catch {}
+}
+
+function unmarkReportDeleted(id: string) {
+  const set = getDeletedReportIds();
+  if (set.has(id)) {
+    set.delete(id);
+    try {
+      localStorage.setItem(DELETED_REPORTS_KEY, JSON.stringify(Array.from(set)));
+    } catch {}
+  }
+}
 
 const INITIAL_SAVED_REPORTS: SavedReport[] = [];
 
@@ -89,17 +118,24 @@ if (typeof window !== 'undefined') {
 }
 
 // Global Supabase Realtime event listener
-subscribeToLabRealtimeEvents((event) => {
+subscribeToLabRealtimeEvents((event, payload) => {
   if (event === 'reports_change') {
-    initCloudAndLocalReports();
+    if (payload?.deletedId) {
+      markReportDeleted(payload.deletedId);
+      savedReportsCache = savedReportsCache.filter(r => r.id !== payload.deletedId);
+      persistReports(savedReportsCache);
+      notifyListeners(savedReportsCache);
+    } else {
+      initCloudAndLocalReports();
+    }
   }
 });
 
-// Periodic background sync check
+// Periodic background sync: push un-synced items to Firestore
 if (typeof window !== 'undefined') {
   setInterval(() => {
-    initCloudAndLocalReports();
-  }, 7000);
+    pushPendingReportsToFirestore();
+  }, 15000);
 }
 
 /* ==========================================
@@ -109,8 +145,13 @@ if (typeof window !== 'undefined') {
 export async function syncReportRoomToFirestore(report: SavedReport) {
   if (!db || !report || report.id === 'rep-cs-101' || report.id === 'rep-ce-102') return;
   try {
+    const sanitized = enforceFirestoreDocSizeLimit(cleanForFirestore(report));
     const docRef = doc(db, 'report_room', report.id);
-    await setDoc(docRef, { ...report }, { merge: true });
+    await setDoc(docRef, sanitized, { merge: true });
+    if ((report as any)._pendingSync) {
+      delete (report as any)._pendingSync;
+      persistReports(savedReportsCache);
+    }
     console.log('Successfully synced Report to Firebase Firestore:', report.id);
   } catch (e) {
     console.warn('Firestore Report sync note:', e);
@@ -147,6 +188,54 @@ export async function fetchReportRoomFromFirestore(): Promise<SavedReport[] | nu
   }
 }
 
+/**
+ * Merges incoming remote reports with the local cache non-destructively.
+ */
+function mergeReportsWithLocal(remoteReports: SavedReport[]): SavedReport[] {
+  const deleted = getDeletedReportIds();
+  const map = new Map<string, SavedReport>();
+
+  // Add all existing local reports that are not explicitly deleted
+  savedReportsCache.forEach(r => {
+    if (r && r.id && !deleted.has(r.id)) {
+      map.set(r.id, r);
+    }
+  });
+
+  // Integrate remote reports
+  remoteReports.forEach(rem => {
+    if (!rem || !rem.id || deleted.has(rem.id)) return;
+    const local = map.get(rem.id);
+    if (!local) {
+      map.set(rem.id, rem);
+    } else {
+      if ((local as any)._pendingSync) {
+        return;
+      }
+      const remTime = new Date(rem.createdAt || 0).getTime();
+      const localTime = new Date(local.createdAt || 0).getTime();
+      if (remTime >= localTime) {
+        map.set(rem.id, rem);
+      }
+    }
+  });
+
+  const merged = Array.from(map.values());
+  merged.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+  return merged;
+}
+
+function pushPendingReportsToFirestore() {
+  const deleted = getDeletedReportIds();
+  savedReportsCache.forEach(r => {
+    if (r && !deleted.has(r.id) && !r.id.startsWith('rep-cs-101') && !r.id.startsWith('rep-ce-102')) {
+      if ((r as any)._pendingSync) {
+        syncReportRoomToFirestore(r);
+      }
+    }
+  });
+}
+
 // Attach Real-Time Firestore Listener for Live Multi-Device Sync
 if (db) {
   try {
@@ -160,12 +249,11 @@ if (db) {
             list.push(data);
           }
         });
-        if (list.length > 0) {
-          list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-          savedReportsCache = list;
-          persistReports(list);
-          notifyListeners(list);
-        }
+        
+        const merged = mergeReportsWithLocal(list);
+        savedReportsCache = merged;
+        persistReports(merged);
+        notifyListeners(merged);
       }
     }, (err: any) => {
       console.warn('[ReportRoom] Real-time listener error:', err);
@@ -183,21 +271,21 @@ async function initCloudAndLocalReports() {
     const firestoreReports = await fetchReportRoomFromFirestore();
     if (firestoreReports && firestoreReports.length > 0) {
       const cleanFs = firestoreReports.filter(r => r && r.id !== 'rep-cs-101' && r.id !== 'rep-ce-102');
-      savedReportsCache = cleanFs;
-      persistReports(cleanFs);
-      notifyListeners(cleanFs);
+      const merged = mergeReportsWithLocal(cleanFs);
+      savedReportsCache = merged;
+      persistReports(merged);
+      notifyListeners(merged);
+      pushPendingReportsToFirestore();
       return;
     }
 
     const remoteReports = await fetchReportRoomFromSupabase();
     if (remoteReports && remoteReports.length > 0) {
       const cleanRemote = remoteReports.filter(r => r && r.id !== 'rep-cs-101' && r.id !== 'rep-ce-102');
-      const mergedMap = new Map<string, SavedReport>();
-      savedReportsCache.forEach(r => { if (r && r.id !== 'rep-cs-101' && r.id !== 'rep-ce-102') mergedMap.set(r.id, r); });
-      cleanRemote.forEach((r: SavedReport) => { if (r && r.id !== 'rep-cs-101' && r.id !== 'rep-ce-102') mergedMap.set(r.id, r); });
-      savedReportsCache = Array.from(mergedMap.values());
-      persistReports(savedReportsCache);
-      notifyListeners(savedReportsCache);
+      const merged = mergeReportsWithLocal(cleanRemote);
+      savedReportsCache = merged;
+      persistReports(merged);
+      notifyListeners(merged);
       cleanRemote.forEach((r: SavedReport) => syncReportRoomToFirestore(r));
     }
   } catch (err) {
@@ -282,6 +370,8 @@ export function saveReportToRoom(reportData: Omit<SavedReport, 'id' | 'createdAt
     createdAt: dateStr,
     generatedDate: reportData.generatedDate || now.toISOString().split('T')[0],
   };
+  (newReport as any)._pendingSync = true;
+  unmarkReportDeleted(newReport.id);
 
   // Prepend new report to list
   const updated = [newReport, ...current.filter(r => r.id !== id)];
@@ -306,11 +396,13 @@ export function deleteSavedReport(id: string): boolean {
   if (!requireOnlineForSave(`Delete Report (${id})`)) {
     return false;
   }
+  markReportDeleted(id);
   const current = getSavedReports();
   const deletedItem = current.find(r => r.id === id);
   const updated = current.filter(r => r.id !== id);
   
   persistReports(updated);
+  broadcastLabRealtimeEvent('reports_change', { deletedId: id, timestamp: Date.now() });
   deleteReportRoomFromSupabase(id);
   deleteReportRoomFromFirestore(id);
 

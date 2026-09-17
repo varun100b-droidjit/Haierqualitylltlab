@@ -5,6 +5,7 @@ import {
   Trash2, 
   Eye, 
   RefreshCw, 
+  RotateCw,
   CheckCircle2, 
   ImageIcon, 
   X, 
@@ -320,6 +321,33 @@ export const PhotoUploadSection: React.FC<PhotoUploadSectionProps> = ({
     onChange(updated);
   };
 
+  const handleRotatePhoto = (config: PhotoFieldConfig) => {
+    const currentUrl = getPhotoValue(config);
+    if (!currentUrl) return;
+
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.height;
+      canvas.height = img.width;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      ctx.translate(canvas.width / 2, canvas.height / 2);
+      ctx.rotate((90 * Math.PI) / 180);
+      ctx.drawImage(img, -img.width / 2, -img.height / 2);
+
+      const rotatedDataUrl = canvas.toDataURL('image/jpeg', 0.85);
+      const updated = { ...photos, [config.key]: rotatedDataUrl };
+      if (config.legacyKey) {
+        updated[config.legacyKey] = rotatedDataUrl;
+      }
+      onChange(updated);
+    };
+    img.src = currentUrl;
+  };
+
   // Drag and drop handlers
   const handleDragOver = (key: string, e: React.DragEvent) => {
     e.preventDefault();
@@ -613,12 +641,12 @@ export const PhotoUploadSection: React.FC<PhotoUploadSectionProps> = ({
                           </button>
                           <button
                             type="button"
-                            onClick={() => fileInputRefs.current[config.key]?.click()}
-                            className="px-2.5 py-1.5 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-xs font-medium flex items-center gap-1 transition-colors cursor-pointer shadow-md"
-                            title="Replace Photo"
+                            onClick={() => handleRotatePhoto(config)}
+                            className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-medium flex items-center gap-1 transition-colors cursor-pointer shadow-md"
+                            title="Rotate Picture 90° Clockwise"
                           >
-                            <RefreshCw className="w-3.5 h-3.5" />
-                            <span>Replace</span>
+                            <RotateCw className="w-3.5 h-3.5" />
+                            <span>Rotate</span>
                           </button>
                           <button
                             type="button"
@@ -640,11 +668,12 @@ export const PhotoUploadSection: React.FC<PhotoUploadSectionProps> = ({
                       <div className="flex items-center gap-1.5">
                         <button
                           type="button"
-                          onClick={() => fileInputRefs.current[config.key]?.click()}
-                          className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-medium flex items-center gap-1 border border-slate-700 transition-colors cursor-pointer"
+                          onClick={() => handleRotatePhoto(config)}
+                          className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-indigo-300 hover:text-white rounded-lg text-xs font-medium flex items-center gap-1 border border-slate-700 transition-colors cursor-pointer"
+                          title="Rotate Picture 90° Clockwise"
                         >
-                          <RefreshCw className="w-3 h-3 text-blue-400" />
-                          <span>Replace</span>
+                          <RotateCw className="w-3 h-3 text-indigo-400" />
+                          <span>Rotate</span>
                         </button>
                         <button
                           type="button"

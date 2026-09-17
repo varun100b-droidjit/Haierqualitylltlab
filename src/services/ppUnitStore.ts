@@ -9,8 +9,40 @@ import {
 } from '../lib/supabase';
 import { db, collection, doc, setDoc, deleteDoc, getDocs, onSnapshot } from './firebase';
 import { requireOnlineForSave } from './networkManager';
+import { buildNormalizedPhotos } from '../utils/photoManager';
+import { cleanForFirestore, enforceFirestoreDocSizeLimit } from './firestoreSanitizer';
+import { safeLocalStorageSet, idbSaveAll, idbGetAll } from '../lib/indexedDbStorage';
 
 const STORAGE_KEY_PP_UNITS = 'llt_pp_units_v1';
+const DELETED_PP_UNITS_KEY = 'llt_deleted_pp_units_v1';
+
+// Helper to track explicitly deleted unit IDs to prevent resurrection during sync
+function getDeletedPpUnitIds(): Set<string> {
+  try {
+    const raw = localStorage.getItem(DELETED_PP_UNITS_KEY);
+    return new Set(raw ? JSON.parse(raw) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function markPpUnitDeleted(id: string) {
+  const set = getDeletedPpUnitIds();
+  set.add(id);
+  try {
+    localStorage.setItem(DELETED_PP_UNITS_KEY, JSON.stringify(Array.from(set)));
+  } catch {}
+}
+
+function unmarkPpUnitDeleted(id: string) {
+  const set = getDeletedPpUnitIds();
+  if (set.has(id)) {
+    set.delete(id);
+    try {
+      localStorage.setItem(DELETED_PP_UNITS_KEY, JSON.stringify(Array.from(set)));
+    } catch {}
+  }
+}
 
 // Helper to generate a random unique 5-digit string (e.g., "54321")
 export function generatePp5DigitSerial(): string {
@@ -45,17 +77,24 @@ if (typeof window !== 'undefined') {
 }
 
 // Global Supabase Realtime event listener
-subscribeToLabRealtimeEvents((event) => {
+subscribeToLabRealtimeEvents((event, payload) => {
   if (event === 'pp_units_change') {
-    initDataSync();
+    if (payload?.deletedId) {
+      markPpUnitDeleted(payload.deletedId);
+      ppUnitsCache = ppUnitsCache.filter(u => u.id !== payload.deletedId);
+      safeLocalStorageSet(STORAGE_KEY_PP_UNITS, ppUnitsCache);
+      notifyListeners();
+    } else {
+      initDataSync();
+    }
   }
 });
 
-// Periodic background sync check
+// Periodic background sync: ONLY push un-synced items to Firestore, never destructively wipe
 if (typeof window !== 'undefined') {
   setInterval(() => {
-    initDataSync();
-  }, 6000);
+    pushPendingLocalUnitsToFirestore();
+  }, 15000);
 }
 
 /* ==========================================
@@ -65,8 +104,13 @@ if (typeof window !== 'undefined') {
 export async function syncPpUnitToFirestore(unit: PpUnit) {
   if (!db || !unit || unit.id.startsWith('pp-idu-') || unit.id.startsWith('pp-odu-')) return;
   try {
+    const sanitized = enforceFirestoreDocSizeLimit(cleanForFirestore(unit));
     const docRef = doc(db, 'pp_units', unit.id);
-    await setDoc(docRef, { ...unit }, { merge: true });
+    await setDoc(docRef, sanitized, { merge: true });
+    if ((unit as any)._pendingSync) {
+      delete (unit as any)._pendingSync;
+      safeLocalStorageSet(STORAGE_KEY_PP_UNITS, ppUnitsCache);
+    }
     console.log('Successfully synced PP Unit to Firebase Firestore:', unit.id);
   } catch (e) {
     console.warn('Firestore PP Unit sync note:', e);
@@ -103,6 +147,57 @@ export async function fetchPpUnitsFromFirestore(): Promise<PpUnit[] | null> {
   }
 }
 
+/**
+ * Merges incoming remote records with the local cache in a NON-DESTRUCTIVE manner.
+ * Never drops locally created or updated units that have not finished syncing to Firestore.
+ */
+function mergeWithLocalCache(remoteUnits: PpUnit[]): PpUnit[] {
+  const deleted = getDeletedPpUnitIds();
+  const map = new Map<string, PpUnit>();
+
+  // First, add all existing local units that have NOT been explicitly deleted
+  ppUnitsCache.forEach(u => {
+    if (u && u.id && !deleted.has(u.id)) {
+      map.set(u.id, u);
+    }
+  });
+
+  // Second, integrate remote units
+  remoteUnits.forEach(rem => {
+    if (!rem || !rem.id || deleted.has(rem.id)) return;
+    const local = map.get(rem.id);
+    if (!local) {
+      map.set(rem.id, rem);
+    } else {
+      // If local is currently marked as pending sync, preserve local changes
+      if ((local as any)._pendingSync) {
+        return;
+      }
+      const remTime = new Date(rem.updatedAt || rem.createdAt || 0).getTime();
+      const localTime = new Date(local.updatedAt || local.createdAt || 0).getTime();
+      if (remTime >= localTime) {
+        map.set(rem.id, rem);
+      }
+    }
+  });
+
+  const merged = Array.from(map.values());
+  merged.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+  return merged;
+}
+
+// Push any pending local units to Firestore if they aren't on the cloud yet
+function pushPendingLocalUnitsToFirestore() {
+  const deleted = getDeletedPpUnitIds();
+  ppUnitsCache.forEach(u => {
+    if (u && !deleted.has(u.id) && !u.id.startsWith('pp-idu-') && !u.id.startsWith('pp-odu-')) {
+      if ((u as any)._pendingSync) {
+        syncPpUnitToFirestore(u);
+      }
+    }
+  });
+}
+
 // Attach Real-Time Firestore Listener for Live Multi-Device Sync
 if (db) {
   try {
@@ -116,10 +211,12 @@ if (db) {
             list.push(data);
           }
         });
-        // Sort by creation date descending
-        list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-        ppUnitsCache = list;
-        try { localStorage.setItem(STORAGE_KEY_PP_UNITS, JSON.stringify(list)); } catch {}
+
+        // Non-destructive merge preserves any freshly created local unit
+        const merged = mergeWithLocalCache(list);
+        ppUnitsCache = merged;
+        safeLocalStorageSet(STORAGE_KEY_PP_UNITS, merged);
+        idbSaveAll('pp_units', merged);
         notifyListeners();
       }
     }, (err: any) => {
@@ -139,20 +236,25 @@ async function initDataSync() {
     const firestoreData = await fetchPpUnitsFromFirestore();
     if (firestoreData && firestoreData.length > 0) {
       const clean = firestoreData.filter(u => u && !u.id.startsWith('pp-idu-') && !u.id.startsWith('pp-odu-'));
-      ppUnitsCache = clean;
-      try { localStorage.setItem(STORAGE_KEY_PP_UNITS, JSON.stringify(clean)); } catch {}
+      const merged = mergeWithLocalCache(clean);
+      ppUnitsCache = merged;
+      safeLocalStorageSet(STORAGE_KEY_PP_UNITS, merged);
+      idbSaveAll('pp_units', merged);
       notifyListeners();
+      pushPendingLocalUnitsToFirestore();
       return;
     }
 
     // Fallback to Supabase
     const remoteData = await fetchPpUnitsFromSupabase();
     if (remoteData && remoteData.length > 0) {
-      const clean = remoteData.filter(u => u && !u.id.startsWith('pp-idu-') && !u.id.startsWith('pp-odu-'));
-      ppUnitsCache = clean;
-      try { localStorage.setItem(STORAGE_KEY_PP_UNITS, JSON.stringify(clean)); } catch {}
+      const cleanRemote = remoteData.filter(u => u && !u.id.startsWith('pp-idu-') && !u.id.startsWith('pp-odu-'));
+      const merged = mergeWithLocalCache(cleanRemote);
+      ppUnitsCache = merged;
+      safeLocalStorageSet(STORAGE_KEY_PP_UNITS, merged);
+      idbSaveAll('pp_units', merged);
       notifyListeners();
-      clean.forEach(u => syncPpUnitToFirestore(u));
+      cleanRemote.forEach(u => syncPpUnitToFirestore(u));
     }
   } catch (e) {
     console.warn('Data sync note in PP Store:', e);
@@ -173,7 +275,8 @@ export function subscribePpUnitStore(callback: () => void) {
 function saveLocalPpUnits(data: PpUnit[]) {
   const clean = (data || []).filter(u => u && !u.id.startsWith('pp-idu-') && !u.id.startsWith('pp-odu-'));
   ppUnitsCache = clean;
-  try { localStorage.setItem(STORAGE_KEY_PP_UNITS, JSON.stringify(clean)); } catch {}
+  safeLocalStorageSet(STORAGE_KEY_PP_UNITS, clean);
+  idbSaveAll('pp_units', clean);
   if (localPpBus) {
     try { localPpBus.postMessage({ timestamp: Date.now() }); } catch {}
   }
@@ -209,8 +312,6 @@ function getFormattedNow(): string {
   const minutes = String(now.getMinutes()).padStart(2, '0');
   return `${year}-${month}-${day} ${hours}:${minutes}`;
 }
-
-import { buildNormalizedPhotos } from '../utils/photoManager';
 
 function sanitizeStringFields<T>(obj: T, parentKey = ''): T {
   if (parentKey === 'photos' || parentKey === 'photoRecords' || parentKey === 'photoUrl') {
@@ -259,6 +360,8 @@ export function addPpUnit(unit: Omit<PpUnit, 'id' | 'createdAt' | 'updatedAt'> &
     createdAt: formattedDate,
     updatedAt: formattedDate,
   };
+  (newUnit as any)._pendingSync = true;
+  unmarkPpUnitDeleted(newUnit.id);
 
   const updated = [newUnit, ...ppUnitsCache];
   saveLocalPpUnits(updated);
@@ -399,8 +502,11 @@ export function passPpUnitWithDetails(
 }
 
 export function deletePpUnit(id: string): void {
+  markPpUnitDeleted(id);
   const updated = ppUnitsCache.filter(u => u.id !== id);
   saveLocalPpUnits(updated);
+
+  broadcastLabRealtimeEvent('pp_units_change', { deletedId: id, timestamp: Date.now() });
 
   // Delete from Supabase & Firestore asynchronously
   deletePpUnitFromSupabase(id).catch(err => console.warn('[PPUnitStore] Supabase delete note:', err));

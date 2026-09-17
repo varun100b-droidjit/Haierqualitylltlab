@@ -9,8 +9,38 @@ import {
 } from '../lib/supabase';
 import { db, collection, doc, setDoc, deleteDoc, getDocs, onSnapshot } from './firebase';
 import { requireOnlineForSave } from './networkManager';
+import { cleanForFirestore, enforceFirestoreDocSizeLimit } from './firestoreSanitizer';
+import { safeLocalStorageSet, idbSaveAll, idbGetAll } from '../lib/indexedDbStorage';
 
 const STORAGE_KEY_FIELD_UNITS = 'llt_field_units_v2';
+const DELETED_FIELD_UNITS_KEY = 'llt_deleted_field_units_v1';
+
+function getDeletedFieldUnitIds(): Set<string> {
+  try {
+    const raw = localStorage.getItem(DELETED_FIELD_UNITS_KEY);
+    return new Set(raw ? JSON.parse(raw) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function markFieldUnitDeleted(id: string) {
+  const set = getDeletedFieldUnitIds();
+  set.add(id);
+  try {
+    localStorage.setItem(DELETED_FIELD_UNITS_KEY, JSON.stringify(Array.from(set)));
+  } catch {}
+}
+
+function unmarkFieldUnitDeleted(id: string) {
+  const set = getDeletedFieldUnitIds();
+  if (set.has(id)) {
+    set.delete(id);
+    try {
+      localStorage.setItem(DELETED_FIELD_UNITS_KEY, JSON.stringify(Array.from(set)));
+    } catch {}
+  }
+}
 
 function getFormattedNow(): string {
   const now = new Date();
@@ -50,17 +80,24 @@ if (typeof window !== 'undefined') {
 }
 
 // Global Supabase Realtime event listener
-subscribeToLabRealtimeEvents((event) => {
+subscribeToLabRealtimeEvents((event, payload) => {
   if (event === 'field_units_change') {
-    initDataSync();
+    if (payload?.deletedId) {
+      markFieldUnitDeleted(payload.deletedId);
+      fieldUnitsCache = fieldUnitsCache.filter(u => u.id !== payload.deletedId);
+      safeLocalStorageSet(STORAGE_KEY_FIELD_UNITS, fieldUnitsCache);
+      notifySubscribers();
+    } else {
+      initDataSync();
+    }
   }
 });
 
-// Periodic background sync check
+// Periodic background sync: ONLY push un-synced items to Firestore, never destructively wipe
 if (typeof window !== 'undefined') {
   setInterval(() => {
-    initDataSync();
-  }, 6000);
+    pushPendingLocalUnitsToFirestore();
+  }, 15000);
 }
 
 /* ==========================================
@@ -70,8 +107,13 @@ if (typeof window !== 'undefined') {
 export async function syncFieldUnitToFirestore(unit: FieldUnit) {
   if (!db || !unit || unit.id === 'field-101' || unit.id === 'field-102' || unit.id === 'field-103') return;
   try {
+    const sanitized = enforceFirestoreDocSizeLimit(cleanForFirestore(unit));
     const docRef = doc(db, 'field_units', unit.id);
-    await setDoc(docRef, { ...unit }, { merge: true });
+    await setDoc(docRef, sanitized, { merge: true });
+    if ((unit as any)._pendingSync) {
+      delete (unit as any)._pendingSync;
+      safeLocalStorageSet(STORAGE_KEY_FIELD_UNITS, fieldUnitsCache);
+    }
     console.log('Successfully synced Field Unit to Firebase Firestore:', unit.id);
   } catch (e) {
     console.warn('Firestore Field Unit sync note:', e);
@@ -108,6 +150,57 @@ export async function fetchFieldUnitsFromFirestore(): Promise<FieldUnit[] | null
   }
 }
 
+/**
+ * Merges incoming remote records with the local cache in a NON-DESTRUCTIVE manner.
+ * Never drops locally created or updated units that have not finished syncing to Firestore.
+ */
+function mergeWithLocalCache(remoteUnits: FieldUnit[]): FieldUnit[] {
+  const deleted = getDeletedFieldUnitIds();
+  const map = new Map<string, FieldUnit>();
+
+  // First, add all existing local units that have NOT been explicitly deleted
+  fieldUnitsCache.forEach(u => {
+    if (u && u.id && !deleted.has(u.id)) {
+      map.set(u.id, u);
+    }
+  });
+
+  // Second, integrate remote units
+  remoteUnits.forEach(rem => {
+    if (!rem || !rem.id || deleted.has(rem.id)) return;
+    const local = map.get(rem.id);
+    if (!local) {
+      map.set(rem.id, rem);
+    } else {
+      // If local is currently marked as pending sync, preserve local changes
+      if ((local as any)._pendingSync) {
+        return;
+      }
+      const remTime = new Date(rem.updatedAt || rem.createdAt || 0).getTime();
+      const localTime = new Date(local.updatedAt || local.createdAt || 0).getTime();
+      if (remTime >= localTime) {
+        map.set(rem.id, rem);
+      }
+    }
+  });
+
+  const merged = Array.from(map.values());
+  merged.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+  return merged;
+}
+
+// Push any pending local units to Firestore if they aren't on the cloud yet
+function pushPendingLocalUnitsToFirestore() {
+  const deleted = getDeletedFieldUnitIds();
+  fieldUnitsCache.forEach(u => {
+    if (u && !deleted.has(u.id) && !u.id.startsWith('field-101') && !u.id.startsWith('field-102') && !u.id.startsWith('field-103')) {
+      if ((u as any)._pendingSync) {
+        syncFieldUnitToFirestore(u);
+      }
+    }
+  });
+}
+
 // Attach Real-Time Firestore Listener for Live Multi-Device Sync
 if (db) {
   try {
@@ -121,9 +214,12 @@ if (db) {
             list.push(data);
           }
         });
-        list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-        fieldUnitsCache = list;
-        try { localStorage.setItem(STORAGE_KEY_FIELD_UNITS, JSON.stringify(list)); } catch {}
+
+        // Non-destructive merge preserves any freshly created local unit
+        const merged = mergeWithLocalCache(list);
+        fieldUnitsCache = merged;
+        safeLocalStorageSet(STORAGE_KEY_FIELD_UNITS, merged);
+        idbSaveAll('field_units', merged);
         notifySubscribers();
       }
     }, (err: any) => {
@@ -143,9 +239,12 @@ async function initDataSync() {
     const firestoreData = await fetchFieldUnitsFromFirestore();
     if (firestoreData && firestoreData.length > 0) {
       const clean = firestoreData.filter(u => u && u.id !== 'field-101' && u.id !== 'field-102' && u.id !== 'field-103');
-      fieldUnitsCache = clean;
-      try { localStorage.setItem(STORAGE_KEY_FIELD_UNITS, JSON.stringify(clean)); } catch {}
+      const merged = mergeWithLocalCache(clean);
+      fieldUnitsCache = merged;
+      safeLocalStorageSet(STORAGE_KEY_FIELD_UNITS, merged);
+      idbSaveAll('field_units', merged);
       notifySubscribers();
+      pushPendingLocalUnitsToFirestore();
       return;
     }
 
@@ -153,8 +252,10 @@ async function initDataSync() {
     const remoteData = await fetchFieldUnitsFromSupabase();
     if (remoteData && remoteData.length > 0) {
       const clean = remoteData.filter(u => u && u.id !== 'field-101' && u.id !== 'field-102' && u.id !== 'field-103');
-      fieldUnitsCache = clean;
-      try { localStorage.setItem(STORAGE_KEY_FIELD_UNITS, JSON.stringify(clean)); } catch {}
+      const merged = mergeWithLocalCache(clean);
+      fieldUnitsCache = merged;
+      safeLocalStorageSet(STORAGE_KEY_FIELD_UNITS, merged);
+      idbSaveAll('field_units', merged);
       notifySubscribers();
       clean.forEach(u => syncFieldUnitToFirestore(u));
     }
@@ -185,11 +286,8 @@ function loadLocalFieldUnits(): FieldUnit[] {
 function saveLocalFieldUnits(units: FieldUnit[]) {
   const clean = (units || []).filter(u => u && u.id !== 'field-101' && u.id !== 'field-102' && u.id !== 'field-103');
   fieldUnitsCache = clean;
-  try {
-    localStorage.setItem(STORAGE_KEY_FIELD_UNITS, JSON.stringify(clean));
-  } catch (err) {
-    console.error('Error saving field units to localStorage:', err);
-  }
+  safeLocalStorageSet(STORAGE_KEY_FIELD_UNITS, clean);
+  idbSaveAll('field_units', clean);
   if (localFieldBus) {
     try { localFieldBus.postMessage({ timestamp: Date.now() }); } catch {}
   }
@@ -218,6 +316,8 @@ export function addFieldUnit(unitData: Omit<FieldUnit, 'id' | 'createdAt' | 'upd
     createdAt: formattedDate,
     updatedAt: formattedDate
   };
+  (newUnit as any)._pendingSync = true;
+  unmarkFieldUnitDeleted(newUnit.id);
 
   const updated = [newUnit, ...fieldUnitsCache];
   saveLocalFieldUnits(updated);
@@ -264,7 +364,7 @@ export function updateFieldUnitStatus(id: string, status: FieldUnit['status'], d
         ...u,
         status,
         ...(typeof doneHour === 'number' ? { doneHour } : {}),
-        endDateTime: status === 'stopped' || status === 'finished' ? formattedDate : (status === 'live' ? undefined : u.endDateTime),
+        endDateTime: status === 'stopped' || status === 'finished' ? formattedDate : (status === 'live' ? '' : (u.endDateTime || '')),
         observations: [...autoObs, ...existingObs],
         updatedAt: formattedDate
       };
@@ -378,8 +478,11 @@ export function deleteFieldUnitObservation(id: string, obsId: string): FieldUnit
 }
 
 export function deleteFieldUnit(id: string) {
+  markFieldUnitDeleted(id);
   const updated = fieldUnitsCache.filter(u => u.id !== id);
   saveLocalFieldUnits(updated);
+
+  broadcastLabRealtimeEvent('field_units_change', { deletedId: id, timestamp: Date.now() });
 
   // Delete from Supabase & Firestore asynchronously
   deleteFieldUnitFromSupabase(id).catch(err => console.warn('[FieldUnitStore] Supabase delete note:', err));
