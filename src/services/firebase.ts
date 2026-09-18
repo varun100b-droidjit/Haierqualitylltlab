@@ -8,7 +8,6 @@ import {
   setDoc, 
   getDoc,
   getDocs, 
-  getDocFromServer,
   onSnapshot, 
   updateDoc, 
   deleteDoc, 
@@ -26,6 +25,7 @@ import {
   updatePassword,
   User as FirebaseUser
 } from 'firebase/auth';
+import { getStorage } from 'firebase/storage';
 import firebaseAppletConfig from '../../firebase-applet-config.json';
 
 const metaEnv = (import.meta as any).env || {};
@@ -47,20 +47,22 @@ export const isFirebaseConfigured = Boolean(firebaseConfig.projectId && firebase
 let app: any = null;
 let db: any = null;
 let auth: any = null;
+let storage: any = null;
 
 if (isFirebaseConfigured) {
   try {
     app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
     
-    // Suppress non-critical WebChannel timeout warnings in browser iframe/sandboxed environments
+    // Suppress WebChannel connection retry noise in browser sandboxed / offline states
     try {
-      setLogLevel('error');
+      setLogLevel('silent');
     } catch {}
 
     try {
-      // Force long-polling to prevent WebChannel 10-second backend timeout in browser iframe/proxy environments
+      // Force long-polling to prevent WebChannel timeout in browser iframe/proxy environments
       db = initializeFirestore(app, {
         experimentalForceLongPolling: true,
+        experimentalAutoDetectLongPolling: true,
       }, databaseId);
     } catch (e1) {
       try {
@@ -70,20 +72,10 @@ if (isFirebaseConfigured) {
       }
     }
     auth = getAuth(app);
+    try {
+      storage = getStorage(app);
+    } catch {}
     console.log("Firebase initialized successfully for LLT Lab with long-polling transport");
-
-    // Test connection asynchronously without blocking app startup
-    setTimeout(async () => {
-      try {
-        if (db) {
-          await getDocFromServer(doc(db, 'system_settings', 'active_shift'));
-        }
-      } catch (error: any) {
-        if (error instanceof Error && error.message.includes('the client is offline')) {
-          console.warn("Client offline; operating in offline cache mode.");
-        }
-      }
-    }, 100);
   } catch (error) {
     console.warn("Firebase initialization note:", error);
   }
@@ -140,6 +132,7 @@ export {
   app, 
   db, 
   auth, 
+  storage,
   initializeApp,
   deleteApp,
   collection, 
