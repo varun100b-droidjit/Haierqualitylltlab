@@ -16,6 +16,35 @@ const DB_VERSION = 1;
 const STORE_NAME = 'templates';
 const FIREBASE_COLLECTION = 'master_templates';
 const CHUNK_SIZE = 600000; // ~600KB chunk size to stay safely within Firestore's 1MB doc limit
+const DELETED_TEMPLATES_KEY = 'llt_deleted_master_templates_v1';
+
+// Helper to track explicitly deleted template types to prevent resurrection
+function getDeletedTemplateTypes(): Set<string> {
+  try {
+    const raw = localStorage.getItem(DELETED_TEMPLATES_KEY);
+    return new Set(raw ? JSON.parse(raw) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function markTemplateDeleted(reportType: string) {
+  const set = getDeletedTemplateTypes();
+  set.add(reportType);
+  try {
+    localStorage.setItem(DELETED_TEMPLATES_KEY, JSON.stringify(Array.from(set)));
+  } catch {}
+}
+
+function unmarkTemplateDeleted(reportType: string) {
+  const set = getDeletedTemplateTypes();
+  if (set.has(reportType)) {
+    set.delete(reportType);
+    try {
+      localStorage.setItem(DELETED_TEMPLATES_KEY, JSON.stringify(Array.from(set)));
+    } catch {}
+  }
+}
 
 // In-memory cache for ultra-fast sync access
 const templateCache: Record<string, MasterTemplate> = {};
@@ -87,9 +116,13 @@ export async function initMasterTemplateStore(): Promise<Record<string, MasterTe
     await new Promise<void>((resolve) => {
       request.onsuccess = () => {
         const items: MasterTemplate[] = request.result || [];
+        const deletedSet = getDeletedTemplateTypes();
         items.forEach((item) => {
+          if (deletedSet.has(item.reportType)) {
+            return;
+          }
           if (item.uploadedAt === 'Built-in Master Format' || item.id?.startsWith('default-tpl-')) {
-            templateCache[item.reportType] = getDefaultMasterTemplate(item.reportType);
+            // Do not store default template as custom in cache
           } else {
             templateCache[item.reportType] = item;
           }
@@ -218,7 +251,15 @@ function loadFromLocalStorageFallback() {
     const raw = localStorage.getItem('llt_master_report_templates_v1');
     if (raw) {
       const map: Record<string, MasterTemplate> = JSON.parse(raw);
-      Object.assign(templateCache, map);
+      const deletedSet = getDeletedTemplateTypes();
+      Object.keys(map).forEach((rType) => {
+        if (!deletedSet.has(rType)) {
+          const item = map[rType];
+          if (item && item.uploadedAt !== 'Built-in Master Format' && !item.id?.startsWith('default-tpl-')) {
+            templateCache[rType] = item;
+          }
+        }
+      });
     }
   } catch (err) {
     console.warn('LocalStorage fallback failed:', err);
@@ -227,36 +268,55 @@ function loadFromLocalStorageFallback() {
 }
 
 /**
- * Synchronously returns cached master template
+ * Returns custom master template if one was uploaded, or null if deleted/not uploaded
+ */
+export function getCustomMasterTemplate(reportType: string = 'proto'): MasterTemplate | null {
+  if (getDeletedTemplateTypes().has(reportType)) {
+    return null;
+  }
+  const cached = templateCache[reportType];
+  if (cached && cached.uploadedAt !== 'Built-in Master Format' && !cached.id?.startsWith('default-tpl-')) {
+    return cached;
+  }
+  return null;
+}
+
+/**
+ * Async fetch custom master template from Firebase or IndexedDB
+ */
+export async function getCustomMasterTemplateAsync(reportType: string = 'proto'): Promise<MasterTemplate | null> {
+  const syncCustom = getCustomMasterTemplate(reportType);
+  if (syncCustom) return syncCustom;
+  if (getDeletedTemplateTypes().has(reportType)) return null;
+
+  const asyncTpl = await getMasterTemplateAsync(reportType);
+  if (asyncTpl && asyncTpl.uploadedAt !== 'Built-in Master Format' && !asyncTpl.id?.startsWith('default-tpl-')) {
+    return asyncTpl;
+  }
+  return null;
+}
+
+/**
+ * Synchronously returns cached master template, or system default fallback
  */
 export function getMasterTemplate(reportType: string = 'proto'): MasterTemplate {
-  if (templateCache[reportType]) {
-    return templateCache[reportType];
+  const custom = getCustomMasterTemplate(reportType);
+  if (custom) {
+    return custom;
   }
 
-  // Synchronous attempt from localStorage fallback
-  try {
-    const raw = localStorage.getItem('llt_master_report_templates_v1');
-    if (raw) {
-      const map: Record<string, MasterTemplate> = JSON.parse(raw);
-      if (map[reportType]) {
-        templateCache[reportType] = map[reportType];
-        return map[reportType];
-      }
-    }
-  } catch (e) {
-    // Ignore
-  }
-
-  const defaultTpl = getDefaultMasterTemplate(reportType);
-  templateCache[reportType] = defaultTpl;
-  return defaultTpl;
+  // If no custom template exists, return system default template for generation
+  return getDefaultMasterTemplate(reportType);
 }
 
 /**
  * Async fetch master template from Firebase or IndexedDB
  */
 export async function getMasterTemplateAsync(reportType: string = 'proto'): Promise<MasterTemplate> {
+  if (getDeletedTemplateTypes().has(reportType)) {
+    return getDefaultMasterTemplate(reportType);
+  }
+
   if (templateCache[reportType]) {
     return templateCache[reportType];
   }
@@ -305,19 +365,19 @@ export async function getMasterTemplateAsync(reportType: string = 'proto'): Prom
     return new Promise((resolve) => {
       request.onsuccess = () => {
         const result = request.result as MasterTemplate | undefined;
-        if (result) {
+        if (result && result.uploadedAt !== 'Built-in Master Format' && !result.id?.startsWith('default-tpl-')) {
           templateCache[reportType] = result;
           resolve(result);
         } else {
-          resolve(getMasterTemplate(reportType));
+          resolve(getDefaultMasterTemplate(reportType));
         }
       };
       request.onerror = () => {
-        resolve(getMasterTemplate(reportType));
+        resolve(getDefaultMasterTemplate(reportType));
       };
     });
   } catch (e) {
-    return getMasterTemplate(reportType);
+    return getDefaultMasterTemplate(reportType);
   }
 }
 
@@ -336,6 +396,9 @@ async function persistToIndexedDB(template: MasterTemplate): Promise<void> {
  * Saves master template into Firebase Firestore + IndexedDB
  */
 export async function saveMasterTemplateAsync(template: MasterTemplate): Promise<void> {
+  // Clear any deletion tombstone
+  unmarkTemplateDeleted(template.reportType);
+
   const updatedTemplate: MasterTemplate = {
     ...template,
     isFirebaseSynced: isFirebaseConfigured
@@ -384,7 +447,14 @@ export async function saveMasterTemplateAsync(template: MasterTemplate): Promise
 
   // 4. Update localStorage as secondary fallback
   try {
-    const map = { [template.reportType]: updatedTemplate };
+    let map: Record<string, any> = {};
+    const raw = localStorage.getItem('llt_master_report_templates_v1');
+    if (raw) {
+      try {
+        map = JSON.parse(raw) || {};
+      } catch {}
+    }
+    map[template.reportType] = updatedTemplate;
     localStorage.setItem('llt_master_report_templates_v1', JSON.stringify(map));
   } catch (e) {
     // LocalStorage full, ignore since Firestore & IndexedDB have it
@@ -402,6 +472,9 @@ export function saveMasterTemplate(template: MasterTemplate): void {
  * Deletes master template from Firebase Firestore, IndexedDB, and cache
  */
 export async function deleteMasterTemplateAsync(reportType: string = 'proto'): Promise<void> {
+  // Mark as explicitly deleted so listeners or restarts do not re-hydrate it
+  markTemplateDeleted(reportType);
+
   delete templateCache[reportType];
   notifyListeners();
 
@@ -428,10 +501,17 @@ export async function deleteMasterTemplateAsync(reportType: string = 'proto'): P
 
   // 3. Delete from localStorage fallback
   try {
-    localStorage.removeItem('llt_master_report_templates_v1');
+    const raw = localStorage.getItem('llt_master_report_templates_v1');
+    if (raw) {
+      const map = JSON.parse(raw);
+      delete map[reportType];
+      localStorage.setItem('llt_master_report_templates_v1', JSON.stringify(map));
+    }
   } catch (e) {
     // ignore
   }
+
+  notifyListeners();
 }
 
 export function deleteMasterTemplate(reportType: string = 'proto'): void {

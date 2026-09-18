@@ -11,7 +11,8 @@ import {
   PauseCircle,
   User,
   Trash2,
-  Edit
+  Edit,
+  RefreshCw
 } from 'lucide-react';
 import { FieldUnit } from '../../types';
 import { formatShortDateTime } from '../../utils/dateFormatter';
@@ -19,11 +20,13 @@ import {
   getFieldUnits, 
   subscribeFieldUnitStore, 
   updateFieldUnitStatus,
-  deleteFieldUnit
+  deleteFieldUnit,
+  forceSyncFieldUnits
 } from '../../services/fieldUnitStore';
 import { AddFieldUnitDialog } from './AddFieldUnitDialog';
 import { FieldUnitDetailsDialog } from './FieldUnitDetailsDialog';
 import { DeleteUnitConfirmModal } from '../Common/DeleteUnitConfirmModal';
+import { ConfirmPassUnitModal } from '../Common/ConfirmPassUnitModal';
 import { 
   calculateShiftElapsedExactHours, 
   formatHoursToHHMM, 
@@ -88,8 +91,38 @@ export const FieldUnitsModule: React.FC<FieldUnitsModuleProps> = ({
     };
   }, []);
 
+  const [unitToPass, setUnitToPass] = useState<{ unit: FieldUnit; elapsedHours: number } | null>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
+
   const handleStop = (id: string, currentElapsedHours?: number) => {
     updateFieldUnitStatus(id, 'stopped', currentElapsedHours);
+  };
+
+  const handlePromptPass = (unit: FieldUnit, currentElapsedHours?: number) => {
+    setUnitToPass({ unit, elapsedHours: currentElapsedHours ?? 0 });
+  };
+
+  const handleConfirmPass = () => {
+    if (!unitToPass) return;
+    const { unit, elapsedHours } = unitToPass;
+    updateFieldUnitStatus(unit.id, 'finished', elapsedHours);
+    setToastMessage(`Field Unit "${unit.modelName}" passed successfully!`);
+    setTimeout(() => setToastMessage(null), 3500);
+    setUnitToPass(null);
+  };
+
+  const handleManualSync = async () => {
+    setIsSyncing(true);
+    try {
+      const updated = await forceSyncFieldUnits();
+      setFieldUnits(updated);
+      setToastMessage(`Synced ${updated.length} Field Units with Cloud`);
+      setTimeout(() => setToastMessage(null), 3000);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsSyncing(false);
+    }
   };
 
   const handlePass = (id: string, currentElapsedHours?: number) => {
@@ -335,6 +368,17 @@ export const FieldUnitsModule: React.FC<FieldUnitsModuleProps> = ({
           </div>
 
           <button
+            id="btn-field-manual-sync"
+            onClick={handleManualSync}
+            disabled={isSyncing}
+            className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-slate-300 bg-slate-800/80 hover:bg-slate-700/80 hover:text-white border border-slate-700 transition-all shrink-0 cursor-pointer disabled:opacity-50"
+            title="Real-Time Sync with Cloud"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 text-cyan-400 ${isSyncing ? 'animate-spin' : ''}`} />
+            <span className="hidden sm:inline">Sync</span>
+          </button>
+
+          <button
             onClick={handleOpenAdd}
             className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl font-extrabold text-xs text-slate-950 bg-gradient-to-r from-cyan-400 to-emerald-400 hover:from-cyan-300 hover:to-emerald-300 shadow-md shadow-cyan-950/50 hover:scale-[1.02] active:scale-[0.98] transition-all shrink-0 cursor-pointer whitespace-nowrap"
           >
@@ -528,7 +572,8 @@ export const FieldUnitsModule: React.FC<FieldUnitsModuleProps> = ({
 
                   {unit.status !== 'finished' && (
                     <button
-                      onClick={() => handlePass(unit.id, elapsedHours)}
+                      id={`btn-pass-field-${unit.id}`}
+                      onClick={() => handlePromptPass(unit, elapsedHours)}
                       className="flex-1 flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl text-xs font-extrabold text-emerald-300 bg-emerald-950/90 hover:bg-emerald-900 border border-emerald-800/80 transition-all cursor-pointer active:scale-95 shadow-sm"
                       title="Pass Field Test"
                     >
@@ -592,6 +637,21 @@ export const FieldUnitsModule: React.FC<FieldUnitsModuleProps> = ({
         onClose={() => setSelectedUnit(null)}
         onStatusChanged={() => setFieldUnits(getFieldUnits())}
       />
+
+      {/* Pass Confirmation Modal */}
+      {unitToPass && (
+        <ConfirmPassUnitModal
+          isOpen={!!unitToPass}
+          onClose={() => setUnitToPass(null)}
+          onConfirm={handleConfirmPass}
+          unitType="Field Unit"
+          modelName={unitToPass.unit.modelName}
+          station={unitToPass.unit.station}
+          serialNumber={unitToPass.unit.serialNumber}
+          elapsedHours={unitToPass.elapsedHours}
+          requiredHours={unitToPass.unit.requiredHour}
+        />
+      )}
 
       {/* Delete Confirmation Modal */}
       <DeleteUnitConfirmModal

@@ -35,33 +35,55 @@ export function cleanForFirestore<T>(data: T): T {
 
 /**
  * Ensures that a document being sent to Firestore does not exceed the 1MB (1,048,576 bytes) limit.
- * If base64 photo fields make the document too large (> 750KB safe ceiling),
- * safely downscales / compresses photos for the cloud record while keeping them functional.
+ * Deduplicates photo aliases (e.g. PHOTO_IDU_PCB vs iduPcbPhoto) which double the document size.
+ * If base64 photo fields make the document too large (> 650KB safe ceiling),
+ * safely keeps canonical photos within safe size limits so setDoc never fails with 1MB limit errors.
  */
 export function enforceFirestoreDocSizeLimit<T extends Record<string, any>>(docData: T): T {
   const sanitized = cleanForFirestore(docData);
   try {
-    const raw = JSON.stringify(sanitized);
-    // If within safe 750KB limit, return as-is
-    if (raw.length <= 750000) {
-      return sanitized;
-    }
-
-    console.warn(`[Firestore Sanitizer] Document payload is large (${Math.round(raw.length / 1024)} KB). Optimizing photo sizes for cloud sync.`);
     const copy: any = { ...sanitized };
 
-    // If there is a photos object, truncate overly massive base64 strings if necessary
+    // Deduplicate photo alias pairs if photos object exists
     if (copy.photos && typeof copy.photos === 'object') {
-      const optimizedPhotos: Record<string, any> = {};
+      const uniquePhotos: Record<string, any> = {};
+      const seenValues = new Map<string, string>(); // value -> first key
+
       for (const [k, v] of Object.entries(copy.photos)) {
-        if (typeof v === 'string' && v.startsWith('data:image/') && v.length > 200000) {
-          // If a single image is > 200KB, it could push document over 1MB
-          optimizedPhotos[k] = v;
-        } else {
-          optimizedPhotos[k] = v;
+        if (typeof v === 'string' && v.startsWith('data:image/')) {
+          // If this exact base64 data was already included under another key, omit duplicate
+          if (seenValues.has(v)) {
+            // keep alias mapping lightweight reference or omit
+            continue;
+          }
+          seenValues.set(v, k);
+          uniquePhotos[k] = v;
+        } else if (v !== undefined && v !== null) {
+          uniquePhotos[k] = v;
         }
       }
-      copy.photos = optimizedPhotos;
+      copy.photos = uniquePhotos;
+    }
+
+    const raw = JSON.stringify(copy);
+    if (raw.length <= 700000) {
+      return copy as T;
+    }
+
+    console.warn(`[Firestore Sanitizer] Document payload is large (${Math.round(raw.length / 1024)} KB). Pruning oversized photo payloads for cloud sync.`);
+
+    // If still over 700KB, only keep essential photos or placeholder references for very large base64 strings
+    if (copy.photos && typeof copy.photos === 'object') {
+      const prunedPhotos: Record<string, any> = {};
+      for (const [k, v] of Object.entries(copy.photos)) {
+        if (typeof v === 'string' && v.startsWith('data:image/') && v.length > 250000) {
+          // Keep a marker so UI knows photo exists in IndexedDB
+          prunedPhotos[k] = 'data:image/placeholder;stored_in_idb';
+        } else {
+          prunedPhotos[k] = v;
+        }
+      }
+      copy.photos = prunedPhotos;
     }
 
     return copy as T;

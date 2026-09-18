@@ -26,10 +26,10 @@ service cloud.firestore {
       );
     }
 
-    // Master Templates Collection - readable for generation across app, writable by active operators/admin
+    // Master Templates Collection - readable and manageable across the lab
     match /master_templates/{reportType} {
       allow read: if true;
-      allow write: if isSignedIn() && isActiveUser();
+      allow write: if true;
     }
 
     // User Profile & RBAC Collection

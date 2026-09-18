@@ -13,8 +13,8 @@ import {
 } from 'lucide-react';
 import { 
   MasterTemplate, 
-  getMasterTemplate, 
-  getMasterTemplateAsync,
+  getCustomMasterTemplate, 
+  getCustomMasterTemplateAsync,
   saveMasterTemplateAsync, 
   deleteMasterTemplateAsync,
   subscribeToMasterTemplates 
@@ -32,7 +32,7 @@ export const MasterTemplateSection: React.FC<MasterTemplateSectionProps> = ({
   reportTypeName = 'Customer Simulation Report',
   onTemplateChange
 }) => {
-  const [template, setTemplate] = useState<MasterTemplate | null>(() => getMasterTemplate(reportType));
+  const [template, setTemplate] = useState<MasterTemplate | null>(() => getCustomMasterTemplate(reportType));
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -40,22 +40,27 @@ export const MasterTemplateSection: React.FC<MasterTemplateSectionProps> = ({
   // Subscribe to realtime updates across Firebase & cache
   useEffect(() => {
     let isMounted = true;
-    const initialSync = getMasterTemplate(reportType);
+    const initialSync = getCustomMasterTemplate(reportType);
     setTemplate(initialSync);
     onTemplateChange(initialSync);
 
-    getMasterTemplateAsync(reportType).then((fetched) => {
-      if (isMounted && fetched) {
+    getCustomMasterTemplateAsync(reportType).then((fetched) => {
+      if (isMounted) {
         setTemplate(fetched);
         onTemplateChange(fetched);
       }
     });
 
     const unsubscribe = subscribeToMasterTemplates((templates) => {
-      if (isMounted && templates[reportType]) {
+      if (isMounted) {
         const cur = templates[reportType];
-        setTemplate(cur);
-        onTemplateChange(cur);
+        if (cur && cur.uploadedAt !== 'Built-in Master Format' && !cur.id?.startsWith('default-tpl-')) {
+          setTemplate(cur);
+          onTemplateChange(cur);
+        } else {
+          setTemplate(null);
+          onTemplateChange(null);
+        }
       }
     });
 
@@ -121,10 +126,17 @@ export const MasterTemplateSection: React.FC<MasterTemplateSectionProps> = ({
   };
 
   const handleConfirmDelete = async () => {
-    await deleteMasterTemplateAsync(reportType);
-    setTemplate(null);
-    onTemplateChange(null);
-    setIsDeleteModalOpen(false);
+    setIsUploading(true);
+    try {
+      await deleteMasterTemplateAsync(reportType);
+      setTemplate(null);
+      onTemplateChange(null);
+    } catch (err) {
+      console.error('Delete template error:', err);
+    } finally {
+      setIsUploading(false);
+      setIsDeleteModalOpen(false);
+    }
   };
 
   const formatFileSize = (bytes: number) => {

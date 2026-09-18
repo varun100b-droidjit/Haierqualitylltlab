@@ -90,11 +90,28 @@ subscribeToLabRealtimeEvents((event, payload) => {
   }
 });
 
-// Periodic background sync: ONLY push un-synced items to Firestore, never destructively wipe
+// Periodic background sync: Poll cloud every 5 seconds for instant multi-device sync, and push pending units
 if (typeof window !== 'undefined') {
   setInterval(() => {
+    initDataSync();
     pushPendingLocalUnitsToFirestore();
-  }, 15000);
+  }, 5000);
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      initDataSync();
+      setupFirestoreListener();
+    }
+  });
+
+  window.addEventListener('focus', () => {
+    initDataSync();
+  });
+
+  window.addEventListener('online', () => {
+    initDataSync();
+    setupFirestoreListener();
+  });
 }
 
 /* ==========================================
@@ -149,34 +166,32 @@ export async function fetchPpUnitsFromFirestore(): Promise<PpUnit[] | null> {
 
 /**
  * Merges incoming remote records with the local cache in a NON-DESTRUCTIVE manner.
- * Never drops locally created or updated units that have not finished syncing to Firestore.
+ * Prioritizes remote records as the cloud source of truth, while preserving any
+ * locally created units that are currently pending cloud upload.
  */
 function mergeWithLocalCache(remoteUnits: PpUnit[]): PpUnit[] {
   const deleted = getDeletedPpUnitIds();
   const map = new Map<string, PpUnit>();
 
-  // First, add all existing local units that have NOT been explicitly deleted
-  ppUnitsCache.forEach(u => {
-    if (u && u.id && !deleted.has(u.id)) {
-      map.set(u.id, u);
-    }
-  });
-
-  // Second, integrate remote units
+  // 1. All valid remote units from Firestore / cloud
   remoteUnits.forEach(rem => {
     if (!rem || !rem.id || deleted.has(rem.id)) return;
-    const local = map.get(rem.id);
-    if (!local) {
-      map.set(rem.id, rem);
-    } else {
-      // If local is currently marked as pending sync, preserve local changes
-      if ((local as any)._pendingSync) {
-        return;
-      }
-      const remTime = new Date(rem.updatedAt || rem.createdAt || 0).getTime();
-      const localTime = new Date(local.updatedAt || local.createdAt || 0).getTime();
-      if (remTime >= localTime) {
-        map.set(rem.id, rem);
+    map.set(rem.id, rem);
+  });
+
+  // 2. Preserve local units that have not yet reached the cloud or are marked pending sync
+  protoUnitsLoop:
+  ppUnitsCache.forEach(local => {
+    if (local && local.id && !deleted.has(local.id)) {
+      if (!map.has(local.id)) {
+        map.set(local.id, local);
+      } else {
+        const remote = map.get(local.id)!;
+        const localTime = new Date(local.updatedAt || local.createdAt || 0).getTime();
+        const remTime = new Date(remote.updatedAt || remote.createdAt || 0).getTime();
+        if ((local as any)._pendingSync || localTime > remTime) {
+          map.set(local.id, local);
+        }
       }
     }
   });
@@ -198,11 +213,20 @@ function pushPendingLocalUnitsToFirestore() {
   });
 }
 
-// Attach Real-Time Firestore Listener for Live Multi-Device Sync
-if (db) {
+// Attach Real-Time Firestore Listener for Live Multi-Device Sync with auto-reconnect
+let unsubscribePpFirestore: (() => void) | null = null;
+let isSettingUpPpListener = false;
+
+function setupFirestoreListener() {
+  if (!db || isSettingUpPpListener) return;
+  isSettingUpPpListener = true;
   try {
+    if (unsubscribePpFirestore) {
+      try { unsubscribePpFirestore(); } catch {}
+      unsubscribePpFirestore = null;
+    }
     const colRef = collection(db, 'pp_units');
-    onSnapshot(colRef, (snap: any) => {
+    unsubscribePpFirestore = onSnapshot(colRef, (snap: any) => {
       if (snap) {
         const list: PpUnit[] = [];
         snap.forEach((d: any) => {
@@ -220,15 +244,34 @@ if (db) {
         notifyListeners();
       }
     }, (err: any) => {
-      console.warn('[PPUnitStore] Real-time listener error:', err);
+      console.warn('[PPUnitStore] Real-time listener error, scheduling reconnect:', err);
+      setTimeout(() => {
+        isSettingUpPpListener = false;
+        setupFirestoreListener();
+      }, 3000);
     });
   } catch (e) {
     console.warn('[PPUnitStore] Could not set up real-time listener:', e);
+    setTimeout(() => {
+      isSettingUpPpListener = false;
+      setupFirestoreListener();
+    }, 5000);
+  } finally {
+    isSettingUpPpListener = false;
   }
+}
+
+if (db) {
+  setupFirestoreListener();
 }
 
 // Automatically fetch from Firestore / Supabase on init
 initDataSync();
+
+export async function forceSyncPpUnits(): Promise<PpUnit[]> {
+  await initDataSync();
+  return getPpUnits();
+}
 
 async function initDataSync() {
   try {
@@ -430,7 +473,7 @@ export function togglePpUnitStatus(id: string, newStatus: 'live' | 'finished' | 
   return targetUnit;
 }
 
-export function updatePpUnitStatus(id: string, status: 'live' | 'finished' | 'stopped'): void {
+export function updatePpUnitStatus(id: string, status: 'live' | 'finished' | 'stopped', finalDoneHours?: number): void {
   if (!requireOnlineForSave(`Update PP Unit status to ${status}`)) {
     return;
   }
@@ -442,6 +485,7 @@ export function updatePpUnitStatus(id: string, status: 'live' | 'finished' | 'st
       targetUnit = {
         ...u,
         status,
+        ...(typeof finalDoneHours === 'number' ? { doneHour: finalDoneHours } : {}),
         updatedAt: formattedDate,
       };
       return targetUnit;

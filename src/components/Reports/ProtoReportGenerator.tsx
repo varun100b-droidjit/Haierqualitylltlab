@@ -238,6 +238,7 @@ export const ProtoReportGenerator: React.FC<ProtoReportGeneratorProps> = ({
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [allowRegenerate, setAllowRegenerate] = useState(false);
+  const [selectedModelFilter, setSelectedModelFilter] = useState<string>('');
 
   // Circular Percentage Progress state
   const [generationProgress, setGenerationProgress] = useState<{
@@ -245,6 +246,18 @@ export const ProtoReportGenerator: React.FC<ProtoReportGeneratorProps> = ({
     stage: string;
     isComplete: boolean;
   } | null>(null);
+
+  // Available distinct models
+  const availableModels = useMemo(() => {
+    const models = unitsList.map(u => (u.modelName || '').trim()).filter(Boolean);
+    return Array.from(new Set(models));
+  }, [unitsList]);
+
+  // Filtered unit list if model filter active
+  const filteredUnitsList = useMemo(() => {
+    if (!selectedModelFilter) return unitsList;
+    return unitsList.filter(u => (u.modelName || '').trim().toLowerCase() === selectedModelFilter.trim().toLowerCase());
+  }, [unitsList, selectedModelFilter]);
 
   // Load unit list and sync preselected unit if passed
   useEffect(() => {
@@ -266,10 +279,14 @@ export const ProtoReportGenerator: React.FC<ProtoReportGeneratorProps> = ({
       }
       const serial = targetUnit.iduSerialNumber || targetUnit.oduSerialNumber || targetUnit.id;
       setSelectedSerialNo(serial);
+      if (targetUnit.modelName) {
+        setSelectedModelFilter(targetUnit.modelName.trim());
+      }
       populateUnitData(targetUnit, currentSource);
     } else {
       setSelectedSerialNo('');
       setSelectedUnit(null);
+      setSelectedModelFilter('');
     }
   }, [initialUnitSource, initialSerialNo]);
 
@@ -280,28 +297,75 @@ export const ProtoReportGenerator: React.FC<ProtoReportGeneratorProps> = ({
     const list = source === 'pp' ? getPpUnits() : getProtoUnits();
     setUnitsList(list);
     if (list.length > 0) {
-      const firstSerial = list[0].iduSerialNumber || list[0].oduSerialNumber || list[0].id;
+      const first = list[0];
+      const firstSerial = first.iduSerialNumber || first.oduSerialNumber || first.id;
       setSelectedSerialNo(firstSerial);
-      populateUnitData(list[0], source);
+      if (first.modelName) {
+        setSelectedModelFilter(first.modelName.trim());
+      }
+      populateUnitData(first, source);
     } else {
       setSelectedSerialNo('');
       setSelectedUnit(null);
+      setSelectedModelFilter('');
     }
   };
 
-  // Handler when Sr.No is selected / entered
-  const handleSelectSerial = (serial: string) => {
+  // Handler when a specific unit is selected by unique ID
+  const handleSelectUnitById = (unitId: string) => {
     setAllowRegenerate(false);
-    setSelectedSerialNo(serial);
+    const found = unitsList.find(u => u.id === unitId);
+    if (found) {
+      setSelectedUnit(found);
+      const serial = found.iduSerialNumber || found.oduSerialNumber || found.id;
+      setSelectedSerialNo(serial);
+      if (found.modelName) {
+        setSelectedModelFilter(found.modelName.trim());
+      }
+      populateUnitData(found, unitSource);
+    }
+  };
+
+  // Handler when model is selected from the Model dropdown
+  const handleSelectModel = (modelName: string) => {
+    setSelectedModelFilter(modelName);
+    setAllowRegenerate(false);
+    if (!modelName) {
+      if (unitsList.length > 0) {
+        handleSelectUnitById(unitsList[0].id);
+      }
+      return;
+    }
+    const matchingUnit = unitsList.find(u => (u.modelName || '').trim().toLowerCase() === modelName.trim().toLowerCase());
+    if (matchingUnit) {
+      setSelectedUnit(matchingUnit);
+      const serial = matchingUnit.iduSerialNumber || matchingUnit.oduSerialNumber || matchingUnit.id;
+      setSelectedSerialNo(serial);
+      populateUnitData(matchingUnit, unitSource);
+    }
+  };
+
+  // Handler when Sr.No or search text is entered
+  const handleSelectSerial = (serialOrText: string) => {
+    setAllowRegenerate(false);
+    setSelectedSerialNo(serialOrText);
+    const trimmed = serialOrText.trim().toLowerCase();
+    if (!trimmed) return;
+
     const found = unitsList.find(u => 
-      u.iduSerialNumber === serial || 
-      u.oduSerialNumber === serial || 
-      u.id === serial ||
-      u.modelName === serial
+      u.id.toLowerCase() === trimmed ||
+      (u.iduSerialNumber && u.iduSerialNumber.toLowerCase() === trimmed) || 
+      (u.oduSerialNumber && u.oduSerialNumber.toLowerCase() === trimmed) || 
+      (u.modelName && u.modelName.toLowerCase() === trimmed) ||
+      (u.iduSerialNumber && u.iduSerialNumber.toLowerCase().includes(trimmed)) ||
+      (u.modelName && u.modelName.toLowerCase().includes(trimmed))
     );
 
     if (found) {
       setSelectedUnit(found);
+      if (found.modelName) {
+        setSelectedModelFilter(found.modelName.trim());
+      }
       populateUnitData(found, unitSource);
     }
   };
@@ -762,51 +826,89 @@ export const ProtoReportGenerator: React.FC<ProtoReportGeneratorProps> = ({
         </span>
       </div>
 
-      {/* 1. Search / Dropdown Field for Unit Sr.No */}
-      <div className="p-4 rounded-xl bg-slate-950/80 border border-slate-800 space-y-2">
-        <label className="text-xs font-extrabold text-slate-300 uppercase tracking-wider block flex items-center gap-1.5">
-          <Search className="w-4 h-4 text-cyan-400" />
-          <span>{unitSource === 'pp' ? 'PP Unit Sr.No / Model Selector' : 'Proto Unit Sr.No / Model Selector'}</span>
-        </label>
+      {/* 1. Dedicated Model & Unit Selector Section */}
+      <div className="p-4 rounded-xl bg-slate-950/80 border border-slate-800 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <label className="text-xs font-extrabold text-slate-300 uppercase tracking-wider block flex items-center gap-1.5">
+            <Search className="w-4 h-4 text-cyan-400" />
+            <span>{unitSource === 'pp' ? 'PP Model & Unit Selector' : 'Proto Model & Unit Selector'}</span>
+          </label>
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-mono font-bold text-cyan-400 bg-cyan-950/80 px-2 py-0.5 rounded border border-cyan-800/60">
+              {unitsList.length} Units ({availableModels.length} Models)
+            </span>
+          </div>
+        </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <select
-            value={selectedSerialNo}
-            onChange={(e) => handleSelectSerial(e.target.value)}
-            className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white font-mono font-bold text-xs focus:outline-none focus:border-cyan-500"
-          >
-            {unitsList.length === 0 ? (
-              <option value="">No {unitSource === 'pp' ? 'PP' : 'Proto'} Units registered in database</option>
-            ) : (
-              unitsList.map((unit) => {
-                const serial = unit.iduSerialNumber || unit.oduSerialNumber || unit.id;
-                const unitTypeTag = (unit as any).unitType ? ` [${(unit as any).unitType}]` : '';
-                const repInRoom = findSavedReportForUnit({
-                  id: unit.id,
-                  serialNo: serial,
-                  iduSerialNumber: unit.iduSerialNumber,
-                  oduSerialNumber: unit.oduSerialNumber,
-                  modelName: unit.modelName
-                }, targetTag);
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {/* A. Dedicated Model Selector */}
+          <div>
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+              Select Model ({availableModels.length})
+            </label>
+            <select
+              value={selectedModelFilter}
+              onChange={(e) => handleSelectModel(e.target.value)}
+              className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white font-bold text-xs focus:outline-none focus:border-cyan-500 transition-colors"
+            >
+              <option value="">-- All Models ({availableModels.length}) --</option>
+              {availableModels.map((model) => (
+                <option key={model} value={model}>
+                  Model: {model}
+                </option>
+              ))}
+            </select>
+          </div>
 
-                const statusLabel = repInRoom ? ` [✅ REPORT IN ROOM: #${repInRoom.reportNo}]` : '';
+          {/* B. Specific Unit / Sr.No Dropdown (Keyed by unique unit.id) */}
+          <div>
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+              Select Unit / Sr.No
+            </label>
+            <select
+              value={selectedUnit?.id || ''}
+              onChange={(e) => handleSelectUnitById(e.target.value)}
+              className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white font-mono font-bold text-xs focus:outline-none focus:border-cyan-500 transition-colors"
+            >
+              {filteredUnitsList.length === 0 ? (
+                <option value="">No {unitSource === 'pp' ? 'PP' : 'Proto'} Units found</option>
+              ) : (
+                filteredUnitsList.map((unit) => {
+                  const serial = unit.iduSerialNumber || unit.oduSerialNumber || unit.id;
+                  const unitTypeTag = (unit as any).unitType ? ` [${(unit as any).unitType}]` : '';
+                  const repInRoom = findSavedReportForUnit({
+                    id: unit.id,
+                    serialNo: serial,
+                    iduSerialNumber: unit.iduSerialNumber,
+                    oduSerialNumber: unit.oduSerialNumber,
+                    modelName: unit.modelName
+                  }, targetTag);
 
-                return (
-                  <option key={unit.id} value={serial}>
-                    {unitSource === 'pp' ? 'PP Unit' : 'Proto'} Sr.No: {serial} — {unit.modelName}{unitTypeTag} ({unit.station || 'Station 01'}){statusLabel}
-                  </option>
-                );
-              })
-            )}
-          </select>
+                  const statusLabel = repInRoom ? ` [✅ REPORT IN ROOM: #${repInRoom.reportNo}]` : '';
 
-          <input
-            type="text"
-            placeholder={unitSource === 'pp' ? "Or type PP Sr.No e.g. 58192..." : "Or type Proto Sr.No e.g. 58192..."}
-            value={selectedSerialNo}
-            onChange={(e) => handleSelectSerial(e.target.value)}
-            className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-cyan-300 font-mono text-xs focus:outline-none focus:border-cyan-500"
-          />
+                  return (
+                    <option key={unit.id} value={unit.id}>
+                      {unit.modelName} — Sr: {serial}{unitTypeTag} ({unit.station || 'Station 01'}){statusLabel}
+                    </option>
+                  );
+                })
+              )}
+            </select>
+          </div>
+
+          {/* C. Quick Search Input */}
+          <div>
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+              Search by Model / Sr.No
+            </label>
+            <input
+              type="text"
+              placeholder={unitSource === 'pp' ? "Search Model / PP Sr.No..." : "Search Model / Proto Sr.No..."}
+              value={selectedSerialNo}
+              onChange={(e) => handleSelectSerial(e.target.value)}
+              className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-cyan-300 font-mono text-xs focus:outline-none focus:border-cyan-500 transition-colors"
+            />
+          </div>
         </div>
       </div>
 

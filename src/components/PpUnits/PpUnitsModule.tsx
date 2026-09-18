@@ -13,7 +13,8 @@ import {
   Check,
   BarChart2,
   Boxes,
-  Edit
+  Edit,
+  RefreshCw
 } from 'lucide-react';
 import { PpUnit } from '../../types';
 import { formatShortDateTime } from '../../utils/dateFormatter';
@@ -22,7 +23,8 @@ import {
   subscribePpUnitStore, 
   updatePpUnitStatus, 
   deletePpUnit,
-  isUnitTestingEntry
+  isUnitTestingEntry,
+  forceSyncPpUnits
 } from '../../services/ppUnitStore';
 import { AddPpUnitDialog } from './AddPpUnitDialog';
 import { PpUnitDetailsDialog } from './PpUnitDetailsDialog';
@@ -92,6 +94,8 @@ export const PpUnitsModule: React.FC<PpUnitsModuleProps> = ({
     }
   };
 
+  const [isSyncing, setIsSyncing] = useState(false);
+
   const handleEditUnit = (unit: PpUnit) => {
     setEditingUnit(unit);
     setIsAddDialogOpen(true);
@@ -103,6 +107,20 @@ export const PpUnitsModule: React.FC<PpUnitsModuleProps> = ({
 
   const handleStopUnit = (id: string) => {
     updatePpUnitStatus(id, 'stopped');
+  };
+
+  const handleManualSync = async () => {
+    setIsSyncing(true);
+    try {
+      const updated = await forceSyncPpUnits();
+      setPpUnits(updated);
+      setToastMessage(`Synced ${updated.length} PP Units with Cloud`);
+      setTimeout(() => setToastMessage(null), 3000);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsSyncing(false);
+    }
   };
 
   const handlePassUnit = (unit: PpUnit) => {
@@ -221,6 +239,17 @@ export const PpUnitsModule: React.FC<PpUnitsModuleProps> = ({
               className="w-full pl-10 pr-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 transition-colors"
             />
           </div>
+
+          <button
+            id="btn-pp-manual-sync"
+            onClick={handleManualSync}
+            disabled={isSyncing}
+            className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-slate-300 bg-slate-800/80 hover:bg-slate-700/80 hover:text-white border border-slate-700 transition-all shrink-0 cursor-pointer disabled:opacity-50"
+            title="Real-Time Sync with Cloud"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 text-cyan-400 ${isSyncing ? 'animate-spin' : ''}`} />
+            <span className="hidden sm:inline">Sync</span>
+          </button>
 
           <button
             onClick={handleOpenAdd}
@@ -537,6 +566,7 @@ export const PpUnitsModule: React.FC<PpUnitsModuleProps> = ({
 
                   {unit.status !== 'finished' && (
                     <button
+                      id={`btn-pass-pp-${unit.id}`}
                       onClick={() => handlePassUnit(unit)}
                       className="flex-1 flex items-center justify-center gap-1 py-2 px-2.5 rounded-xl text-xs font-bold text-emerald-200 bg-emerald-950/90 hover:bg-emerald-900 border border-emerald-800/80 transition-all shadow-sm cursor-pointer"
                       title="Pass Test & Move to Finished"

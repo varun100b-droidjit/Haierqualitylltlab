@@ -19,7 +19,8 @@ import {
   Award,
   Box,
   Zap,
-  Sliders
+  Sliders,
+  Sparkles
 } from 'lucide-react';
 import { ProtoUnit, ProtoUnitParts, ProtoUnitPhotos, ReportDetails, NamePlateDetails } from '../../types';
 import { addProtoUnit, updateProtoUnit, generate5DigitSerial, getProtoUnits } from '../../services/protoUnitStore';
@@ -28,6 +29,16 @@ import { PhotoUploadSection } from '../Common/PhotoUploadSection';
 import { compressImageFile } from '../../services/photoSettingsStore';
 import { PHOTO_FIELD_DEFINITIONS } from '../../utils/photoManager';
 import { PICTURE_NOT_AVAILABLE_IMAGE } from '../../utils/placeholderImage';
+import {
+  getAllComponentCatalog,
+  getUniqueValues,
+  findCompressorMatch,
+  findIduMotorMatch,
+  findOduMotorMatch,
+  findIduPcbMatch,
+  findOduPcbMatch,
+  findEevMatch
+} from '../../services/componentCatalogService';
 
 interface AddProtoUnitDialogProps {
   isOpen: boolean;
@@ -44,13 +55,13 @@ export const AddProtoUnitDialog: React.FC<AddProtoUnitDialogProps> = ({
 }) => {
   // Basic Information
   const [modelName, setModelName] = useState('');
-  const [sampleType, setSampleType] = useState('');
+  const [sampleType, setSampleType] = useState('Proto Type');
   const [station, setStation] = useState('');
   const [iduSerialNumber, setIduSerialNumber] = useState('');
   const [oduSerialNumber, setOduSerialNumber] = useState('');
   const [requestBy, setRequestBy] = useState('');
-  const [testPurpose, setTestPurpose] = useState('');
-  const [requiredHour, setRequiredHour] = useState<string>('72');
+  const [testPurpose, setTestPurpose] = useState('Product Reliability Testing 1045 Hour');
+  const [requiredHour, setRequiredHour] = useState<string>('1045');
   const [doneHour, setDoneHour] = useState<string>('0');
 
   // Report Details
@@ -68,7 +79,7 @@ export const AddProtoUnitDialog: React.FC<AddProtoUnitDialogProps> = ({
   const [powerMode, setPowerMode] = useState('');
   const [eeChecksumIdu, setEeChecksumIdu] = useState('');
   const [eeChecksumOdu, setEeChecksumOdu] = useState('');
-  const [refrigerant, setRefrigerant] = useState('');
+  const [refrigerant, setRefrigerant] = useState('R32');
   const [iseer, setIseer] = useState('');
 
   // IDU Details
@@ -120,21 +131,67 @@ export const AddProtoUnitDialog: React.FC<AddProtoUnitDialogProps> = ({
   // Preview full size image modal state
   const [previewImage, setPreviewImage] = useState<{ url: string; title: string } | null>(null);
 
+  // Live Auto-fill banner indicator
+  const [autoFillNotice, setAutoFillNotice] = useState<{ component: string; text: string } | null>(null);
+
+  // Catalog loaded from all testing machines and database
+  const [catalog, setCatalog] = useState(() => getAllComponentCatalog());
+
   // Compute live occupied stations across Proto & Field units
   const liveOccupiedStations = getOccupiedStations();
+
+  // Refresh catalog when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      setCatalog(getAllComponentCatalog());
+    }
+  }, [isOpen]);
+
+  const uniqueOptions = React.useMemo(() => {
+    return {
+      compSpecs: getUniqueValues(catalog.compressors.map(c => c.spec)),
+      compParts: getUniqueValues(catalog.compressors.map(c => c.partCode)),
+      compSuppliers: getUniqueValues(catalog.compressors.map(c => c.supplier)),
+
+      iduMotorSpecs: getUniqueValues(catalog.iduMotors.map(m => m.spec)),
+      iduMotorParts: getUniqueValues(catalog.iduMotors.map(m => m.partCode)),
+      iduMotorSuppliers: getUniqueValues(catalog.iduMotors.map(m => m.supplier)),
+
+      oduMotorSpecs: getUniqueValues(catalog.oduMotors.map(m => m.spec)),
+      oduMotorParts: getUniqueValues(catalog.oduMotors.map(m => m.partCode)),
+      oduMotorSuppliers: getUniqueValues(catalog.oduMotors.map(m => m.supplier)),
+
+      iduPcbParts: getUniqueValues(catalog.iduPcbs.map(p => p.partCode)),
+      iduPcbSuppliers: getUniqueValues(catalog.iduPcbs.map(p => p.supplier)),
+
+      oduPcbParts: getUniqueValues(catalog.oduPcbs.map(p => p.partCode)),
+      oduPcbSuppliers: getUniqueValues(catalog.oduPcbs.map(p => p.supplier)),
+
+      eevSpecs: getUniqueValues(catalog.eevs.map(e => e.spec)),
+      eevParts: getUniqueValues(catalog.eevs.map(e => e.partCode)),
+      eevSuppliers: getUniqueValues(catalog.eevs.map(e => e.supplier)),
+    };
+  }, [catalog]);
+
+  const triggerNotice = (component: string, text: string) => {
+    setAutoFillNotice({ component, text });
+    setTimeout(() => {
+      setAutoFillNotice(prev => (prev?.component === component ? null : prev));
+    }, 4000);
+  };
 
   // Auto generate 5 digit serials, set default station, or load initialUnit when modal opens
   useEffect(() => {
     if (isOpen) {
       if (initialUnit) {
         setModelName(initialUnit.modelName || '');
-        setSampleType(initialUnit.sampleType || '');
+        setSampleType(initialUnit.sampleType || 'Proto Type');
         setStation(initialUnit.station || ALL_STATIONS[0]);
         setIduSerialNumber(initialUnit.iduSerialNumber || '');
         setOduSerialNumber(initialUnit.oduSerialNumber || '');
         setRequestBy(initialUnit.requestBy || '');
-        setTestPurpose(initialUnit.testPurpose || '');
-        setRequiredHour(String(initialUnit.requiredHour ?? 72));
+        setTestPurpose(initialUnit.testPurpose || 'Product Reliability Testing 1045 Hour');
+        setRequiredHour(String(initialUnit.requiredHour ?? 1045));
         setDoneHour(String(initialUnit.doneHour ?? 0));
 
         setReportNo(initialUnit.reportDetails?.reportNo || '');
@@ -150,7 +207,7 @@ export const AddProtoUnitDialog: React.FC<AddProtoUnitDialogProps> = ({
         setPowerMode(initialUnit.namePlate?.powerMode || '');
         setEeChecksumIdu(initialUnit.namePlate?.eeChecksumIdu || '');
         setEeChecksumOdu(initialUnit.namePlate?.eeChecksumOdu || '');
-        setRefrigerant(initialUnit.namePlate?.refrigerant || '');
+        setRefrigerant(initialUnit.namePlate?.refrigerant || 'R32');
         setIseer(initialUnit.namePlate?.iseer || '');
 
         setIduMotorSpec(initialUnit.partsInfo?.iduMotorSpec || '');
@@ -191,8 +248,15 @@ export const AddProtoUnitDialog: React.FC<AddProtoUnitDialogProps> = ({
         setRemarks(initialUnit.remarks || '');
         setErrors({});
       } else {
+        setModelName('');
+        setSampleType('Proto Type');
         setIduSerialNumber(generate5DigitSerial());
         setOduSerialNumber(generate5DigitSerial());
+        setRequestBy('');
+        setTestPurpose('Product Reliability Testing 1045 Hour');
+        setRequiredHour('1045');
+        setDoneHour('0');
+        setRefrigerant('R32');
         setErrors({});
         
         const occupied = getOccupiedStations();
@@ -203,17 +267,260 @@ export const AddProtoUnitDialog: React.FC<AddProtoUnitDialogProps> = ({
         const todayStr = new Date().toISOString().split('T')[0];
         setSampleReceived(todayStr);
         setTestCommenced(todayStr);
-        setDoneHour('0');
 
-        // Auto-calculate Test Complete Date (Start Date + Pending Hours)
-        const req = Number(requiredHour) || 72;
+        // Auto-calculate Test Complete Date (Start Date + 1045 Hours)
+        const req = 1045;
         const done = 0;
         const pending = Math.max(0, req - done);
         const compDate = new Date(Date.now() + pending * 3600 * 1000);
         setTestCompleted(compDate.toISOString().split('T')[0]);
+
+        // Reset parts & photos
+        setIduMotorSpec('');
+        setIduMotorPartCode('');
+        setIduMotorSupplier('');
+        setIduPcbPartCode('');
+        setIduPcbSupplier('');
+        setOduMotorSpec('');
+        setOduMotorPartCode('');
+        setOduMotorSupplier('');
+        setOduPcbPartCode('');
+        setOduPcbSupplier('');
+        setCompressorSpec('');
+        setCompressorPartCode('');
+        setCompressorSupplier('');
+        setEevSpec('');
+        setEevPartCode('');
+        setEevSupplier('');
+        setPhotos({
+          indoorUnitPhoto: '',
+          productPhoto: '',
+          packingBoxPhoto: '',
+          iduNameplatePhoto: '',
+          oduNameplatePhoto: '',
+          iduPcbPhoto: '',
+          iduMotorPhoto: '',
+          oduPcbPhoto: '',
+          oduMotorPhoto: '',
+          oduCompressorPhoto: '',
+          oduEevPhoto: '',
+          stickerPhoto: '',
+        });
       }
     }
   }, [isOpen, initialUnit]);
+
+  // --- COMPONENT AUTO-FILL HANDLERS (From Machine Testing Data & Seeds) ---
+
+  // Compressor auto-fill
+  const handleCompressorSpecChange = (val: string) => {
+    setCompressorSpec(val);
+    const match = findCompressorMatch({ spec: val });
+    if (match) {
+      if (match.partCode) setCompressorPartCode(match.partCode);
+      if (match.supplier) setCompressorSupplier(match.supplier);
+      if (match.photoUrl && !photos.oduCompressorPhoto) {
+        setPhotos(p => ({ ...p, oduCompressorPhoto: match.photoUrl! }));
+      }
+      triggerNotice('Compressor', `Auto-filled Part Code (${match.partCode}), Supplier (${match.supplier}) & Photo from testing machines`);
+    }
+  };
+
+  const handleCompressorPartCodeChange = (val: string) => {
+    setCompressorPartCode(val);
+    const match = findCompressorMatch({ partCode: val });
+    if (match) {
+      if (match.spec) setCompressorSpec(match.spec);
+      if (match.supplier) setCompressorSupplier(match.supplier);
+      if (match.photoUrl && !photos.oduCompressorPhoto) {
+        setPhotos(p => ({ ...p, oduCompressorPhoto: match.photoUrl! }));
+      }
+      triggerNotice('Compressor', `Auto-filled Spec (${match.spec}), Supplier (${match.supplier}) & Photo from testing machines`);
+    }
+  };
+
+  const handleCompressorSupplierChange = (val: string) => {
+    setCompressorSupplier(val);
+    const match = findCompressorMatch({ supplier: val });
+    if (match && (!compressorSpec || !compressorPartCode)) {
+      if (!compressorSpec && match.spec) setCompressorSpec(match.spec);
+      if (!compressorPartCode && match.partCode) setCompressorPartCode(match.partCode);
+      if (match.photoUrl && !photos.oduCompressorPhoto) {
+        setPhotos(p => ({ ...p, oduCompressorPhoto: match.photoUrl! }));
+      }
+      triggerNotice('Compressor', `Auto-filled Spec (${match.spec}), Part Code (${match.partCode}) & Photo from testing machines`);
+    }
+  };
+
+  // IDU Motor auto-fill (user: "like IDU Moter ka Supplier Name fill kru to automatically Eska Part Code, Spec Aa jaye")
+  const handleIduMotorSupplierChange = (val: string) => {
+    setIduMotorSupplier(val);
+    const match = findIduMotorMatch({ supplier: val });
+    if (match) {
+      if (match.partCode) setIduMotorPartCode(match.partCode);
+      if (match.spec) setIduMotorSpec(match.spec);
+      if (match.photoUrl && !photos.iduMotorPhoto) {
+        setPhotos(p => ({ ...p, iduMotorPhoto: match.photoUrl! }));
+      }
+      triggerNotice('IDU Motor', `Auto-filled Part Code (${match.partCode}), Spec (${match.spec}) & Photo from testing machines`);
+    }
+  };
+
+  const handleIduMotorSpecChange = (val: string) => {
+    setIduMotorSpec(val);
+    const match = findIduMotorMatch({ spec: val });
+    if (match) {
+      if (match.partCode) setIduMotorPartCode(match.partCode);
+      if (match.supplier) setIduMotorSupplier(match.supplier);
+      if (match.photoUrl && !photos.iduMotorPhoto) {
+        setPhotos(p => ({ ...p, iduMotorPhoto: match.photoUrl! }));
+      }
+      triggerNotice('IDU Motor', `Auto-filled Part Code (${match.partCode}), Supplier (${match.supplier}) & Photo from testing machines`);
+    }
+  };
+
+  const handleIduMotorPartCodeChange = (val: string) => {
+    setIduMotorPartCode(val);
+    const match = findIduMotorMatch({ partCode: val });
+    if (match) {
+      if (match.spec) setIduMotorSpec(match.spec);
+      if (match.supplier) setIduMotorSupplier(match.supplier);
+      if (match.photoUrl && !photos.iduMotorPhoto) {
+        setPhotos(p => ({ ...p, iduMotorPhoto: match.photoUrl! }));
+      }
+      triggerNotice('IDU Motor', `Auto-filled Spec (${match.spec}), Supplier (${match.supplier}) & Photo from testing machines`);
+    }
+  };
+
+  // ODU Motor auto-fill (user: "ODU Moter ye data fill krne ke liye kaha se loge jo machine Preview me Testing per laga hai waha se check kr ke loge. Aur Enka photo bhi")
+  const handleOduMotorSpecChange = (val: string) => {
+    setOduMotorSpec(val);
+    const match = findOduMotorMatch({ spec: val });
+    if (match) {
+      if (match.partCode) setOduMotorPartCode(match.partCode);
+      if (match.supplier) setOduMotorSupplier(match.supplier);
+      if (match.photoUrl && !photos.oduMotorPhoto) {
+        setPhotos(p => ({ ...p, oduMotorPhoto: match.photoUrl! }));
+      }
+      triggerNotice('ODU Motor', `Auto-filled Part Code (${match.partCode}), Supplier (${match.supplier}) & Photo from testing machines`);
+    }
+  };
+
+  const handleOduMotorPartCodeChange = (val: string) => {
+    setOduMotorPartCode(val);
+    const match = findOduMotorMatch({ partCode: val });
+    if (match) {
+      if (match.spec) setOduMotorSpec(match.spec);
+      if (match.supplier) setOduMotorSupplier(match.supplier);
+      if (match.photoUrl && !photos.oduMotorPhoto) {
+        setPhotos(p => ({ ...p, oduMotorPhoto: match.photoUrl! }));
+      }
+      triggerNotice('ODU Motor', `Auto-filled Spec (${match.spec}), Supplier (${match.supplier}) & Photo from testing machines`);
+    }
+  };
+
+  const handleOduMotorSupplierChange = (val: string) => {
+    setOduMotorSupplier(val);
+    const match = findOduMotorMatch({ supplier: val });
+    if (match && (!oduMotorSpec || !oduMotorPartCode)) {
+      if (!oduMotorSpec && match.spec) setOduMotorSpec(match.spec);
+      if (!oduMotorPartCode && match.partCode) setOduMotorPartCode(match.partCode);
+      if (match.photoUrl && !photos.oduMotorPhoto) {
+        setPhotos(p => ({ ...p, oduMotorPhoto: match.photoUrl! }));
+      }
+      triggerNotice('ODU Motor', `Auto-filled Spec (${match.spec}), Part Code (${match.partCode}) & Photo from testing machines`);
+    }
+  };
+
+  // IDU PCB auto-fill
+  const handleIduPcbPartCodeChange = (val: string) => {
+    setIduPcbPartCode(val);
+    const match = findIduPcbMatch({ partCode: val });
+    if (match) {
+      if (match.supplier) setIduPcbSupplier(match.supplier);
+      if (match.photoUrl && !photos.iduPcbPhoto) {
+        setPhotos(p => ({ ...p, iduPcbPhoto: match.photoUrl! }));
+      }
+      triggerNotice('IDU PCB', `Auto-filled Supplier (${match.supplier}) & Photo from testing machines`);
+    }
+  };
+
+  const handleIduPcbSupplierChange = (val: string) => {
+    setIduPcbSupplier(val);
+    const match = findIduPcbMatch({ supplier: val });
+    if (match && !iduPcbPartCode) {
+      if (match.partCode) setIduPcbPartCode(match.partCode);
+      if (match.photoUrl && !photos.iduPcbPhoto) {
+        setPhotos(p => ({ ...p, iduPcbPhoto: match.photoUrl! }));
+      }
+      triggerNotice('IDU PCB', `Auto-filled Part Code (${match.partCode}) & Photo from testing machines`);
+    }
+  };
+
+  // ODU PCB auto-fill
+  const handleOduPcbPartCodeChange = (val: string) => {
+    setOduPcbPartCode(val);
+    const match = findOduPcbMatch({ partCode: val });
+    if (match) {
+      if (match.supplier) setOduPcbSupplier(match.supplier);
+      if (match.photoUrl && !photos.oduPcbPhoto) {
+        setPhotos(p => ({ ...p, oduPcbPhoto: match.photoUrl! }));
+      }
+      triggerNotice('ODU PCB', `Auto-filled Supplier (${match.supplier}) & Photo from testing machines`);
+    }
+  };
+
+  const handleOduPcbSupplierChange = (val: string) => {
+    setOduPcbSupplier(val);
+    const match = findOduPcbMatch({ supplier: val });
+    if (match && !oduPcbPartCode) {
+      if (match.partCode) setOduPcbPartCode(match.partCode);
+      if (match.photoUrl && !photos.oduPcbPhoto) {
+        setPhotos(p => ({ ...p, oduPcbPhoto: match.photoUrl! }));
+      }
+      triggerNotice('ODU PCB', `Auto-filled Part Code (${match.partCode}) & Photo from testing machines`);
+    }
+  };
+
+  // EEV auto-fill
+  const handleEevSpecChange = (val: string) => {
+    setEevSpec(val);
+    const match = findEevMatch({ spec: val });
+    if (match) {
+      if (match.partCode) setEevPartCode(match.partCode);
+      if (match.supplier) setEevSupplier(match.supplier);
+      if (match.photoUrl && !photos.oduEevPhoto) {
+        setPhotos(p => ({ ...p, oduEevPhoto: match.photoUrl! }));
+      }
+      triggerNotice('EEV', `Auto-filled Part Code (${match.partCode}), Supplier (${match.supplier}) & Photo from testing machines`);
+    }
+  };
+
+  const handleEevPartCodeChange = (val: string) => {
+    setEevPartCode(val);
+    const match = findEevMatch({ partCode: val });
+    if (match) {
+      if (match.spec) setEevSpec(match.spec);
+      if (match.supplier) setEevSupplier(match.supplier);
+      if (match.photoUrl && !photos.oduEevPhoto) {
+        setPhotos(p => ({ ...p, oduEevPhoto: match.photoUrl! }));
+      }
+      triggerNotice('EEV', `Auto-filled Spec (${match.spec}), Supplier (${match.supplier}) & Photo from testing machines`);
+    }
+  };
+
+  const handleEevSupplierChange = (val: string) => {
+    setEevSupplier(val);
+    const match = findEevMatch({ supplier: val });
+    if (match && (!eevSpec || !eevPartCode)) {
+      if (!eevSpec && match.spec) setEevSpec(match.spec);
+      if (!eevPartCode && match.partCode) setEevPartCode(match.partCode);
+      if (match.photoUrl && !photos.oduEevPhoto) {
+        setPhotos(p => ({ ...p, oduEevPhoto: match.photoUrl! }));
+      }
+      triggerNotice('EEV', `Auto-filled Spec (${match.spec}), Part Code (${match.partCode}) & Photo from testing machines`);
+    }
+  };
 
   const handleSampleReceivedChange = (dateVal: string) => {
     setSampleReceived(dateVal);
@@ -543,6 +850,27 @@ export const AddProtoUnitDialog: React.FC<AddProtoUnitDialogProps> = ({
           
           {/* Scrollable Form Body */}
           <div className="flex-1 overflow-y-auto p-6 space-y-6">
+
+            {/* Auto-fill feedback alert notification */}
+            {autoFillNotice && (
+              <div className="bg-cyan-950/90 border border-cyan-500/50 rounded-xl p-3 flex items-center justify-between shadow-lg shadow-cyan-950/40 animate-in fade-in slide-in-from-top-2 duration-200">
+                <div className="flex items-center gap-2.5 text-xs text-cyan-200">
+                  <div className="w-6 h-6 rounded-lg bg-cyan-500/20 border border-cyan-400/40 flex items-center justify-center shrink-0">
+                    <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+                  </div>
+                  <span>
+                    <strong className="text-cyan-300 font-bold">{autoFillNotice.component}:</strong> {autoFillNotice.text}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setAutoFillNotice(null)}
+                  className="text-cyan-400 hover:text-white p-1 rounded transition-colors cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            )}
           
           {/* SECTION 1: Basic Information */}
           <div className="bg-slate-950/60 p-5 rounded-xl border border-slate-800/80 space-y-4">
@@ -958,9 +1286,14 @@ export const AddProtoUnitDialog: React.FC<AddProtoUnitDialogProps> = ({
 
           {/* SECTION 4: IDU Details */}
           <div className="bg-slate-950/60 p-5 rounded-xl border border-slate-800/80 space-y-4">
-            <div className="flex items-center gap-2 border-b border-slate-800 pb-2.5">
-              <Box className="w-4 h-4 text-purple-400" />
-              <h3 className="text-sm font-bold text-purple-300 uppercase tracking-wider">IDU Details</h3>
+            <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+              <div className="flex items-center gap-2">
+                <Box className="w-4 h-4 text-purple-400" />
+                <h3 className="text-sm font-bold text-purple-300 uppercase tracking-wider">IDU Details</h3>
+              </div>
+              <span className="text-[10px] font-medium text-purple-300 flex items-center gap-1 bg-purple-950/70 px-2.5 py-0.5 rounded-full border border-purple-800/60">
+                <Sparkles className="w-3 h-3 text-purple-400" /> Auto-fill from testing machines
+              </span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -970,7 +1303,8 @@ export const AddProtoUnitDialog: React.FC<AddProtoUnitDialogProps> = ({
                   type="text"
                   placeholder="e.g. 30W DC Brushless"
                   value={iduMotorSpec}
-                  onChange={(e) => setIduMotorSpec(e.target.value)}
+                  list="proto-idu-motor-spec-list"
+                  onChange={(e) => handleIduMotorSpecChange(e.target.value)}
                   className="w-full px-3.5 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-purple-500 transition-colors"
                 />
               </div>
@@ -981,19 +1315,23 @@ export const AddProtoUnitDialog: React.FC<AddProtoUnitDialogProps> = ({
                   type="text"
                   placeholder="e.g. MTR-IDU-2201"
                   value={iduMotorPartCode}
-                  onChange={(e) => setIduMotorPartCode(e.target.value)}
+                  list="proto-idu-motor-part-list"
+                  onChange={(e) => handleIduMotorPartCodeChange(e.target.value)}
                   className="w-full px-3.5 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-purple-500 transition-colors font-mono"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">IDU Motor Supplier</label>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  IDU Motor Supplier <span className="text-purple-400 text-[10px]">(Type to Auto-Fill)</span>
+                </label>
                 <input
                   type="text"
                   placeholder="e.g. Nidec"
                   value={iduMotorSupplier}
-                  onChange={(e) => setIduMotorSupplier(e.target.value)}
-                  className="w-full px-3.5 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-purple-500 transition-colors"
+                  list="proto-idu-motor-supplier-list"
+                  onChange={(e) => handleIduMotorSupplierChange(e.target.value)}
+                  className="w-full px-3.5 py-2 bg-slate-900 border border-purple-800/60 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-purple-400 transition-colors shadow-inner"
                 />
               </div>
 
@@ -1003,7 +1341,8 @@ export const AddProtoUnitDialog: React.FC<AddProtoUnitDialogProps> = ({
                   type="text"
                   placeholder="e.g. PCB-IDU-8841"
                   value={iduPcbPartCode}
-                  onChange={(e) => setIduPcbPartCode(e.target.value)}
+                  list="proto-idu-pcb-part-list"
+                  onChange={(e) => handleIduPcbPartCodeChange(e.target.value)}
                   className="w-full px-3.5 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-purple-500 transition-colors font-mono"
                 />
               </div>
@@ -1014,18 +1353,54 @@ export const AddProtoUnitDialog: React.FC<AddProtoUnitDialogProps> = ({
                   type="text"
                   placeholder="e.g. Sanken Electric"
                   value={iduPcbSupplier}
-                  onChange={(e) => setIduPcbSupplier(e.target.value)}
+                  list="proto-idu-pcb-supplier-list"
+                  onChange={(e) => handleIduPcbSupplierChange(e.target.value)}
                   className="w-full px-3.5 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-purple-500 transition-colors"
                 />
               </div>
+
+              {/* Linked Photo Preview for IDU Motor / PCB */}
+              {(photos.iduMotorPhoto || photos.iduPcbPhoto) && (
+                <div className="flex items-center gap-3 p-2 bg-purple-950/30 border border-purple-900/50 rounded-xl">
+                  {photos.iduMotorPhoto && (
+                    <div 
+                      onClick={() => setPreviewImage({ url: photos.iduMotorPhoto, title: 'IDU Motor Photo' })}
+                      className="flex items-center gap-1.5 cursor-pointer group hover:opacity-90"
+                    >
+                      <img src={photos.iduMotorPhoto} alt="IDU Motor" className="w-9 h-9 object-cover rounded-lg border border-purple-500/40" />
+                      <div className="text-[10px]">
+                        <span className="text-purple-300 font-semibold block">IDU Motor</span>
+                        <span className="text-slate-400 group-hover:text-cyan-300">Preview ↗</span>
+                      </div>
+                    </div>
+                  )}
+                  {photos.iduPcbPhoto && (
+                    <div 
+                      onClick={() => setPreviewImage({ url: photos.iduPcbPhoto, title: 'IDU PCB Photo' })}
+                      className="flex items-center gap-1.5 cursor-pointer group hover:opacity-90"
+                    >
+                      <img src={photos.iduPcbPhoto} alt="IDU PCB" className="w-9 h-9 object-cover rounded-lg border border-purple-500/40" />
+                      <div className="text-[10px]">
+                        <span className="text-purple-300 font-semibold block">IDU PCB</span>
+                        <span className="text-slate-400 group-hover:text-cyan-300">Preview ↗</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
           {/* SECTION 5: ODU Details */}
           <div className="bg-slate-950/60 p-5 rounded-xl border border-slate-800/80 space-y-4">
-            <div className="flex items-center gap-2 border-b border-slate-800 pb-2.5">
-              <Box className="w-4 h-4 text-blue-400" />
-              <h3 className="text-sm font-bold text-blue-300 uppercase tracking-wider">ODU Details</h3>
+            <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+              <div className="flex items-center gap-2">
+                <Box className="w-4 h-4 text-blue-400" />
+                <h3 className="text-sm font-bold text-blue-300 uppercase tracking-wider">ODU Details</h3>
+              </div>
+              <span className="text-[10px] font-medium text-blue-300 flex items-center gap-1 bg-blue-950/70 px-2.5 py-0.5 rounded-full border border-blue-800/60">
+                <Sparkles className="w-3 h-3 text-blue-400" /> Auto-fill from testing machines
+              </span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -1035,7 +1410,8 @@ export const AddProtoUnitDialog: React.FC<AddProtoUnitDialogProps> = ({
                   type="text"
                   placeholder="e.g. 60W DC Fan Motor"
                   value={oduMotorSpec}
-                  onChange={(e) => setOduMotorSpec(e.target.value)}
+                  list="proto-odu-motor-spec-list"
+                  onChange={(e) => handleOduMotorSpecChange(e.target.value)}
                   className="w-full px-3.5 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 transition-colors"
                 />
               </div>
@@ -1046,7 +1422,8 @@ export const AddProtoUnitDialog: React.FC<AddProtoUnitDialogProps> = ({
                   type="text"
                   placeholder="e.g. MTR-ODU-3310"
                   value={oduMotorPartCode}
-                  onChange={(e) => setOduMotorPartCode(e.target.value)}
+                  list="proto-odu-motor-part-list"
+                  onChange={(e) => handleOduMotorPartCodeChange(e.target.value)}
                   className="w-full px-3.5 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 transition-colors font-mono"
                 />
               </div>
@@ -1057,7 +1434,8 @@ export const AddProtoUnitDialog: React.FC<AddProtoUnitDialogProps> = ({
                   type="text"
                   placeholder="e.g. Nidec"
                   value={oduMotorSupplier}
-                  onChange={(e) => setOduMotorSupplier(e.target.value)}
+                  list="proto-odu-motor-supplier-list"
+                  onChange={(e) => handleOduMotorSupplierChange(e.target.value)}
                   className="w-full px-3.5 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 transition-colors"
                 />
               </div>
@@ -1068,7 +1446,8 @@ export const AddProtoUnitDialog: React.FC<AddProtoUnitDialogProps> = ({
                   type="text"
                   placeholder="e.g. PCB-ODU-9902"
                   value={oduPcbPartCode}
-                  onChange={(e) => setOduPcbPartCode(e.target.value)}
+                  list="proto-odu-pcb-part-list"
+                  onChange={(e) => handleOduPcbPartCodeChange(e.target.value)}
                   className="w-full px-3.5 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 transition-colors font-mono"
                 />
               </div>
@@ -1079,29 +1458,68 @@ export const AddProtoUnitDialog: React.FC<AddProtoUnitDialogProps> = ({
                   type="text"
                   placeholder="e.g. Delta"
                   value={oduPcbSupplier}
-                  onChange={(e) => setOduPcbSupplier(e.target.value)}
+                  list="proto-odu-pcb-supplier-list"
+                  onChange={(e) => handleOduPcbSupplierChange(e.target.value)}
                   className="w-full px-3.5 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 transition-colors"
                 />
               </div>
+
+              {/* Linked Photo Preview for ODU Motor / PCB */}
+              {(photos.oduMotorPhoto || photos.oduPcbPhoto) && (
+                <div className="flex items-center gap-3 p-2 bg-blue-950/30 border border-blue-900/50 rounded-xl">
+                  {photos.oduMotorPhoto && (
+                    <div 
+                      onClick={() => setPreviewImage({ url: photos.oduMotorPhoto, title: 'ODU Motor Photo' })}
+                      className="flex items-center gap-1.5 cursor-pointer group hover:opacity-90"
+                    >
+                      <img src={photos.oduMotorPhoto} alt="ODU Motor" className="w-9 h-9 object-cover rounded-lg border border-blue-500/40" />
+                      <div className="text-[10px]">
+                        <span className="text-blue-300 font-semibold block">ODU Motor</span>
+                        <span className="text-slate-400 group-hover:text-cyan-300">Preview ↗</span>
+                      </div>
+                    </div>
+                  )}
+                  {photos.oduPcbPhoto && (
+                    <div 
+                      onClick={() => setPreviewImage({ url: photos.oduPcbPhoto, title: 'ODU PCB Photo' })}
+                      className="flex items-center gap-1.5 cursor-pointer group hover:opacity-90"
+                    >
+                      <img src={photos.oduPcbPhoto} alt="ODU PCB" className="w-9 h-9 object-cover rounded-lg border border-blue-500/40" />
+                      <div className="text-[10px]">
+                        <span className="text-blue-300 font-semibold block">ODU PCB</span>
+                        <span className="text-slate-400 group-hover:text-cyan-300">Preview ↗</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
           {/* SECTION 6: Compressor Details */}
           <div className="bg-slate-950/60 p-5 rounded-xl border border-slate-800/80 space-y-4">
-            <div className="flex items-center gap-2 border-b border-slate-800 pb-2.5">
-              <Zap className="w-4 h-4 text-amber-400" />
-              <h3 className="text-sm font-bold text-amber-300 uppercase tracking-wider">Compressor Details</h3>
+            <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+              <div className="flex items-center gap-2">
+                <Zap className="w-4 h-4 text-amber-400" />
+                <h3 className="text-sm font-bold text-amber-300 uppercase tracking-wider">Compressor Details</h3>
+              </div>
+              <span className="text-[10px] font-medium text-amber-300 flex items-center gap-1 bg-amber-950/70 px-2.5 py-0.5 rounded-full border border-amber-800/60">
+                <Sparkles className="w-3 h-3 text-amber-400" /> Auto-fill from testing machines
+              </span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Compressor Spec</label>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Compressor Spec <span className="text-amber-400 text-[10px]">(Fill to Auto-Fill Part & Supplier)</span>
+                </label>
                 <input
                   type="text"
                   placeholder="e.g. Twin Rotary Inverter 1.5T"
                   value={compressorSpec}
-                  onChange={(e) => setCompressorSpec(e.target.value)}
-                  className="w-full px-3.5 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500 transition-colors"
+                  list="proto-compressor-spec-list"
+                  onChange={(e) => handleCompressorSpecChange(e.target.value)}
+                  className="w-full px-3.5 py-2 bg-slate-900 border border-amber-800/60 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-400 transition-colors shadow-inner"
                 />
               </div>
 
@@ -1111,7 +1529,8 @@ export const AddProtoUnitDialog: React.FC<AddProtoUnitDialogProps> = ({
                   type="text"
                   placeholder="e.g. CMP-ODU-7721"
                   value={compressorPartCode}
-                  onChange={(e) => setCompressorPartCode(e.target.value)}
+                  list="proto-compressor-part-list"
+                  onChange={(e) => handleCompressorPartCodeChange(e.target.value)}
                   className="w-full px-3.5 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500 transition-colors font-mono"
                 />
               </div>
@@ -1122,18 +1541,40 @@ export const AddProtoUnitDialog: React.FC<AddProtoUnitDialogProps> = ({
                   type="text"
                   placeholder="e.g. Panasonic / Highly"
                   value={compressorSupplier}
-                  onChange={(e) => setCompressorSupplier(e.target.value)}
+                  list="proto-compressor-supplier-list"
+                  onChange={(e) => handleCompressorSupplierChange(e.target.value)}
                   className="w-full px-3.5 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500 transition-colors"
                 />
               </div>
+
+              {/* Linked Photo Preview for Compressor */}
+              {photos.oduCompressorPhoto && (
+                <div className="flex items-center gap-3 p-2 bg-amber-950/30 border border-amber-900/50 rounded-xl sm:col-span-2 lg:col-span-3">
+                  <div 
+                    onClick={() => setPreviewImage({ url: photos.oduCompressorPhoto, title: 'ODU Compressor Photo' })}
+                    className="flex items-center gap-2 cursor-pointer group hover:opacity-90"
+                  >
+                    <img src={photos.oduCompressorPhoto} alt="ODU Compressor" className="w-10 h-10 object-cover rounded-lg border border-amber-500/40" />
+                    <div className="text-xs">
+                      <span className="text-amber-300 font-semibold block">ODU Compressor Photo Linked from Machine Testing</span>
+                      <span className="text-slate-400 group-hover:text-cyan-300 text-[11px]">Click to view full preview ↗</span>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
           {/* SECTION 7: EEV Details */}
           <div className="bg-slate-950/60 p-5 rounded-xl border border-slate-800/80 space-y-4">
-            <div className="flex items-center gap-2 border-b border-slate-800 pb-2.5">
-              <Sliders className="w-4 h-4 text-rose-400" />
-              <h3 className="text-sm font-bold text-rose-300 uppercase tracking-wider">EEV Details</h3>
+            <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+              <div className="flex items-center gap-2">
+                <Sliders className="w-4 h-4 text-rose-400" />
+                <h3 className="text-sm font-bold text-rose-300 uppercase tracking-wider">EEV Details</h3>
+              </div>
+              <span className="text-[10px] font-medium text-rose-300 flex items-center gap-1 bg-rose-950/70 px-2.5 py-0.5 rounded-full border border-rose-800/60">
+                <Sparkles className="w-3 h-3 text-rose-400" /> Auto-fill from testing machines
+              </span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -1143,7 +1584,8 @@ export const AddProtoUnitDialog: React.FC<AddProtoUnitDialogProps> = ({
                   type="text"
                   placeholder="e.g. 500 Pulse Electronic Expansion Valve"
                   value={eevSpec}
-                  onChange={(e) => setEevSpec(e.target.value)}
+                  list="proto-eev-spec-list"
+                  onChange={(e) => handleEevSpecChange(e.target.value)}
                   className="w-full px-3.5 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-rose-500 transition-colors"
                 />
               </div>
@@ -1154,7 +1596,8 @@ export const AddProtoUnitDialog: React.FC<AddProtoUnitDialogProps> = ({
                   type="text"
                   placeholder="e.g. EEV-ODU-1022"
                   value={eevPartCode}
-                  onChange={(e) => setEevPartCode(e.target.value)}
+                  list="proto-eev-part-list"
+                  onChange={(e) => handleEevPartCodeChange(e.target.value)}
                   className="w-full px-3.5 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-rose-500 transition-colors font-mono"
                 />
               </div>
@@ -1165,10 +1608,27 @@ export const AddProtoUnitDialog: React.FC<AddProtoUnitDialogProps> = ({
                   type="text"
                   placeholder="e.g. Sanhua / DunAn"
                   value={eevSupplier}
-                  onChange={(e) => setEevSupplier(e.target.value)}
+                  list="proto-eev-supplier-list"
+                  onChange={(e) => handleEevSupplierChange(e.target.value)}
                   className="w-full px-3.5 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-rose-500 transition-colors"
                 />
               </div>
+
+              {/* Linked Photo Preview for EEV */}
+              {photos.oduEevPhoto && (
+                <div className="flex items-center gap-3 p-2 bg-rose-950/30 border border-rose-900/50 rounded-xl sm:col-span-3">
+                  <div 
+                    onClick={() => setPreviewImage({ url: photos.oduEevPhoto, title: 'ODU EEV Photo' })}
+                    className="flex items-center gap-2 cursor-pointer group hover:opacity-90"
+                  >
+                    <img src={photos.oduEevPhoto} alt="ODU EEV" className="w-10 h-10 object-cover rounded-lg border border-rose-500/40" />
+                    <div className="text-xs">
+                      <span className="text-rose-300 font-semibold block">ODU EEV Photo Linked from Machine Testing</span>
+                      <span className="text-slate-400 group-hover:text-cyan-300 text-[11px]">Click to view full preview ↗</span>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -1224,6 +1684,61 @@ export const AddProtoUnitDialog: React.FC<AddProtoUnitDialogProps> = ({
               <span>{initialUnit ? 'Update & Start Live' : 'Submit Proto Unit'}</span>
             </button>
           </div>
+
+          {/* HTML5 Datalists for Auto-fill & Component suggestions from preview testing machines */}
+          <datalist id="proto-compressor-spec-list">
+            {uniqueOptions.compSpecs.map(s => <option key={s} value={s} />)}
+          </datalist>
+          <datalist id="proto-compressor-part-list">
+            {uniqueOptions.compParts.map(s => <option key={s} value={s} />)}
+          </datalist>
+          <datalist id="proto-compressor-supplier-list">
+            {uniqueOptions.compSuppliers.map(s => <option key={s} value={s} />)}
+          </datalist>
+
+          <datalist id="proto-idu-motor-spec-list">
+            {uniqueOptions.iduMotorSpecs.map(s => <option key={s} value={s} />)}
+          </datalist>
+          <datalist id="proto-idu-motor-part-list">
+            {uniqueOptions.iduMotorParts.map(s => <option key={s} value={s} />)}
+          </datalist>
+          <datalist id="proto-idu-motor-supplier-list">
+            {uniqueOptions.iduMotorSuppliers.map(s => <option key={s} value={s} />)}
+          </datalist>
+
+          <datalist id="proto-odu-motor-spec-list">
+            {uniqueOptions.oduMotorSpecs.map(s => <option key={s} value={s} />)}
+          </datalist>
+          <datalist id="proto-odu-motor-part-list">
+            {uniqueOptions.oduMotorParts.map(s => <option key={s} value={s} />)}
+          </datalist>
+          <datalist id="proto-odu-motor-supplier-list">
+            {uniqueOptions.oduMotorSuppliers.map(s => <option key={s} value={s} />)}
+          </datalist>
+
+          <datalist id="proto-idu-pcb-part-list">
+            {uniqueOptions.iduPcbParts.map(s => <option key={s} value={s} />)}
+          </datalist>
+          <datalist id="proto-idu-pcb-supplier-list">
+            {uniqueOptions.iduPcbSuppliers.map(s => <option key={s} value={s} />)}
+          </datalist>
+
+          <datalist id="proto-odu-pcb-part-list">
+            {uniqueOptions.oduPcbParts.map(s => <option key={s} value={s} />)}
+          </datalist>
+          <datalist id="proto-odu-pcb-supplier-list">
+            {uniqueOptions.oduPcbSuppliers.map(s => <option key={s} value={s} />)}
+          </datalist>
+
+          <datalist id="proto-eev-spec-list">
+            {uniqueOptions.eevSpecs.map(s => <option key={s} value={s} />)}
+          </datalist>
+          <datalist id="proto-eev-part-list">
+            {uniqueOptions.eevParts.map(s => <option key={s} value={s} />)}
+          </datalist>
+          <datalist id="proto-eev-supplier-list">
+            {uniqueOptions.eevSuppliers.map(s => <option key={s} value={s} />)}
+          </datalist>
 
         </form>
       </div>

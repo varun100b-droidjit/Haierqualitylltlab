@@ -574,6 +574,9 @@ export const ExportDataModule: React.FC<ExportDataModuleProps> = ({ units }) => 
           const obsText = u.observations && u.observations.length > 0 
             ? u.observations.map(o => `[${o.timestamp}] ${o.text}`).join(' | ') 
             : 'None';
+          const historyText = u.timeline && u.timeline.length > 0
+            ? u.timeline.map(t => `[${t.stageName}] ${t.personName} - ${t.status?.toUpperCase() || 'COMPLETED'} (${t.date || ''} ${t.time || ''})${t.remarks ? ` [Remarks: ${t.remarks}]` : ''}`).join(' | ')
+            : 'Initial Registration';
 
           return {
             'S.No': idx + 1,
@@ -582,19 +585,22 @@ export const ExportDataModule: React.FC<ExportDataModuleProps> = ({ units }) => 
             'Serial Number': u.serialNumber,
             'Status': u.status.toUpperCase(),
             'Current Stage': stageInfo.stageName,
+            'Stage Step Number': `Step ${u.currentStageIndex + 1} of 10`,
             'Current Holder': u.currentHolder || 'Unassigned',
             'Priority': u.priority || 'Normal',
             'Required Date': u.requiredBy,
             'Day Duration': `${u.dayDuration} Days`,
-            'Transfer Date': u.transferDate || 'N/A',
+            'Transfer Date & Time': u.transferDate || 'N/A',
             'BSR Person': u.bsrPerson || 'N/A',
             'ELT Person': u.eltPerson || 'N/A',
-            'R&D Contact': u.rdPerson || 'N/A',
+            'R&D Contact Person': u.rdPerson || 'N/A',
             'OQC Inspector': u.oqcPerson || 'N/A',
             'Notes / Remarks': u.notes || 'None',
             'Latest Tracking Step': latestStep ? `${latestStep.stageName} by ${latestStep.personName} (${latestStep.date} ${latestStep.time})` : 'Initial Stage',
-            'Observations': obsText,
-            'Created At': u.createdAt
+            'Timeline Workflow History': historyText,
+            'Observations Log': obsText,
+            'Created At': u.createdAt,
+            'Updated At': u.updatedAt || u.createdAt
           };
         });
       }
@@ -603,64 +609,202 @@ export const ExportDataModule: React.FC<ExportDataModuleProps> = ({ units }) => 
         return protoUnits.map((p, idx) => {
           const namePlate = p.namePlate || {};
           const report = p.reportDetails || {};
+          const parts = p.partsInfo || {};
+          const photos = p.photos || {};
           const obsText = p.observations && p.observations.length > 0 
             ? p.observations.map(o => `[${o.timestamp}] ${o.text}`).join(' | ') 
             : 'None';
+
+          const photoFields = [
+            photos.indoorUnitPhoto, photos.productPhoto, photos.packingBoxPhoto,
+            photos.iduNameplatePhoto, photos.oduNameplatePhoto, photos.iduPcbPhoto,
+            photos.iduMotorPhoto, photos.oduPcbPhoto, photos.oduMotorPhoto,
+            photos.oduCompressorPhoto, photos.oduEevPhoto, photos.stickerPhoto, photos.remotePhoto
+          ];
+          const attachedCount = photoFields.filter(val => val && val.length > 50).length;
 
           return {
             'S.No': idx + 1,
             'Proto ID': p.id,
             'Model Name': p.modelName,
-            'IDU Serial': p.iduSerialNumber,
-            'ODU Serial': p.oduSerialNumber,
-            'Requested By': p.requestBy,
-            'Test Purpose': p.testPurpose,
+            'Sample Type': p.sampleType || report.sampleType || 'Proto Sample',
+            'Station Assigned': p.station || 'Station 01',
+            'IDU Serial Number': p.iduSerialNumber || 'N/A',
+            'ODU Serial Number': p.oduSerialNumber || 'N/A',
+            'Requested By': p.requestBy || 'N/A',
+            'Test Purpose': p.testPurpose || 'N/A',
             'Required Hours': `${p.requiredHour} hrs`,
+            'Done Hours': `${p.doneHour ?? 0} hrs`,
+            'Remaining Hours': `${Math.max(0, p.requiredHour - (p.doneHour || 0))} hrs`,
             'Status': p.status.toUpperCase(),
+            'Four-Way Swing': p.fourWaySwing || namePlate.fourWaySwing || parts.fourWaySwing || 'N/A',
+            'RPM': p.rpm || namePlate.rpm || parts.rpm || 'N/A',
+            // Report Details
+            'Report No': report.reportNo || 'N/A',
+            'Sample Received Date': report.sampleReceived || 'N/A',
+            'Test Commenced Date': report.testCommenced || 'N/A',
+            'Test Completed Date': report.testCompleted || 'N/A',
+            // Name Plate Details
+            'Cooling Capacity': namePlate.coolingCapacity || 'N/A',
+            'Rated Cooling Power': namePlate.ratedCoolingPower || 'N/A',
             'Rated Power': namePlate.ratedPower || 'N/A',
             'Rated Current': namePlate.ratedCurrent || 'N/A',
-            'Cooling Capacity': namePlate.coolingCapacity || 'N/A',
             'Voltage': namePlate.voltage || 'N/A',
             'ISEER Rating': namePlate.iseer || 'N/A',
-            'Gas Qty': namePlate.gasQty || 'N/A',
             'Refrigerant': namePlate.refrigerant || 'N/A',
-            'Report No': report.reportNo || 'N/A',
-            'Sample Received': report.sampleReceived || 'N/A',
+            'Gas Qty': namePlate.gasQty || 'N/A',
+            'Power Mode': namePlate.powerMode || 'N/A',
+            'Gas Injection Volume': namePlate.gasInjectionVolume || 'N/A',
+            'Main Program Checksum IDU': namePlate.mainProgramChecksumIdu || 'N/A',
+            'Main Program Checksum ODU': namePlate.mainProgramChecksumOdu || 'N/A',
+            'EE Checksum IDU': namePlate.eeChecksumIdu || 'N/A',
+            'EE Checksum ODU': namePlate.eeChecksumOdu || 'N/A',
+            // Parts Info - IDU
+            'IDU Motor Spec': parts.iduMotorSpec || 'N/A',
+            'IDU Motor Part Code': parts.iduMotorPartCode || 'N/A',
+            'IDU Motor Supplier': parts.iduMotorSupplier || 'N/A',
+            'IDU PCB Part Code': parts.iduPcbPartCode || 'N/A',
+            'IDU PCB Supplier': parts.iduPcbSupplier || 'N/A',
+            // Parts Info - ODU
+            'ODU Motor Spec': parts.oduMotorSpec || 'N/A',
+            'ODU Motor Part Code': parts.oduMotorPartCode || 'N/A',
+            'ODU Motor Supplier': parts.oduMotorSupplier || 'N/A',
+            'ODU PCB Part Code': parts.oduPcbPartCode || 'N/A',
+            'ODU PCB Supplier': parts.oduPcbSupplier || 'N/A',
+            // Parts Info - Compressor
+            'Compressor Spec': parts.compressorSpec || parts.oduCompressorSpec || 'N/A',
+            'Compressor Part Code': parts.compressorPartCode || parts.oduCompressorPartCode || 'N/A',
+            'Compressor Supplier': parts.compressorSupplier || parts.oduCompressorSupplier || 'N/A',
+            // Parts Info - EEV
+            'EEV Spec': parts.eevSpec || parts.oduEevSpec || 'N/A',
+            'EEV Part Code': parts.eevPartCode || parts.oduEevPartCode || 'N/A',
+            'EEV Supplier': parts.eevSupplier || parts.oduEevSupplier || 'N/A',
+            // Photos Status
+            'Total Photos Attached': `${attachedCount} / 13 Photos`,
+            'Indoor Unit Photo': photos.indoorUnitPhoto?.length ? 'Attached' : 'None',
+            'Product Photo': photos.productPhoto?.length ? 'Attached' : 'None',
+            'Packing Box Photo': photos.packingBoxPhoto?.length ? 'Attached' : 'None',
+            'IDU Nameplate Photo': photos.iduNameplatePhoto?.length ? 'Attached' : 'None',
+            'ODU Nameplate Photo': photos.oduNameplatePhoto?.length ? 'Attached' : 'None',
+            'IDU PCB Photo': photos.iduPcbPhoto?.length ? 'Attached' : 'None',
+            'IDU Motor Photo': photos.iduMotorPhoto?.length ? 'Attached' : 'None',
+            'ODU PCB Photo': photos.oduPcbPhoto?.length ? 'Attached' : 'None',
+            'ODU Motor Photo': photos.oduMotorPhoto?.length ? 'Attached' : 'None',
+            'ODU Compressor Photo': photos.oduCompressorPhoto?.length ? 'Attached' : 'None',
+            'ODU EEV Photo': photos.oduEevPhoto?.length ? 'Attached' : 'None',
+            'Sticker Photo': photos.stickerPhoto?.length ? 'Attached' : 'None',
+            'Remote Photo': photos.remotePhoto?.length ? 'Attached' : 'None',
+            // Observations & Remarks
             'Remarks': p.remarks || 'None',
-            'Observations': obsText,
-            'Created At': p.createdAt
+            'Observations Log': obsText,
+            'Created At': p.createdAt,
+            'Updated At': p.updatedAt || p.createdAt
           };
         });
       }
 
-      case 'pp-units': {
-        return ppUnits.map((p, idx) => ({
-          'S.No': idx + 1,
-          'PP ID': p.id,
-          'Model Name': p.modelName,
-          'Unit Type': p.unitType || (p.iduSerialNumber && !p.oduSerialNumber ? 'IDU' : p.oduSerialNumber && !p.iduSerialNumber ? 'ODU' : 'BOTH'),
-          'Material Code': p.materialCode || 'MAT-1001',
-          'Version': p.version || 'V1.0',
-          'Quantity': typeof p.quantity === 'number' ? p.quantity : 1,
-          'Station Assigned': p.station || 'Station 01',
-          'Status': (p.status || 'Active').toUpperCase(),
-          'Created Date': p.createdAt || 'N/A'
-        }));
-      }
-
+      case 'pp-units':
       case 'pp-models': {
-        return ppUnits.map((p, idx) => ({
-          'S.No': idx + 1,
-          'Model ID': p.id,
-          'Model Name': p.modelName,
-          'Unit Type': p.unitType || (p.iduSerialNumber && !p.oduSerialNumber ? 'IDU' : p.oduSerialNumber && !p.iduSerialNumber ? 'ODU' : 'BOTH'),
-          'Material Code': p.materialCode || 'MAT-1001',
-          'Version': p.version || 'V1.0',
-          'Quantity': typeof p.quantity === 'number' ? p.quantity : 1,
-          'Station Assigned': p.station || 'Station 01',
-          'Status': (p.status || 'Active').toUpperCase(),
-          'Created Date': p.createdAt || 'N/A'
-        }));
+        return ppUnits.map((p, idx) => {
+          const namePlate = p.namePlate || {};
+          const report = p.reportDetails || {};
+          const parts = p.partsInfo || {};
+          const photos = p.photos || {};
+          const obsText = p.observations && p.observations.length > 0 
+            ? p.observations.map(o => `[${o.timestamp}] ${o.text}`).join(' | ') 
+            : 'None';
+
+          const photoFields = [
+            photos.indoorUnitPhoto, photos.productPhoto, photos.packingBoxPhoto,
+            photos.iduNameplatePhoto, photos.oduNameplatePhoto, photos.iduPcbPhoto,
+            photos.iduMotorPhoto, photos.oduPcbPhoto, photos.oduMotorPhoto,
+            photos.oduCompressorPhoto, photos.oduEevPhoto, photos.stickerPhoto, photos.remotePhoto
+          ];
+          const attachedCount = photoFields.filter(val => val && val.length > 50).length;
+
+          return {
+            'S.No': idx + 1,
+            'PP ID': p.id,
+            'Model Name': p.modelName,
+            'Sample Type': p.sampleType || report.sampleType || 'PP Trial',
+            'Unit Type': p.unitType || (p.iduSerialNumber && !p.oduSerialNumber ? 'IDU' : p.oduSerialNumber && !p.iduSerialNumber ? 'ODU' : 'BOTH'),
+            'Material Code': p.materialCode || 'MAT-1001',
+            'Version': p.version || 'V1.0',
+            'Quantity': typeof p.quantity === 'number' ? p.quantity : 1,
+            'Station Assigned': p.station || 'Station 01',
+            'IDU Serial Number': p.iduSerialNumber || 'N/A',
+            'ODU Serial Number': p.oduSerialNumber || 'N/A',
+            'Requested By': p.requestBy || 'N/A',
+            'Test Purpose': p.testPurpose || 'N/A',
+            'Required Hours': `${p.requiredHour} hrs`,
+            'Done Hours': `${p.doneHour ?? 0} hrs`,
+            'Remaining Hours': `${Math.max(0, p.requiredHour - (p.doneHour || 0))} hrs`,
+            'Status': (p.status || 'Active').toUpperCase(),
+            'Four-Way Swing': p.fourWaySwing || namePlate.fourWaySwing || parts.fourWaySwing || 'N/A',
+            'RPM': p.rpm || namePlate.rpm || parts.rpm || 'N/A',
+            'Entry Source': p.entrySource === 'model_list' ? 'Model List' : 'Unit Testing',
+            // Report Details
+            'Report No': report.reportNo || 'N/A',
+            'Sample Received Date': report.sampleReceived || 'N/A',
+            'Test Commenced Date': report.testCommenced || 'N/A',
+            'Test Completed Date': report.testCompleted || 'N/A',
+            // Name Plate Details
+            'Cooling Capacity': namePlate.coolingCapacity || 'N/A',
+            'Rated Cooling Power': namePlate.ratedCoolingPower || 'N/A',
+            'Rated Power': namePlate.ratedPower || 'N/A',
+            'Rated Current': namePlate.ratedCurrent || 'N/A',
+            'Voltage': namePlate.voltage || 'N/A',
+            'ISEER Rating': namePlate.iseer || 'N/A',
+            'Refrigerant': namePlate.refrigerant || 'N/A',
+            'Gas Qty': namePlate.gasQty || 'N/A',
+            'Power Mode': namePlate.powerMode || 'N/A',
+            'Gas Injection Volume': namePlate.gasInjectionVolume || 'N/A',
+            'Main Program Checksum IDU': namePlate.mainProgramChecksumIdu || 'N/A',
+            'Main Program Checksum ODU': namePlate.mainProgramChecksumOdu || 'N/A',
+            'EE Checksum IDU': namePlate.eeChecksumIdu || 'N/A',
+            'EE Checksum ODU': namePlate.eeChecksumOdu || 'N/A',
+            // Parts Info - IDU
+            'IDU Motor Spec': parts.iduMotorSpec || 'N/A',
+            'IDU Motor Part Code': parts.iduMotorPartCode || 'N/A',
+            'IDU Motor Supplier': parts.iduMotorSupplier || 'N/A',
+            'IDU PCB Part Code': parts.iduPcbPartCode || 'N/A',
+            'IDU PCB Supplier': parts.iduPcbSupplier || 'N/A',
+            // Parts Info - ODU
+            'ODU Motor Spec': parts.oduMotorSpec || 'N/A',
+            'ODU Motor Part Code': parts.oduMotorPartCode || 'N/A',
+            'ODU Motor Supplier': parts.oduMotorSupplier || 'N/A',
+            'ODU PCB Part Code': parts.oduPcbPartCode || 'N/A',
+            'ODU PCB Supplier': parts.oduPcbSupplier || 'N/A',
+            // Parts Info - Compressor
+            'Compressor Spec': parts.compressorSpec || parts.oduCompressorSpec || 'N/A',
+            'Compressor Part Code': parts.compressorPartCode || parts.oduCompressorPartCode || 'N/A',
+            'Compressor Supplier': parts.compressorSupplier || parts.oduCompressorSupplier || 'N/A',
+            // Parts Info - EEV
+            'EEV Spec': parts.eevSpec || parts.oduEevSpec || 'N/A',
+            'EEV Part Code': parts.eevPartCode || parts.oduEevPartCode || 'N/A',
+            'EEV Supplier': parts.eevSupplier || parts.oduEevSupplier || 'N/A',
+            // Photos Status
+            'Total Photos Attached': `${attachedCount} / 13 Photos`,
+            'Indoor Unit Photo': photos.indoorUnitPhoto?.length ? 'Attached' : 'None',
+            'Product Photo': photos.productPhoto?.length ? 'Attached' : 'None',
+            'Packing Box Photo': photos.packingBoxPhoto?.length ? 'Attached' : 'None',
+            'IDU Nameplate Photo': photos.iduNameplatePhoto?.length ? 'Attached' : 'None',
+            'ODU Nameplate Photo': photos.oduNameplatePhoto?.length ? 'Attached' : 'None',
+            'IDU PCB Photo': photos.iduPcbPhoto?.length ? 'Attached' : 'None',
+            'IDU Motor Photo': photos.iduMotorPhoto?.length ? 'Attached' : 'None',
+            'ODU PCB Photo': photos.oduPcbPhoto?.length ? 'Attached' : 'None',
+            'ODU Motor Photo': photos.oduMotorPhoto?.length ? 'Attached' : 'None',
+            'ODU Compressor Photo': photos.oduCompressorPhoto?.length ? 'Attached' : 'None',
+            'ODU EEV Photo': photos.oduEevPhoto?.length ? 'Attached' : 'None',
+            'Sticker Photo': photos.stickerPhoto?.length ? 'Attached' : 'None',
+            'Remote Photo': photos.remotePhoto?.length ? 'Attached' : 'None',
+            // Observations & Remarks
+            'Remarks': p.remarks || 'None',
+            'Observations Log': obsText,
+            'Created At': p.createdAt || 'N/A',
+            'Updated At': p.updatedAt || p.createdAt || 'N/A'
+          };
+        });
       }
 
       case 'field-units': {
@@ -674,18 +818,21 @@ export const ExportDataModule: React.FC<ExportDataModuleProps> = ({ units }) => 
             'Field ID': f.id,
             'Model Name': f.modelName,
             'Product Type': f.productType,
-            'Serial Number': f.serialNumber,
-            'IDU Serial': f.iduSerialNumber || 'N/A',
-            'ODU Serial': f.oduSerialNumber || 'N/A',
+            'Display Serial Number': f.serialNumber,
+            'IDU Serial Number': f.iduSerialNumber || 'N/A',
+            'ODU Serial Number': f.oduSerialNumber || 'N/A',
             'Requested By': f.requestBy,
-            'Station': f.station,
-            'Start Date Time': f.startDateTime,
-            'End Date Time': f.endDateTime || 'In Progress',
+            'Station Assigned': f.station,
+            'Start Date & Time': f.startDateTime,
+            'End Date & Time': f.endDateTime || 'In Progress',
             'Required Hours': `${f.requiredHour} hrs`,
+            'Done Hours': `${f.doneHour ?? 0} hrs`,
+            'Remaining Hours': `${Math.max(0, f.requiredHour - (f.doneHour || 0))} hrs`,
             'Status': f.status.toUpperCase(),
             'Remarks': f.remarks || 'None',
-            'Observations': obsText,
-            'Created At': f.createdAt
+            'Observations Log': obsText,
+            'Created At': f.createdAt,
+            'Updated At': f.updatedAt || f.createdAt
           };
         });
       }
