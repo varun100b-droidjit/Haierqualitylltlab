@@ -20,7 +20,8 @@ import {
   Download,
   Tag,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Cloud
 } from 'lucide-react';
 import { ProtoUnitPhotos } from '../../types';
 import { 
@@ -402,6 +403,10 @@ export const PhotoUploadSection: React.FC<PhotoUploadSectionProps> = ({
                   : 'bg-slate-900 text-slate-400 border-slate-800'
               }`}>
                 {coverage.uploaded} / 11 Uploaded
+              </span>
+              <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-cyan-950/80 text-cyan-300 border border-cyan-800/60" title="Photos are stored directly on the Cloud Server (Firestore), synced across Desktop & Mobile">
+                <Cloud className="w-3 h-3 text-cyan-400" />
+                <span>Direct Server Sync</span>
               </span>
               {collapsible && (
                 <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${

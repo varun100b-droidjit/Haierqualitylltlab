@@ -11,6 +11,12 @@ import { db, collection, doc, setDoc, deleteDoc, getDocs, onSnapshot } from './f
 import { requireOnlineForSave } from './networkManager';
 import { cleanForFirestore, enforceFirestoreDocSizeLimit } from './firestoreSanitizer';
 import { safeLocalStorageSet, idbSaveAll, idbGetAll, restorePhotosFromIdb } from '../lib/indexedDbStorage';
+import { 
+  uploadUnitPhotosToServer, 
+  deleteUnitPhotosFromServer, 
+  fetchAllUnitPhotosFromServer 
+} from './cloudPhotoService';
+import { isPhotoMissing } from '../utils/placeholderImage';
 
 const STORAGE_KEY_FIELD_UNITS = 'llt_field_units_v2';
 const DELETED_FIELD_UNITS_KEY = 'llt_deleted_field_units_v1';
@@ -150,6 +156,12 @@ if (typeof window !== 'undefined') {
 export async function syncFieldUnitToFirestore(unit: FieldUnit) {
   if (!db || !unit || unit.id === 'field-101' || unit.id === 'field-102' || unit.id === 'field-103') return;
   try {
+    // 1. Direct Server Upload: upload each genuine photo to server unit_photos collection
+    if (unit.photos && typeof unit.photos === 'object') {
+      await uploadUnitPhotosToServer(unit.id, 'field', unit.photos);
+    }
+
+    // 2. Persist main unit document safely without crashing 1MB limit
     const sanitized = enforceFirestoreDocSizeLimit(cleanForFirestore(unit));
     const docRef = doc(db, 'field_units', unit.id);
     await setDoc(docRef, sanitized, { merge: true });
@@ -157,7 +169,7 @@ export async function syncFieldUnitToFirestore(unit: FieldUnit) {
       delete (unit as any)._pendingSync;
       safeLocalStorageSet(STORAGE_KEY_FIELD_UNITS, fieldUnitsCache);
     }
-    console.log('Successfully synced Field Unit to Firebase Firestore:', unit.id);
+    console.log('Successfully synced Field Unit to Firebase Firestore server:', unit.id);
   } catch (e) {
     console.warn('Firestore Field Unit sync note:', e);
   }
@@ -166,6 +178,8 @@ export async function syncFieldUnitToFirestore(unit: FieldUnit) {
 export async function deleteFieldUnitFromFirestore(id: string) {
   if (!db) return;
   try {
+    // Clean up photos from server collection
+    await deleteUnitPhotosFromServer(id);
     const docRef = doc(db, 'field_units', id);
     await deleteDoc(docRef);
   } catch (e) {
@@ -179,10 +193,27 @@ export async function fetchFieldUnitsFromFirestore(): Promise<FieldUnit[] | null
     const colRef = collection(db, 'field_units');
     const snap = await getDocs(colRef);
     if (snap.empty) return null;
+
+    // Direct Server Fetch: get all photos from Firestore server unit_photos collection
+    let serverPhotosMap = new Map<string, Record<string, string>>();
+    try {
+      serverPhotosMap = await fetchAllUnitPhotosFromServer();
+    } catch {}
+
     const list: FieldUnit[] = [];
     snap.forEach(d => {
       const data = d.data() as FieldUnit;
       if (data && data.id !== 'field-101' && data.id !== 'field-102' && data.id !== 'field-103') {
+        const serverPhotos = serverPhotosMap.get(data.id);
+        if (serverPhotos && Object.keys(serverPhotos).length > 0) {
+          const mergedPhotos: Record<string, string> = { ...(data.photos || {}) };
+          Object.entries(serverPhotos).forEach(([k, v]) => {
+            if (v && !isPhotoMissing(v)) {
+              mergedPhotos[k] = v;
+            }
+          });
+          data.photos = mergedPhotos as any;
+        }
         list.push(data);
       }
     });
@@ -264,7 +295,7 @@ function setupFirestoreListener() {
       unsubscribeFieldFirestore = null;
     }
     const colRef = collection(db, 'field_units');
-    unsubscribeFieldFirestore = onSnapshot(colRef, (snap: any) => {
+    unsubscribeFieldFirestore = onSnapshot(colRef, async (snap: any) => {
       if (snap) {
         const list: FieldUnit[] = [];
         snap.forEach((d: any) => {
@@ -273,6 +304,23 @@ function setupFirestoreListener() {
             list.push(data);
           }
         });
+
+        // Hydrate photos from cloud server collection
+        try {
+          const serverPhotosMap = await fetchAllUnitPhotosFromServer();
+          list.forEach(u => {
+            const serverPhotos = serverPhotosMap.get(u.id);
+            if (serverPhotos && Object.keys(serverPhotos).length > 0) {
+              const mergedPhotos: Record<string, string> = { ...(u.photos || {}) };
+              Object.entries(serverPhotos).forEach(([k, v]) => {
+                if (v && !isPhotoMissing(v)) {
+                  mergedPhotos[k] = v;
+                }
+              });
+              u.photos = mergedPhotos as any;
+            }
+          });
+        } catch {}
 
         // Non-destructive merge preserves any freshly created local unit
         const merged = mergeWithLocalCache(list);

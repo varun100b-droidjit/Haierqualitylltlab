@@ -76,12 +76,32 @@ export function enforceFirestoreDocSizeLimit<T extends Record<string, any>>(docD
     }
 
     let raw = JSON.stringify(copy);
-    if (raw.length <= 1000000) {
+    if (raw.length <= 800000) {
       return copy as T;
     }
 
-    console.warn(`[Firestore Sanitizer] Document payload (${Math.round(raw.length / 1024)} KB) exceeds safe 1MB threshold.`);
-    return copy as T;
+    console.warn(`[Firestore Sanitizer] Document payload (${Math.round(raw.length / 1024)} KB) exceeds safe threshold. Retaining cloud reference while individual photos are stored in server collection.`);
+    // Keep photo existence markers so UI knows photos exist, while individual full photos live in server unit_photos collection
+    if (copy.photos && typeof copy.photos === 'object') {
+      const reducedPhotos: Record<string, any> = {};
+      let currentLen = raw.length;
+      
+      for (const [k, v] of Object.entries(copy.photos)) {
+        if (typeof v === 'string' && v.startsWith('data:image/')) {
+          if (currentLen > 700000) {
+            // Keep small URL or thumbnail/key reference
+            reducedPhotos[k] = `server_photo://${copy.id || 'unit'}/${k}`;
+            currentLen -= (v.length - 40);
+          } else {
+            reducedPhotos[k] = v;
+          }
+        } else {
+          reducedPhotos[k] = v;
+        }
+      }
+      copy.photos = reducedPhotos;
+      copy._photosStoredInServerCollection = true;
+    }
 
     return copy as T;
   } catch (err) {

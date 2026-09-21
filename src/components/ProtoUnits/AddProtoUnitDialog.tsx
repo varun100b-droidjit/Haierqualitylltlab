@@ -198,9 +198,10 @@ export const AddProtoUnitDialog: React.FC<AddProtoUnitDialogProps> = ({
         setReportNo(initialUnit.reportDetails?.reportNo || '');
         const machineStart = getMachineStartDateTime(initialUnit);
         const machineEnd = getMachineEndDateTime(initialUnit);
+        const isCompletedOrPassed = initialUnit.status === 'finished' || (Number(initialUnit.doneHour) >= 1045);
         setSampleReceived(initialUnit.reportDetails?.sampleReceived || machineStart);
         setTestCommenced(initialUnit.reportDetails?.testCommenced || machineStart);
-        setTestCompleted(initialUnit.reportDetails?.testCompleted || (machineEnd !== 'N/A' ? machineEnd : ''));
+        setTestCompleted(isCompletedOrPassed ? (initialUnit.reportDetails?.testCompleted || (machineEnd !== '-' ? machineEnd : '')) : '-');
 
         setCoolingCapacity(initialUnit.namePlate?.coolingCapacity || '');
         setRatedCoolingPower(initialUnit.namePlate?.ratedCoolingPower || '');
@@ -271,12 +272,8 @@ export const AddProtoUnitDialog: React.FC<AddProtoUnitDialogProps> = ({
         setSampleReceived(todayStr);
         setTestCommenced(todayStr);
 
-        // Auto-calculate Test Complete Date (Start Date + 1045 Hours)
-        const req = 1045;
-        const done = 0;
-        const pending = Math.max(0, req - done);
-        const compDate = new Date(Date.now() + pending * 3600 * 1000);
-        setTestCompleted(compDate.toISOString().split('T')[0]);
+        // While testing is in progress, Test Completed stays '-' until 1045 hours is reached
+        setTestCompleted('-');
 
         // Reset parts & photos
         setIduMotorSpec('');
@@ -528,60 +525,68 @@ export const AddProtoUnitDialog: React.FC<AddProtoUnitDialogProps> = ({
   const handleSampleReceivedChange = (dateVal: string) => {
     setSampleReceived(dateVal);
     setTestCommenced(dateVal); // Same start date in both
-    if (dateVal) {
+    const done = Number(doneHour) || 0;
+    if (done >= 1045 && dateVal) {
       const d = new Date(dateVal);
       if (!isNaN(d.getTime())) {
-        const req = Number(requiredHour) || 72;
-        const done = Number(doneHour) || 0;
-        const pending = Math.max(0, req - done);
-        const compDate = new Date(d.getTime() + pending * 3600 * 1000);
+        const req = Number(requiredHour) || 1045;
+        const compDate = new Date(d.getTime() + req * 3600 * 1000);
         setTestCompleted(compDate.toISOString().split('T')[0]);
       }
+    } else {
+      setTestCompleted('-');
     }
   };
 
   const handleTestCommencedChange = (dateVal: string) => {
     setTestCommenced(dateVal);
     setSampleReceived(dateVal); // Same start date in both
-    if (dateVal) {
+    const done = Number(doneHour) || 0;
+    if (done >= 1045 && dateVal) {
       const d = new Date(dateVal);
       if (!isNaN(d.getTime())) {
-        const req = Number(requiredHour) || 72;
-        const done = Number(doneHour) || 0;
-        const pending = Math.max(0, req - done);
-        const compDate = new Date(d.getTime() + pending * 3600 * 1000);
+        const req = Number(requiredHour) || 1045;
+        const compDate = new Date(d.getTime() + req * 3600 * 1000);
         setTestCompleted(compDate.toISOString().split('T')[0]);
       }
+    } else {
+      setTestCompleted('-');
     }
   };
 
   const handleRequiredHourChange = (val: string) => {
     setRequiredHour(val);
-    const startStr = sampleReceived || testCommenced;
-    if (startStr) {
-      const d = new Date(startStr);
-      if (!isNaN(d.getTime())) {
-        const req = Number(val) || 0;
-        const done = Number(doneHour) || 0;
-        const pending = Math.max(0, req - done);
-        const compDate = new Date(d.getTime() + pending * 3600 * 1000);
-        setTestCompleted(compDate.toISOString().split('T')[0]);
+    const done = Number(doneHour) || 0;
+    const req = Number(val) || 1045;
+    if (done >= 1045 || (req > 0 && done >= req && req >= 1045)) {
+      const startStr = sampleReceived || testCommenced;
+      if (startStr) {
+        const d = new Date(startStr);
+        if (!isNaN(d.getTime())) {
+          const compDate = new Date(d.getTime() + req * 3600 * 1000);
+          setTestCompleted(compDate.toISOString().split('T')[0]);
+        }
       }
+    } else {
+      setTestCompleted('-');
     }
   };
 
   const handleDoneHourChange = (val: string) => {
     setDoneHour(val);
-    const startStr = sampleReceived || testCommenced;
-    if (startStr) {
-      const d = new Date(startStr);
-      if (!isNaN(d.getTime())) {
-        const req = Number(requiredHour) || 72;
-        const done = Number(val) || 0;
-        const pending = Math.max(0, req - done);
-        const compDate = new Date(d.getTime() + pending * 3600 * 1000);
-        setTestCompleted(compDate.toISOString().split('T')[0]);
+    const done = Number(val) || 0;
+    const req = Number(requiredHour) || 1045;
+    if (done >= 1045 || (req > 0 && done >= req && req >= 1045)) {
+      const startStr = sampleReceived || testCommenced;
+      if (startStr) {
+        const d = new Date(startStr);
+        if (!isNaN(d.getTime())) {
+          const compDate = new Date(d.getTime() + req * 3600 * 1000);
+          setTestCompleted(compDate.toISOString().split('T')[0]);
+        }
       }
+    } else {
+      setTestCompleted('-');
     }
   };
 
@@ -705,6 +710,19 @@ export const AddProtoUnitDialog: React.FC<AddProtoUnitDialogProps> = ({
       ? 'finished'
       : targetStatus;
 
+    const isDoneOrFinished = effectiveStatus === 'finished' || numericDone >= 1045;
+    const finalEndDateTime = isDoneOrFinished 
+      ? (val(testCompleted) !== 'NA' && val(testCompleted) !== '-' ? val(testCompleted) : new Date().toISOString())
+      : (effectiveStatus === 'stopped' ? (val(testCompleted) !== 'NA' && val(testCompleted) !== '-' ? val(testCompleted) : new Date().toISOString()) : '');
+    const finalTestCompleted = isDoneOrFinished
+      ? (val(testCompleted) !== 'NA' && val(testCompleted) !== '-' ? val(testCompleted) : new Date().toISOString().split('T')[0])
+      : '-';
+
+    const finalReportDetails: ReportDetails = {
+      ...reportDetails,
+      testCompleted: finalTestCompleted,
+    };
+
     if (initialUnit) {
       updateProtoUnit(initialUnit.id, {
         modelName: val(modelName),
@@ -716,13 +734,13 @@ export const AddProtoUnitDialog: React.FC<AddProtoUnitDialogProps> = ({
         testPurpose: val(testPurpose),
         requiredHour: numericReq,
         doneHour: numericDone,
-        reportDetails,
+        reportDetails: finalReportDetails,
         namePlate,
         partsInfo,
         photos: completePhotos,
         remarks: val(remarks),
         status: effectiveStatus,
-        endDateTime: val(testCompleted),
+        endDateTime: finalEndDateTime,
       });
     } else {
       addProtoUnit({
@@ -735,13 +753,13 @@ export const AddProtoUnitDialog: React.FC<AddProtoUnitDialogProps> = ({
         testPurpose: val(testPurpose),
         requiredHour: numericReq,
         doneHour: numericDone,
-        reportDetails,
+        reportDetails: finalReportDetails,
         namePlate,
         partsInfo,
         photos: completePhotos,
         remarks: val(remarks),
         status: effectiveStatus,
-        endDateTime: val(testCompleted),
+        endDateTime: finalEndDateTime,
       });
     }
 

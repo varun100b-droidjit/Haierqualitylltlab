@@ -23,10 +23,11 @@ import {
 import { PpUnit } from '../../types';
 import { updatePpUnit, togglePpUnitStatus } from '../../services/ppUnitStore';
 import { exportUnitToPDF } from '../../utils/pdfExport';
-import { formatShortDateTime } from '../../utils/dateFormatter';
+import { formatShortDateTime, getMachineStartDateTime, getMachineEndDateTime, getTestCommencedDate, getTestCompletedDate } from '../../utils/dateFormatter';
 import { formatHoursToHHMM } from '../../services/shiftStore';
 import { PICTURE_NOT_AVAILABLE_SVG, isPhotoMissing } from '../../utils/placeholderImage';
 import { PHOTO_FIELD_DEFINITIONS, getPhotoUrlForContentControl } from '../../utils/photoManager';
+import { fetchUnitPhotosFromServer, subscribeToUnitPhotos } from '../../services/cloudPhotoService';
 
 interface PpUnitDetailsDialogProps {
   unit: PpUnit | null;
@@ -47,9 +48,49 @@ export const PpUnitDetailsDialog: React.FC<PpUnitDetailsDialogProps> = ({
   const [selectedPhoto, setSelectedPhoto] = useState<{ url: string; label: string } | null>(null);
   const [observationInput, setObservationInput] = useState('');
 
-  // Keep internal state synced when prop changes
+  // Keep internal state synced when prop changes and hydrate server photos
   useEffect(() => {
     setCurrentUnit(unit);
+
+    if (unit?.id) {
+      // 1. Asynchronously hydrate any full photos directly from cloud server
+      fetchUnitPhotosFromServer(unit.id).then(serverPhotos => {
+        if (serverPhotos && Object.keys(serverPhotos).length > 0) {
+          setCurrentUnit(prev => {
+            if (!prev || prev.id !== unit.id) return prev;
+            const merged = { ...(prev.photos || {}) };
+            let hasNew = false;
+            Object.entries(serverPhotos).forEach(([k, v]) => {
+              if (v && !isPhotoMissing(v) && (!merged[k] || isPhotoMissing(merged[k]))) {
+                merged[k] = v;
+                hasNew = true;
+              }
+            });
+            return hasNew ? { ...prev, photos: merged as any } : prev;
+          });
+        }
+      }).catch(() => {});
+
+      // 2. Real-time subscription: If mobile uploads photos while dialog is open on desktop, update live!
+      const unsubscribe = subscribeToUnitPhotos(unit.id, (realtimePhotos) => {
+        setCurrentUnit(prev => {
+          if (!prev || prev.id !== unit.id) return prev;
+          const merged = { ...(prev.photos || {}) };
+          let hasNew = false;
+          Object.entries(realtimePhotos).forEach(([k, v]) => {
+            if (v && !isPhotoMissing(v) && merged[k] !== v) {
+              merged[k] = v;
+              hasNew = true;
+            }
+          });
+          return hasNew ? { ...prev, photos: merged as any } : prev;
+        });
+      });
+
+      return () => {
+        try { unsubscribe(); } catch {}
+      };
+    }
   }, [unit]);
 
   if (!isOpen || !currentUnit) return null;
@@ -193,8 +234,10 @@ export const PpUnitDetailsDialog: React.FC<PpUnitDetailsDialogProps> = ({
                   {currentUnit.status === 'live' ? '🟢 LIVE' : currentUnit.status === 'stopped' ? '⏸️ STOPPED' : '✅ PASSED'}
                 </span>
               </div>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Created: <span className="text-slate-200 font-mono">{formatShortDateTime(currentUnit.createdAt)}</span>
+              <p className="text-xs text-slate-400 flex flex-wrap items-center gap-2 mt-1">
+                <span>Start Date & Time: <span className="text-slate-200 font-mono font-medium">{getMachineStartDateTime(currentUnit)}</span></span>
+                <span className="text-slate-600">•</span>
+                <span>End Date & Time: <span className="text-emerald-300 font-mono font-bold">{getMachineEndDateTime(currentUnit)}</span></span>
               </p>
             </div>
           </div>
@@ -278,11 +321,11 @@ export const PpUnitDetailsDialog: React.FC<PpUnitDetailsDialogProps> = ({
                 </div>
                 <div>
                   <span className="text-slate-400 block text-[10px]">Test Commenced</span>
-                  <span className="text-white font-medium">{currentUnit.reportDetails.testCommenced || 'N/A'}</span>
+                  <span className="text-cyan-300 font-medium font-mono">{getTestCommencedDate(currentUnit)}</span>
                 </div>
                 <div>
                   <span className="text-slate-400 block text-[10px]">Test Completed</span>
-                  <span className="text-white font-medium">{currentUnit.reportDetails.testCompleted || 'N/A'}</span>
+                  <span className="text-emerald-300 font-mono font-bold">{getTestCompletedDate(currentUnit)}</span>
                 </div>
               </div>
             </div>
@@ -494,15 +537,7 @@ export const PpUnitDetailsDialog: React.FC<PpUnitDetailsDialogProps> = ({
             </div>
           </div>
 
-          {/* Notification Toast for Photo Actions */}
-          {photoToast && (
-            <div className="bg-emerald-950/80 border border-emerald-700/80 px-4 py-2.5 rounded-xl flex items-center gap-2 text-xs text-emerald-200 animate-in fade-in duration-200">
-              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-              <span className="font-medium">{photoToast}</span>
-            </div>
-          )}
-
-          {/* Unit Photos Gallery with Instant Upload/Replace */}
+          {/* Unit Photos Gallery with Centered View */}
           <div className="bg-slate-950/60 p-4 rounded-xl border border-slate-800 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2.5">
               <div className="flex items-center gap-2">
@@ -518,73 +553,17 @@ export const PpUnitDetailsDialog: React.FC<PpUnitDetailsDialogProps> = ({
                 }`}>
                   {uploadedCount} / 12 Uploaded
                 </span>
-
-                {/* Hidden Bulk File Input */}
-                <input
-                  ref={bulkFileInputRef}
-                  type="file"
-                  multiple
-                  accept="image/*"
-                  className="hidden"
-                  onChange={(e) => {
-                    handleBulkUploadFiles(e.target.files);
-                    e.target.value = '';
-                  }}
-                />
-
-                <button
-                  type="button"
-                  onClick={() => bulkFileInputRef.current?.click()}
-                  disabled={isBulkUploading}
-                  className="px-2.5 py-1 bg-cyan-600 hover:bg-cyan-500 text-white font-medium text-[11px] rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
-                  title="Select multiple component photos to automatically map and upload"
-                >
-                  {isBulkUploading ? (
-                    <RefreshCw className="w-3 h-3 animate-spin text-white" />
-                  ) : (
-                    <Upload className="w-3 h-3" />
-                  )}
-                  <span>Bulk Upload</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setShowFullPhotoManager(prev => !prev)}
-                  className={`px-2.5 py-1 text-[11px] font-medium rounded-lg border transition-colors cursor-pointer flex items-center gap-1 ${
-                    showFullPhotoManager
-                      ? 'bg-cyan-950 border-cyan-700 text-cyan-200'
-                      : 'bg-slate-900 border-slate-700 text-slate-300 hover:text-white'
-                  }`}
-                >
-                  <Layers className="w-3 h-3" />
-                  <span>{showFullPhotoManager ? 'Hide Uploader' : 'Manage All'}</span>
-                </button>
               </div>
             </div>
-
-            {/* Inline Full Photo Manager Toggle */}
-            {showFullPhotoManager && (
-              <div className="p-3 bg-slate-900/90 border border-slate-800 rounded-xl space-y-3 animate-in fade-in duration-200">
-                <PhotoUploadSection
-                  photos={currentUnit.photos || {}}
-                  onChange={(updated) => {
-                    const saved = updatePpUnit(currentUnit.id, { photos: updated });
-                    if (saved) {
-                      setCurrentUnit(saved);
-                      if (onUpdateUnit) onUpdateUnit(saved);
-                      if (onStatusChanged) onStatusChanged();
-                    }
-                  }}
-                  title="Photo Upload & Dropzone Manager"
-                  subtitle="Drag and drop or select files to update all 11 standardized inspection slots"
-                />
-              </div>
-            )}
 
             {/* 12-Slot Standard Inspection Photos Grid */}
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
               {photoList.map((p, idx) => (
-                <div key={idx} className="bg-slate-900/90 border border-slate-800 hover:border-slate-700 rounded-xl p-2.5 flex flex-col items-center justify-between gap-2 transition-colors">
+                <div 
+                  key={idx} 
+                  onClick={() => setSelectedPhoto({ url: p.url, label: p.label })}
+                  className="bg-slate-900/90 border border-slate-800 hover:border-slate-700 rounded-xl p-2.5 flex flex-col items-center justify-between gap-2 transition-colors cursor-pointer group"
+                >
                   <div className="flex items-center justify-between w-full gap-1 min-w-0">
                     <span className="text-[11px] text-slate-200 font-semibold truncate flex-1" title={p.label}>
                       {p.label}
@@ -601,12 +580,9 @@ export const PpUnitDetailsDialog: React.FC<PpUnitDetailsDialogProps> = ({
                   </div>
 
                   {/* Thumbnail Container: fixed 4:3 ratio matching standard 6cm × 4cm */}
-                  <div 
-                    onClick={() => setSelectedPhoto({ url: p.url, label: p.label })}
-                    className={`w-full aspect-[4/3] rounded-lg border flex items-center justify-center overflow-hidden cursor-pointer relative group shadow-inner ${
-                      p.isPlaceholder ? 'bg-white border-slate-300' : 'bg-slate-950 border-slate-800'
-                    }`}
-                  >
+                  <div className={`w-full aspect-[4/3] rounded-lg border flex items-center justify-center overflow-hidden relative shadow-inner ${
+                    p.isPlaceholder ? 'bg-white border-slate-300' : 'bg-slate-950 border-slate-800'
+                  }`}>
                     <img 
                       src={p.url} 
                       alt={p.label} 
@@ -619,76 +595,9 @@ export const PpUnitDetailsDialog: React.FC<PpUnitDetailsDialogProps> = ({
                         }
                       }}
                     />
-                    
-                    {uploadingKey === p.key ? (
-                      <div className="absolute inset-0 bg-slate-950/80 flex flex-col items-center justify-center gap-1">
-                        <RefreshCw className="w-5 h-5 text-cyan-400 animate-spin" />
-                        <span className="text-[9px] text-cyan-200">Saving...</span>
-                      </div>
-                    ) : (
-                      <div className="absolute inset-0 bg-slate-950/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                        <Eye className="w-5 h-5 text-cyan-400 drop-shadow" />
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Hidden File Input for this specific slot */}
-                  <input
-                    ref={(el) => { fileInputRefs.current[p.key] = el; }}
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={(e) => {
-                      if (e.target.files?.[0]) {
-                        handleUploadSinglePhoto(e.target.files[0], p.key, p.legacyKey);
-                      }
-                      e.target.value = '';
-                    }}
-                  />
-
-                  {/* Card Action Controls */}
-                  <div className="w-full pt-1 border-t border-slate-800/80">
-                    {p.isPlaceholder ? (
-                      <button
-                        type="button"
-                        onClick={() => fileInputRefs.current[p.key]?.click()}
-                        disabled={uploadingKey === p.key}
-                        className="w-full py-1 px-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg text-[10px] font-semibold flex items-center justify-center gap-1 transition-colors cursor-pointer disabled:opacity-50"
-                      >
-                        <Camera className="w-3 h-3" />
-                        <span>Upload Photo</span>
-                      </button>
-                    ) : (
-                      <div className="flex items-center gap-1 w-full">
-                        <button
-                          type="button"
-                          onClick={() => setSelectedPhoto({ url: p.url, label: p.label })}
-                          className="flex-1 py-1 px-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded text-[10px] font-medium flex items-center justify-center gap-0.5 transition-colors cursor-pointer"
-                          title="Preview full size"
-                        >
-                          <Eye className="w-2.5 h-2.5 text-cyan-400" />
-                          <span>View</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => fileInputRefs.current[p.key]?.click()}
-                          disabled={uploadingKey === p.key}
-                          className="flex-1 py-1 px-1 bg-slate-800 hover:bg-slate-700 text-cyan-300 rounded text-[10px] font-medium flex items-center justify-center gap-0.5 transition-colors cursor-pointer disabled:opacity-50"
-                          title="Replace this photo"
-                        >
-                          <RefreshCw className="w-2.5 h-2.5" />
-                          <span>Change</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveSinglePhoto(p.key, p.legacyKey)}
-                          className="p-1 bg-slate-800 hover:bg-rose-900/70 text-slate-400 hover:text-rose-300 rounded text-[10px] transition-colors cursor-pointer"
-                          title="Remove photo (revert to placeholder)"
-                        >
-                          <Trash2 className="w-2.5 h-2.5" />
-                        </button>
-                      </div>
-                    )}
+                    <div className="absolute inset-0 bg-slate-950/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                      <Eye className="w-5 h-5 text-cyan-400 drop-shadow" />
+                    </div>
                   </div>
                 </div>
               ))}
@@ -759,33 +668,33 @@ export const PpUnitDetailsDialog: React.FC<PpUnitDetailsDialogProps> = ({
           <button
             onClick={() => {
               exportUnitToPDF({
+                unit: currentUnit,
                 title: 'PP Unit Inspection Report',
                 unitType: 'PP Testing Unit',
                 modelName: currentUnit.modelName,
                 serialNumber: `IDU: ${currentUnit.iduSerialNumber} | ODU: ${currentUnit.oduSerialNumber}`,
-                status: currentUnit.status === 'finished' ? 'PASSED' : currentUnit.status.toUpperCase(),
-                details: [
-                  { label: 'Testing Station', value: currentUnit.station || 'Station 01' },
-                  { label: 'Requested By', value: currentUnit.requestBy },
-                  { label: 'Required Duration', value: `${currentUnit.requiredHour} Hours` },
-                  { label: 'Created At', value: currentUnit.createdAt }
-                ],
-                purpose: currentUnit.testPurpose,
-                remarks: currentUnit.remarks || 'No remarks provided.',
-                extraInfo: [
-                  { label: 'Rated Power / Current', value: `${currentUnit.namePlate?.ratedPower || 'N/A'} / ${currentUnit.namePlate?.ratedCurrent || 'N/A'}` },
-                  { label: 'Cooling Capacity / Voltage', value: `${currentUnit.namePlate?.coolingCapacity || 'N/A'} / ${currentUnit.namePlate?.voltage || 'N/A'}` },
-                  { label: 'ISEER / Gas Qty', value: `${currentUnit.namePlate?.iseer || 'N/A'} / ${currentUnit.namePlate?.gasQty || 'N/A'}` },
-                  { label: 'Refrigerant / Power Mode', value: `${currentUnit.namePlate?.refrigerant || 'N/A'} / ${currentUnit.namePlate?.powerMode || 'N/A'}` },
-                  { label: '4 Way Swing / RPM', value: `${currentUnit.namePlate?.fourWaySwing || currentUnit.fourWaySwing || 'N/A'} / ${currentUnit.namePlate?.rpm || currentUnit.rpm || 'N/A'}` },
-                  { label: 'Main Checksums (IDU / ODU)', value: `${currentUnit.namePlate?.mainProgramChecksumIdu || 'N/A'} / ${currentUnit.namePlate?.mainProgramChecksumOdu || 'N/A'}` },
-                  { label: 'IDU PCB Supplier / Code', value: `${currentUnit.partsInfo?.iduPcbSupplier || 'N/A'} (${currentUnit.partsInfo?.iduPcbPartCode || 'N/A'})` },
-                  { label: 'IDU Motor Supplier / Code', value: `${currentUnit.partsInfo?.iduMotorSupplier || 'N/A'} (${currentUnit.partsInfo?.iduMotorPartCode || 'N/A'})` },
-                  { label: 'ODU PCB Supplier / Code', value: `${currentUnit.partsInfo?.oduPcbSupplier || 'N/A'} (${currentUnit.partsInfo?.oduPcbPartCode || 'N/A'})` },
-                  { label: 'ODU Motor Supplier / Code', value: `${currentUnit.partsInfo?.oduMotorSupplier || 'N/A'} (${currentUnit.partsInfo?.oduMotorPartCode || 'N/A'})` },
-                  { label: 'Compressor Supplier / Code', value: `${currentUnit.partsInfo?.compressorSupplier || currentUnit.partsInfo?.oduCompressorSupplier || 'N/A'} (${currentUnit.partsInfo?.compressorPartCode || currentUnit.partsInfo?.oduCompressorPartCode || 'N/A'})` },
-                  { label: 'EEV Supplier / Code', value: `${currentUnit.partsInfo?.eevSupplier || currentUnit.partsInfo?.oduEevSupplier || 'N/A'} (${currentUnit.partsInfo?.eevPartCode || currentUnit.partsInfo?.oduEevPartCode || 'N/A'})` },
-                ],
+                iduSerialNumber: currentUnit.iduSerialNumber,
+                oduSerialNumber: currentUnit.oduSerialNumber,
+                station: currentUnit.station || 'Station 01',
+                status: currentUnit.status === 'finished' ? 'PASSED' : currentUnit.status === 'live' ? 'LIVE TESTING' : 'STOPPED',
+                sampleType: currentUnit.sampleType || currentUnit.reportDetails?.sampleType || 'PP Unit',
+                materialCode: currentUnit.materialCode,
+                version: currentUnit.version,
+                quantity: currentUnit.quantity,
+                requestBy: currentUnit.requestBy,
+                testPurpose: currentUnit.testPurpose || 'Standard PP Trial Unit Verification',
+                requiredHour: `${currentUnit.requiredHour} Hours`,
+                elapsedHours: doneHHMM,
+                pendingHours: pendingHHMM,
+                testCommenced: currentUnit.reportDetails?.testCommenced || currentUnit.createdAt,
+                testCompleted: currentUnit.reportDetails?.testCompleted || currentUnit.endDateTime || currentUnit.completedAt || 'In Progress',
+                endDateTime: currentUnit.endDateTime,
+                createdAt: currentUnit.createdAt,
+                updatedAt: currentUnit.updatedAt,
+                namePlate: currentUnit.namePlate,
+                partsInfo: currentUnit.partsInfo,
+                photos: currentUnit.photos,
+                remarks: currentUnit.remarks || 'PP sample passed inspection standards.',
                 observations: currentUnit.observations || []
               });
             }}
@@ -819,24 +728,40 @@ export const PpUnitDetailsDialog: React.FC<PpUnitDetailsDialogProps> = ({
 
       </div>
 
-      {/* Photo View Modal */}
-      {selectedPhoto && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md">
-          <div className="relative max-w-3xl w-full bg-slate-900 border border-slate-800 rounded-2xl p-4 overflow-hidden">
-            <div className="flex items-center justify-between mb-3 pb-2 border-b border-slate-800">
-              <h4 className="text-sm font-bold text-white">{selectedPhoto.label}</h4>
+      {/* Photo View Modal rendered directly into document.body */}
+      {selectedPhoto && typeof document !== 'undefined' && createPortal(
+        <div 
+          className="fixed inset-0 z-[9999] flex items-center justify-center p-4 sm:p-6 bg-slate-950/90 backdrop-blur-md"
+          onClick={() => setSelectedPhoto(null)}
+        >
+          <div 
+            className="relative max-w-4xl w-full bg-slate-900 border border-slate-700 rounded-2xl p-4 overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-150"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-3 pb-2.5 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <ImageIcon className="w-4 h-4 text-cyan-400" />
+                <h4 className="text-sm font-bold text-white">{selectedPhoto.label}</h4>
+              </div>
               <button
+                type="button"
                 onClick={() => setSelectedPhoto(null)}
-                className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg"
+                className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                title="Close Viewer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <div className="max-h-[70vh] overflow-auto flex items-center justify-center rounded-xl bg-slate-950 p-2">
-              <img src={selectedPhoto.url} alt={selectedPhoto.label} className="max-h-[65vh] object-contain rounded-lg" />
+            <div className="max-h-[75vh] overflow-auto flex items-center justify-center rounded-xl bg-slate-950 p-2 sm:p-4 border border-slate-800/80">
+              <img 
+                src={selectedPhoto.url} 
+                alt={selectedPhoto.label} 
+                className="max-h-[70vh] max-w-full object-contain rounded-lg shadow-lg" 
+              />
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

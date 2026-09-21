@@ -14,6 +14,11 @@ import { buildNormalizedPhotos } from '../utils/photoManager';
 import { cleanForFirestore, enforceFirestoreDocSizeLimit } from './firestoreSanitizer';
 import { safeLocalStorageSet, idbSaveAll, idbGetAll, restorePhotosFromIdb } from '../lib/indexedDbStorage';
 import { isPhotoMissing } from '../utils/placeholderImage';
+import { 
+  uploadUnitPhotosToServer, 
+  deleteUnitPhotosFromServer, 
+  fetchAllUnitPhotosFromServer 
+} from './cloudPhotoService';
 
 const STORAGE_KEY_PP_UNITS = 'llt_pp_units_v1';
 const DELETED_PP_UNITS_KEY = 'llt_deleted_pp_units_v1';
@@ -149,6 +154,12 @@ if (typeof window !== 'undefined') {
 export async function syncPpUnitToFirestore(unit: PpUnit) {
   if (!db || !unit || unit.id.startsWith('pp-idu-') || unit.id.startsWith('pp-odu-')) return;
   try {
+    // 1. Direct Server Upload: upload each genuine photo to server unit_photos collection
+    if (unit.photos && typeof unit.photos === 'object') {
+      await uploadUnitPhotosToServer(unit.id, 'pp', unit.photos);
+    }
+
+    // 2. Persist main unit document safely without crashing 1MB limit
     const sanitized = enforceFirestoreDocSizeLimit(cleanForFirestore(unit));
     const docRef = doc(db, 'pp_units', unit.id);
     await setDoc(docRef, sanitized, { merge: true });
@@ -156,7 +167,7 @@ export async function syncPpUnitToFirestore(unit: PpUnit) {
       delete (unit as any)._pendingSync;
       safeLocalStorageSet(STORAGE_KEY_PP_UNITS, ppUnitsCache);
     }
-    console.log('Successfully synced PP Unit to Firebase Firestore:', unit.id);
+    console.log('Successfully synced PP Unit to Firebase Firestore server:', unit.id);
   } catch (e) {
     console.warn('Firestore PP Unit sync note:', e);
   }
@@ -165,6 +176,8 @@ export async function syncPpUnitToFirestore(unit: PpUnit) {
 export async function deletePpUnitFromFirestore(id: string) {
   if (!db) return;
   try {
+    // Clean up photos from server collection
+    await deleteUnitPhotosFromServer(id);
     const docRef = doc(db, 'pp_units', id);
     await deleteDoc(docRef);
   } catch (e) {
@@ -178,10 +191,28 @@ export async function fetchPpUnitsFromFirestore(): Promise<PpUnit[] | null> {
     const colRef = collection(db, 'pp_units');
     const snap = await getDocs(colRef);
     if (snap.empty) return null;
+
+    // Direct Server Fetch: get all photos from Firestore server unit_photos collection
+    let serverPhotosMap = new Map<string, Record<string, string>>();
+    try {
+      serverPhotosMap = await fetchAllUnitPhotosFromServer();
+    } catch {}
+
     const list: PpUnit[] = [];
     snap.forEach(d => {
       const data = d.data() as PpUnit;
       if (data && !data.id.startsWith('pp-idu-') && !data.id.startsWith('pp-odu-')) {
+        // Merge cloud server photos so Mobile has 100% full photos
+        const serverPhotos = serverPhotosMap.get(data.id);
+        if (serverPhotos && Object.keys(serverPhotos).length > 0) {
+          const mergedPhotos: Record<string, string> = { ...(data.photos || {}) };
+          Object.entries(serverPhotos).forEach(([k, v]) => {
+            if (v && !isPhotoMissing(v)) {
+              mergedPhotos[k] = v;
+            }
+          });
+          data.photos = mergedPhotos as any;
+        }
         list.push(data);
       }
     });
@@ -267,7 +298,7 @@ function setupFirestoreListener() {
       unsubscribePpFirestore = null;
     }
     const colRef = collection(db, 'pp_units');
-    unsubscribePpFirestore = onSnapshot(colRef, (snap: any) => {
+    unsubscribePpFirestore = onSnapshot(colRef, async (snap: any) => {
       if (snap) {
         const list: PpUnit[] = [];
         snap.forEach((d: any) => {
@@ -276,6 +307,23 @@ function setupFirestoreListener() {
             list.push(data);
           }
         });
+
+        // Hydrate photos from cloud server collection
+        try {
+          const serverPhotosMap = await fetchAllUnitPhotosFromServer();
+          list.forEach(u => {
+            const serverPhotos = serverPhotosMap.get(u.id);
+            if (serverPhotos && Object.keys(serverPhotos).length > 0) {
+              const mergedPhotos: Record<string, string> = { ...(u.photos || {}) };
+              Object.entries(serverPhotos).forEach(([k, v]) => {
+                if (v && !isPhotoMissing(v)) {
+                  mergedPhotos[k] = v;
+                }
+              });
+              u.photos = mergedPhotos as any;
+            }
+          });
+        } catch {}
 
         // Non-destructive merge preserves any freshly created local unit
         const merged = mergeWithLocalCache(list);
@@ -392,20 +440,21 @@ function loadLocalPpUnits(): PpUnit[] {
             photos = cleanPhotos;
           }
 
-          // Test Completed gets data strictly from Machine End Date & Time when completed/stopped
-          const isDoneOrStopped = u.status === 'finished' || u.status === 'stopped' || (Number(u.doneHour) >= 1045);
+          // Test Completed gets data strictly from Machine End Date & Time when completed
+          const isCompleted = u.status === 'finished' || (Number(u.doneHour) >= 1045);
+          const isStopped = u.status === 'stopped';
           const machineEnd = getMachineEndDateTime(u);
           const machineStart = getMachineStartDateTime(u);
           const existingReport = u.reportDetails || {};
 
-          const resolvedTestCompleted = isDoneOrStopped && machineEnd && machineEnd !== 'N/A' && machineEnd !== 'In Progress'
+          const resolvedTestCompleted = isCompleted && machineEnd && machineEnd !== '-'
             ? machineEnd
-            : (existingReport.testCompleted || 'In Progress');
+            : '-';
 
           return {
             ...u,
             photos,
-            endDateTime: isDoneOrStopped ? (u.endDateTime || machineEnd) : u.endDateTime,
+            endDateTime: isCompleted ? (u.endDateTime || machineEnd) : (isStopped ? (u.endDateTime || '') : ''),
             reportDetails: {
               ...existingReport,
               testCommenced: existingReport.testCommenced || machineStart,
@@ -575,7 +624,7 @@ export function updatePpUnitStatus(id: string, status: 'live' | 'finished' | 'st
   const updated = ppUnitsCache.map(u => {
     if (u.id === id) {
       const isFinOrStopped = status === 'finished' || status === 'stopped';
-      const resolvedEnd = isFinOrStopped ? formattedDate : u.endDateTime;
+      const resolvedEnd = isFinOrStopped ? formattedDate : '';
       const currentReport = u.reportDetails || {};
 
       targetUnit = {
@@ -591,7 +640,14 @@ export function updatePpUnitStatus(id: string, status: 'live' | 'finished' | 'st
             testCommenced: currentReport.testCommenced || getMachineStartDateTime(u),
             testCompleted: formattedDate,
           }
-        } : {})
+        } : {
+          endDateTime: '',
+          completedAt: undefined,
+          reportDetails: {
+            ...currentReport,
+            testCompleted: '-',
+          }
+        })
       };
       return targetUnit;
     }

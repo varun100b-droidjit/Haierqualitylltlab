@@ -14,6 +14,11 @@ import { buildNormalizedPhotos } from '../utils/photoManager';
 import { cleanForFirestore, enforceFirestoreDocSizeLimit } from './firestoreSanitizer';
 import { safeLocalStorageSet, idbSaveAll, idbGetAll, restorePhotosFromIdb } from '../lib/indexedDbStorage';
 import { isPhotoMissing } from '../utils/placeholderImage';
+import { 
+  uploadUnitPhotosToServer, 
+  deleteUnitPhotosFromServer, 
+  fetchAllUnitPhotosFromServer 
+} from './cloudPhotoService';
 
 const STORAGE_KEY_PROTO_UNITS = 'llt_proto_units_v1';
 const DELETED_PROTO_UNITS_KEY = 'llt_deleted_proto_units_v1';
@@ -149,6 +154,12 @@ if (typeof window !== 'undefined') {
 export async function syncProtoUnitToFirestore(unit: ProtoUnit) {
   if (!db || !unit || unit.id.startsWith('proto-101') || unit.id.startsWith('proto-102')) return;
   try {
+    // 1. Direct Server Upload: upload each genuine photo to server unit_photos collection
+    if (unit.photos && typeof unit.photos === 'object') {
+      await uploadUnitPhotosToServer(unit.id, 'proto', unit.photos);
+    }
+
+    // 2. Persist main unit document safely without crashing 1MB limit
     const sanitized = enforceFirestoreDocSizeLimit(cleanForFirestore(unit));
     const docRef = doc(db, 'proto_units', unit.id);
     await setDoc(docRef, sanitized, { merge: true });
@@ -157,7 +168,7 @@ export async function syncProtoUnitToFirestore(unit: ProtoUnit) {
       delete (unit as any)._pendingSync;
       safeLocalStorageSet(STORAGE_KEY_PROTO_UNITS, protoUnitsCache);
     }
-    console.log('Successfully synced Proto Unit to Firebase Firestore:', unit.id);
+    console.log('Successfully synced Proto Unit to Firebase Firestore server:', unit.id);
   } catch (e) {
     console.warn('Firestore Proto Unit sync note:', e);
   }
@@ -166,6 +177,8 @@ export async function syncProtoUnitToFirestore(unit: ProtoUnit) {
 export async function deleteProtoUnitFromFirestore(id: string) {
   if (!db) return;
   try {
+    // Clean up photos from server collection
+    await deleteUnitPhotosFromServer(id);
     const docRef = doc(db, 'proto_units', id);
     await deleteDoc(docRef);
   } catch (e) {
@@ -179,10 +192,28 @@ export async function fetchProtoUnitsFromFirestore(): Promise<ProtoUnit[] | null
     const colRef = collection(db, 'proto_units');
     const snap = await getDocs(colRef);
     if (snap.empty) return null;
+
+    // Direct Server Fetch: get all photos from Firestore server unit_photos collection
+    let serverPhotosMap = new Map<string, Record<string, string>>();
+    try {
+      serverPhotosMap = await fetchAllUnitPhotosFromServer();
+    } catch {}
+
     const list: ProtoUnit[] = [];
     snap.forEach(d => {
       const data = d.data() as ProtoUnit;
       if (data && data.id !== 'proto-101' && data.id !== 'proto-102') {
+        // Merge cloud server photos so Mobile has 100% full photos
+        const serverPhotos = serverPhotosMap.get(data.id);
+        if (serverPhotos && Object.keys(serverPhotos).length > 0) {
+          const mergedPhotos: Record<string, string> = { ...(data.photos || {}) };
+          Object.entries(serverPhotos).forEach(([k, v]) => {
+            if (v && !isPhotoMissing(v)) {
+              mergedPhotos[k] = v;
+            }
+          });
+          data.photos = mergedPhotos as any;
+        }
         list.push(data);
       }
     });
@@ -267,7 +298,7 @@ function setupFirestoreListener() {
       unsubscribeFirestore = null;
     }
     const colRef = collection(db, 'proto_units');
-    unsubscribeFirestore = onSnapshot(colRef, (snap: any) => {
+    unsubscribeFirestore = onSnapshot(colRef, async (snap: any) => {
       if (snap) {
         const list: ProtoUnit[] = [];
         snap.forEach((d: any) => {
@@ -276,6 +307,23 @@ function setupFirestoreListener() {
             list.push(data);
           }
         });
+
+        // Hydrate photos from cloud server collection
+        try {
+          const serverPhotosMap = await fetchAllUnitPhotosFromServer();
+          list.forEach(u => {
+            const serverPhotos = serverPhotosMap.get(u.id);
+            if (serverPhotos && Object.keys(serverPhotos).length > 0) {
+              const mergedPhotos: Record<string, string> = { ...(u.photos || {}) };
+              Object.entries(serverPhotos).forEach(([k, v]) => {
+                if (v && !isPhotoMissing(v)) {
+                  mergedPhotos[k] = v;
+                }
+              });
+              u.photos = mergedPhotos as any;
+            }
+          });
+        } catch {}
 
         // Non-destructive merge preserves any freshly created local unit
         const merged = mergeWithLocalCache(list);
@@ -392,20 +440,21 @@ function loadLocalProtoUnits(): ProtoUnit[] {
             photos = cleanPhotos;
           }
 
-          // Test Completed gets data strictly from Machine End Date & Time when completed/stopped
-          const isDoneOrStopped = u.status === 'finished' || u.status === 'stopped' || (Number(u.doneHour) >= 1045);
+          // Test Completed gets data strictly from Machine End Date & Time when completed
+          const isCompleted = u.status === 'finished' || (Number(u.doneHour) >= 1045);
+          const isStopped = u.status === 'stopped';
           const machineEnd = getMachineEndDateTime(u);
           const machineStart = getMachineStartDateTime(u);
           const existingReport = u.reportDetails || {};
 
-          const resolvedTestCompleted = isDoneOrStopped && machineEnd && machineEnd !== 'N/A' && machineEnd !== 'In Progress'
+          const resolvedTestCompleted = isCompleted && machineEnd && machineEnd !== '-'
             ? machineEnd
-            : (existingReport.testCompleted || 'In Progress');
+            : '-';
 
           return {
             ...u,
             photos,
-            endDateTime: isDoneOrStopped ? (u.endDateTime || machineEnd) : u.endDateTime,
+            endDateTime: isCompleted ? (u.endDateTime || machineEnd) : (isStopped ? (u.endDateTime || '') : ''),
             reportDetails: {
               ...existingReport,
               testCommenced: existingReport.testCommenced || machineStart,
@@ -537,21 +586,19 @@ export function updateProtoUnitStatus(id: string, status: 'live' | 'finished' | 
   const updated = protoUnitsCache.map(u => {
     if (u.id === id) {
       const isFinishing = status === 'finished';
+      const isStopping = status === 'stopped';
       const existingReport = u.reportDetails || {};
       
-      // End Date & Time automatically drives Test Completed
       const machineEndDateTime = isFinishing 
         ? formattedDate 
-        : (status === 'stopped' ? formattedDate : (u.endDateTime || ''));
+        : (isStopping ? formattedDate : '');
 
       const updatedReportDetails: ReportDetails = {
         ...existingReport,
-        // Start date is preserved from Test Commenced
-        testCommenced: existingReport.testCommenced || u.createdAt?.slice(0, 10) || currentDateStr,
-        // Whatever data is in End Date & Time is automatically in Test Completed
+        testCommenced: existingReport.testCommenced || getMachineStartDateTime(u),
         testCompleted: isFinishing 
           ? formattedDate 
-          : (status === 'stopped' ? formattedDate : (existingReport.testCompleted || '')),
+          : (isStopping ? formattedDate : '-'),
       };
 
       targetUnit = {
@@ -563,10 +610,17 @@ export function updateProtoUnitStatus(id: string, status: 'live' | 'finished' | 
           completedAt: formattedDate,
           endDateTime: formattedDate,
           reportDetails: updatedReportDetails
-        } : (status === 'stopped' ? {
+        } : (isStopping ? {
           endDateTime: formattedDate,
           reportDetails: updatedReportDetails
-        } : {})),
+        } : {
+          endDateTime: '',
+          completedAt: undefined,
+          reportDetails: {
+            ...existingReport,
+            testCompleted: '-'
+          }
+        })),
       };
       return targetUnit;
     }
@@ -596,12 +650,12 @@ export function transferProtoUnitToLive(id: string, initialDoneHour: number = 0)
         doneHour: initialDoneHour,
         createdAt: formattedDate,
         updatedAt: formattedDate,
-        endDateTime: undefined,
+        endDateTime: '',
         completedAt: undefined,
         reportDetails: {
           ...(u.reportDetails || {}),
           testCommenced: currentDateStr,
-          testCompleted: '', // Reset completion date since unit is back in live testing
+          testCompleted: '-', // Reset completion date to '-' since unit is in live testing
         }
       };
       return transferredUnit;

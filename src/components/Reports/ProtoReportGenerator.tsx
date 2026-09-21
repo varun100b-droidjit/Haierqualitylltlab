@@ -39,6 +39,11 @@ import { MasterTemplate, getMasterTemplate } from '../../services/reportTemplate
 import { PhotoUploadSection } from '../Common/PhotoUploadSection';
 import { compressImageFile } from '../../services/photoSettingsStore';
 import { 
+  fetchUnitPhotosFromServer, 
+  subscribeToUnitPhotos, 
+  uploadSinglePhotoToServer 
+} from '../../services/cloudPhotoService';
+import { 
   saveReportToRoom, 
   updateSavedReport,
   getSavedReports, 
@@ -102,6 +107,22 @@ export const ProtoReportGenerator: React.FC<ProtoReportGeneratorProps> = ({
     });
     return unsub;
   }, []);
+
+  // Subscribe to real-time cloud server photo uploads (e.g. from Mobile while Report Generator is open on Desktop)
+  useEffect(() => {
+    if (!selectedUnit?.id) return;
+    const unsub = subscribeToUnitPhotos(selectedUnit.id, (realtimePhotos) => {
+      if (realtimePhotos && Object.keys(realtimePhotos).length > 0) {
+        setPhotos(prev => {
+          const merged = { ...prev, ...realtimePhotos };
+          return buildNormalizedPhotos(merged).photos;
+        });
+      }
+    });
+    return () => {
+      try { unsub(); } catch {}
+    };
+  }, [selectedUnit?.id]);
 
   // Auto-filled specification state from Database
   const [formData, setFormData] = useState<{
@@ -449,6 +470,17 @@ export const ProtoReportGenerator: React.FC<ProtoReportGeneratorProps> = ({
     const existingPhotos = unit.photos || {};
     const normalized = buildNormalizedPhotos(existingPhotos);
     setPhotos(normalized.photos);
+
+    if (unit?.id) {
+      fetchUnitPhotosFromServer(unit.id).then(serverPhotos => {
+        if (serverPhotos && Object.keys(serverPhotos).length > 0) {
+          setPhotos(prev => {
+            const merged = { ...prev, ...serverPhotos };
+            return buildNormalizedPhotos(merged).photos;
+          });
+        }
+      }).catch(() => {});
+    }
   };
 
   // Allow inline upload of photos & persist with unit
@@ -457,6 +489,17 @@ export const ProtoReportGenerator: React.FC<ProtoReportGeneratorProps> = ({
       const result = await compressImageFile(file);
       const url = result.dataUrl;
       if (!url) return;
+      
+      // Directly upload to server photo collection so all devices see it immediately
+      if (selectedUnit) {
+        uploadSinglePhotoToServer(
+          selectedUnit.id, 
+          unitSource === 'pp' ? 'pp' : 'proto', 
+          key, 
+          url
+        ).catch(() => {});
+      }
+
       setPhotos(prev => {
         const rawUpdated = { ...prev, [key]: url };
         const norm = buildNormalizedPhotos(rawUpdated);

@@ -340,19 +340,21 @@ export const UnitDetailsDialog: React.FC<UnitDetailsDialogProps> = ({
                 }
               }
               exportUnitToPDF({
+                unit: targetUnit,
                 title: 'R&D Transfer Unit Report',
                 unitType: 'R&D Machine Unit',
                 modelName: targetUnit.modelName,
                 serialNumber: targetUnit.serialNumber,
                 status: `${stageInfo.stageName} (${stageInfo.department})`,
-                details: [
-                  { label: 'Required By', value: targetUnit.requiredBy },
-                  { label: 'Transfer Date', value: targetUnit.transferDate },
-                  { label: 'Duration', value: `${targetUnit.dayDuration} Days` },
-                  { label: 'Request By', value: targetUnit.rdPerson || targetUnit.bsrPerson || 'R&D Person' },
-                  { label: 'Current Stage', value: `${stageInfo.stageName} (${stageInfo.department})` }
-                ],
-                remarks: targetUnit.notes || 'No remarks provided.',
+                requestBy: targetUnit.rdPerson || targetUnit.bsrPerson || 'R&D Lead',
+                testPurpose: `R&D Stage Testing: ${stageInfo.stageName} under ${stageInfo.department}`,
+                requiredHour: `${targetUnit.dayDuration * 24} Hours (${targetUnit.dayDuration} Days)`,
+                testCommenced: targetUnit.transferDate || targetUnit.createdAt,
+                testCompleted: targetUnit.requiredBy,
+                createdAt: targetUnit.createdAt,
+                updatedAt: targetUnit.updatedAt,
+                timeline: targetUnit.timeline || [],
+                remarks: targetUnit.notes || 'R&D machine transfer stage completed as scheduled.',
                 observations: targetUnit.observations || []
               });
             }}

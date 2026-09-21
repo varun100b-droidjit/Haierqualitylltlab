@@ -401,57 +401,43 @@ export const PpUnitsModule: React.FC<PpUnitsModuleProps> = ({
 
                   {/* Metadata Info Box */}
                   <div className="bg-slate-950/70 p-3 rounded-xl border border-slate-800/80">
-                    {unit.status === 'finished' || unit.status === 'stopped' ? (
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-6 gap-y-2.5 text-xs">
-                        <div>
-                          <span className="text-[10px] text-slate-400 block font-medium">Start Date & Time</span>
-                          <span className="font-mono text-[11px] font-bold text-slate-200 flex items-center gap-1 mt-0.5">
-                            <Clock className="w-3 h-3 text-cyan-400 shrink-0" />
-                            {getMachineStartDateTime(unit)}
-                          </span>
-                        </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-6 gap-y-2.5 text-xs">
+                      <div>
+                        <span className="text-[10px] text-slate-400 block font-medium">Start Date & Time</span>
+                        <span className="font-mono text-[11px] font-bold text-slate-200 flex items-center gap-1 mt-0.5">
+                          <Clock className="w-3 h-3 text-cyan-400 shrink-0" />
+                          {getMachineStartDateTime(unit)}
+                        </span>
+                      </div>
 
-                        <div>
-                          <span className="text-[10px] text-slate-400 block font-medium">
-                            {unit.status === 'finished' ? 'End Date & Time' : 'Stop Date & Time'}
+                      <div>
+                        <span className="text-[10px] text-slate-400 block font-medium">
+                          {unit.status === 'finished' ? 'End Date & Time' : unit.status === 'stopped' ? 'Stop Date & Time' : 'End Date & Time'}
+                        </span>
+                        {getMachineEndDateTime(unit) === '-' ? (
+                          <span className="font-mono text-xs font-bold text-slate-400 block mt-0.5">
+                            -
                           </span>
+                        ) : (
                           <span className={`font-mono text-[11px] font-bold flex items-center gap-1 mt-0.5 ${
-                            unit.status === 'finished' ? 'text-emerald-300' : 'text-amber-300'
+                            unit.status === 'finished' ? 'text-emerald-300' : unit.status === 'stopped' ? 'text-amber-300' : 'text-cyan-300'
                           }`}>
                             <Clock className={`w-3 h-3 shrink-0 ${
-                              unit.status === 'finished' ? 'text-emerald-400' : 'text-amber-400'
+                              unit.status === 'finished' ? 'text-emerald-400' : unit.status === 'stopped' ? 'text-amber-400' : 'text-cyan-400'
                             }`} />
                             {getMachineEndDateTime(unit)}
                           </span>
-                        </div>
-
-                        <div>
-                          <span className="text-[10px] text-slate-400 block font-medium">Request By</span>
-                          <span className="font-semibold text-indigo-300 flex items-center gap-1 truncate mt-0.5">
-                            <User className="w-3 h-3 text-indigo-400 shrink-0" />
-                            {unit.requestBy}
-                          </span>
-                        </div>
+                        )}
                       </div>
-                    ) : (
-                      <div className="flex items-start justify-between gap-8 text-xs">
-                        <div>
-                          <span className="text-[10px] text-slate-400 block font-medium">Start Date & Time</span>
-                          <span className="font-mono text-[11px] font-bold text-slate-200 flex items-center gap-1 mt-0.5">
-                            <Clock className="w-3 h-3 text-cyan-400 shrink-0" />
-                            {getMachineStartDateTime(unit)}
-                          </span>
-                        </div>
 
-                        <div className="text-right shrink-0">
-                          <span className="text-[10px] text-slate-400 block font-medium">Request By</span>
-                          <span className="font-semibold text-indigo-300 flex items-center justify-end gap-1 truncate mt-0.5">
-                            <User className="w-3 h-3 text-indigo-400 shrink-0" />
-                            {unit.requestBy}
-                          </span>
-                        </div>
+                      <div>
+                        <span className="text-[10px] text-slate-400 block font-medium">Request By</span>
+                        <span className="font-semibold text-indigo-300 flex items-center gap-1 truncate mt-0.5">
+                          <User className="w-3 h-3 text-indigo-400 shrink-0" />
+                          {unit.requestBy}
+                        </span>
                       </div>
-                    )}
+                    </div>
                   </div>
 
                   {/* Done & Pending Hours */}

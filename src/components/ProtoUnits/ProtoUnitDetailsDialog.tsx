@@ -34,6 +34,7 @@ import { exportUnitToPDF } from '../../utils/pdfExport';
 import { useIsShiftActiveNow } from '../../services/shiftStore';
 import { PICTURE_NOT_AVAILABLE_SVG, isPhotoMissing } from '../../utils/placeholderImage';
 import { PHOTO_FIELD_DEFINITIONS, getPhotoUrlForContentControl } from '../../utils/photoManager';
+import { fetchUnitPhotosFromServer, subscribeToUnitPhotos } from '../../services/cloudPhotoService';
 
 interface ProtoUnitDetailsDialogProps {
   unit: ProtoUnit | null;
@@ -61,6 +62,46 @@ export const ProtoUnitDetailsDialog: React.FC<ProtoUnitDetailsDialogProps> = ({
     setObservationInput('');
     setIsTransferModalOpen(false);
     setTransferHours('0');
+
+    if (unit?.id) {
+      // 1. Asynchronously hydrate any full photos directly from cloud server
+      fetchUnitPhotosFromServer(unit.id).then(serverPhotos => {
+        if (serverPhotos && Object.keys(serverPhotos).length > 0) {
+          setCurrentUnit(prev => {
+            if (!prev || prev.id !== unit.id) return prev;
+            const merged = { ...(prev.photos || {}) };
+            let hasNew = false;
+            Object.entries(serverPhotos).forEach(([k, v]) => {
+              if (v && !isPhotoMissing(v) && (!merged[k] || isPhotoMissing(merged[k]))) {
+                merged[k] = v;
+                hasNew = true;
+              }
+            });
+            return hasNew ? { ...prev, photos: merged as any } : prev;
+          });
+        }
+      }).catch(() => {});
+
+      // 2. Real-time subscription: If mobile uploads photos while dialog is open on desktop, update live!
+      const unsubscribe = subscribeToUnitPhotos(unit.id, (realtimePhotos) => {
+        setCurrentUnit(prev => {
+          if (!prev || prev.id !== unit.id) return prev;
+          const merged = { ...(prev.photos || {}) };
+          let hasNew = false;
+          Object.entries(realtimePhotos).forEach(([k, v]) => {
+            if (v && !isPhotoMissing(v) && merged[k] !== v) {
+              merged[k] = v;
+              hasNew = true;
+            }
+          });
+          return hasNew ? { ...prev, photos: merged as any } : prev;
+        });
+      });
+
+      return () => {
+        try { unsubscribe(); } catch {}
+      };
+    }
   }, [unit]);
 
   if (!isOpen || !currentUnit) return null;
@@ -151,13 +192,9 @@ export const ProtoUnitDetailsDialog: React.FC<ProtoUnitDetailsDialogProps> = ({
                 </span>
               </div>
               <p className="text-xs text-slate-400 flex flex-wrap items-center gap-2 mt-1">
-                <span>Start: <span className="text-slate-200 font-mono font-medium">{getMachineStartDateTime(unit)}</span></span>
-                {(unit.status === 'finished' || unit.status === 'stopped' || unit.endDateTime) && (
-                  <>
-                    <span className="text-slate-600">•</span>
-                    <span>{unit.status === 'finished' ? 'End Date & Time:' : 'Stop Date & Time:'} <span className="text-emerald-300 font-mono font-bold">{getMachineEndDateTime(unit)}</span></span>
-                  </>
-                )}
+                <span>Start Date & Time: <span className="text-slate-200 font-mono font-medium">{getMachineStartDateTime(unit)}</span></span>
+                <span className="text-slate-600">•</span>
+                <span>End Date & Time: <span className="text-emerald-300 font-mono font-bold">{getMachineEndDateTime(unit)}</span></span>
               </p>
             </div>
           </div>
@@ -230,7 +267,7 @@ export const ProtoUnitDetailsDialog: React.FC<ProtoUnitDetailsDialogProps> = ({
                 </div>
                 <div>
                   <span className="text-slate-400 block text-[10px]">Test Completed</span>
-                  <span className={`font-mono font-medium ${unit.status === 'finished' ? 'text-emerald-300 font-bold' : unit.status === 'stopped' ? 'text-amber-300 font-bold' : 'text-slate-300'}`}>
+                  <span className="font-mono font-bold text-emerald-300">
                     {getTestCompletedDate(unit)}
                   </span>
                 </div>
@@ -394,15 +431,7 @@ export const ProtoUnitDetailsDialog: React.FC<ProtoUnitDetailsDialogProps> = ({
             </div>
           </div>
 
-          {/* Notification Toast for Photo Actions */}
-          {photoToast && (
-            <div className="bg-emerald-950/80 border border-emerald-700/80 px-4 py-2.5 rounded-xl flex items-center gap-2 text-xs text-emerald-200 animate-in fade-in duration-200">
-              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-              <span className="font-medium">{photoToast}</span>
-            </div>
-          )}
-
-          {/* Unit Photos Gallery with Instant Upload/Replace */}
+          {/* Unit Photos Gallery with Centered View */}
           <div className="bg-slate-950/60 p-4 rounded-xl border border-slate-800 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2.5">
               <div className="flex items-center gap-2">
@@ -565,28 +594,30 @@ export const ProtoUnitDetailsDialog: React.FC<ProtoUnitDetailsDialogProps> = ({
                   }
                 }
                 exportUnitToPDF({
+                  unit: targetUnit,
                   title: 'Proto Unit Inspection Report',
                   unitType: 'Proto Testing Unit',
                   modelName: targetUnit.modelName,
                   serialNumber: `IDU: ${targetUnit.iduSerialNumber} | ODU: ${targetUnit.oduSerialNumber}`,
+                  iduSerialNumber: targetUnit.iduSerialNumber,
+                  oduSerialNumber: targetUnit.oduSerialNumber,
+                  station: targetUnit.station || 'Station 01',
                   status: targetUnit.status === 'live' ? 'LIVE TESTING' : targetUnit.status === 'stopped' ? 'STOPPED' : 'PASSED',
-                  details: [
-                    { label: 'Testing Station', value: targetUnit.station || 'Station 01' },
-                    { label: 'Requested By', value: targetUnit.requestBy },
-                    { label: 'Required Duration', value: `${targetUnit.requiredHour} Hours` },
-                    { label: 'Test Commenced', value: getTestCommencedDate(targetUnit) },
-                    { label: 'Test Completed', value: getTestCompletedDate(targetUnit) }
-                  ],
-                  purpose: targetUnit.testPurpose,
-                  remarks: targetUnit.remarks || 'No remarks provided.',
-                  extraInfo: [
-                    { label: 'IDU PCB Supplier / Code', value: `${targetUnit.partsInfo?.iduPcbSupplier || 'N/A'} (${targetUnit.partsInfo?.iduPcbPartCode || 'N/A'})` },
-                    { label: 'IDU Motor Supplier / Code', value: `${targetUnit.partsInfo?.iduMotorSupplier || 'N/A'} (${targetUnit.partsInfo?.iduMotorPartCode || 'N/A'})` },
-                    { label: 'ODU PCB Supplier / Code', value: `${targetUnit.partsInfo?.oduPcbSupplier || 'N/A'} (${targetUnit.partsInfo?.oduPcbPartCode || 'N/A'})` },
-                    { label: 'ODU Compressor Supplier / Code', value: `${targetUnit.partsInfo?.oduCompressorSupplier || 'N/A'} (${targetUnit.partsInfo?.oduCompressorPartCode || 'N/A'})` },
-                    { label: 'ODU Motor Supplier / Code', value: `${targetUnit.partsInfo?.oduMotorSupplier || 'N/A'} (${targetUnit.partsInfo?.oduMotorPartCode || 'N/A'})` },
-                    { label: 'ODU EEV Supplier / Code', value: `${targetUnit.partsInfo?.oduEevSupplier || 'N/A'} (${targetUnit.partsInfo?.oduEevPartCode || 'N/A'})` }
-                  ],
+                  sampleType: targetUnit.sampleType || 'Proto Unit',
+                  requestBy: targetUnit.requestBy,
+                  testPurpose: targetUnit.testPurpose,
+                  requiredHour: `${targetUnit.requiredHour} Hours`,
+                  elapsedHours: `${targetUnit.doneHour || 0} Hours`,
+                  pendingHours: `${Math.max(0, (targetUnit.requiredHour || 0) - (targetUnit.doneHour || 0))} Hours`,
+                  testCommenced: getTestCommencedDate(targetUnit),
+                  testCompleted: getTestCompletedDate(targetUnit),
+                  endDateTime: targetUnit.endDateTime,
+                  createdAt: targetUnit.createdAt,
+                  updatedAt: targetUnit.updatedAt,
+                  namePlate: targetUnit.namePlate,
+                  partsInfo: targetUnit.partsInfo,
+                  photos: targetUnit.photos,
+                  remarks: targetUnit.remarks || 'Standard proto testing conducted without abnormal vibration or anomalies.',
                   observations: targetUnit.observations || []
                 });
               }}

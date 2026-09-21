@@ -233,19 +233,22 @@ export const FieldUnitDetailsDialog: React.FC<FieldUnitDetailsDialogProps> = ({
                 }
               }
               exportUnitToPDF({
+                unit: targetUnit,
                 title: 'Field Unit Deployment Report',
                 unitType: 'Field Tested Unit',
                 modelName: targetUnit.modelName,
                 serialNumber: targetUnit.serialNumber,
+                iduSerialNumber: targetUnit.iduSerialNumber,
+                oduSerialNumber: targetUnit.oduSerialNumber,
+                station: targetUnit.station || 'Station 01',
                 status: targetUnit.status === 'live' ? 'LIVE FIELD' : targetUnit.status === 'stopped' ? 'STOPPED' : 'PASSED',
-                details: [
-                  { label: 'Station', value: targetUnit.station || 'Station 01' },
-                  { label: 'Request By', value: targetUnit.requestBy },
-                  { label: 'Start Date/Time', value: targetUnit.startDateTime },
-                  ...(targetUnit.endDateTime ? [{ label: 'End Date/Time', value: targetUnit.endDateTime }] : []),
-                  { label: 'Required Hours', value: `${targetUnit.requiredHour} Hours` }
-                ],
-                remarks: targetUnit.remarks || 'No remarks provided.',
+                requestBy: targetUnit.requestBy,
+                requiredHour: `${targetUnit.requiredHour} Hours`,
+                testCommenced: targetUnit.startDateTime,
+                testCompleted: targetUnit.endDateTime || 'Testing Ongoing',
+                createdAt: targetUnit.createdAt,
+                updatedAt: targetUnit.updatedAt,
+                remarks: targetUnit.remarks || 'Field testing performance monitored according to ambient test standards.',
                 observations: targetUnit.observations || []
               });
             }}

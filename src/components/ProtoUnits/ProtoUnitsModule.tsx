@@ -443,59 +443,45 @@ export const ProtoUnitsModule: React.FC<ProtoUnitsModuleProps> = ({
                     </h3>
                   </div>
 
-                  {/* Metadata Info Box: Start Date/Time, End Date/Time (when finished/stopped) & Request By */}
+                  {/* Metadata Info Box: Start Date/Time, End Date/Time & Request By */}
                   <div className="bg-slate-950/70 p-3 rounded-xl border border-slate-800/80">
-                    {unit.status === 'finished' || unit.status === 'stopped' ? (
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-6 gap-y-2.5 text-xs">
-                        <div>
-                          <span className="text-[10px] text-slate-400 block font-medium">Start Date & Time</span>
-                          <span className="font-mono text-[11px] font-bold text-slate-200 flex items-center gap-1 mt-0.5">
-                            <Clock className="w-3 h-3 text-cyan-400 shrink-0" />
-                            {getMachineStartDateTime(unit)}
-                          </span>
-                        </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-6 gap-y-2.5 text-xs">
+                      <div>
+                        <span className="text-[10px] text-slate-400 block font-medium">Start Date & Time</span>
+                        <span className="font-mono text-[11px] font-bold text-slate-200 flex items-center gap-1 mt-0.5">
+                          <Clock className="w-3 h-3 text-cyan-400 shrink-0" />
+                          {getMachineStartDateTime(unit)}
+                        </span>
+                      </div>
 
-                        <div>
-                          <span className="text-[10px] text-slate-400 block font-medium">
-                            {unit.status === 'finished' ? 'End Date & Time' : 'Stop Date & Time'}
+                      <div>
+                        <span className="text-[10px] text-slate-400 block font-medium">
+                          {unit.status === 'finished' ? 'End Date & Time' : unit.status === 'stopped' ? 'Stop Date & Time' : 'End Date & Time'}
+                        </span>
+                        {getMachineEndDateTime(unit) === '-' ? (
+                          <span className="font-mono text-xs font-bold text-slate-400 block mt-0.5">
+                            -
                           </span>
+                        ) : (
                           <span className={`font-mono text-[11px] font-bold flex items-center gap-1 mt-0.5 ${
-                            unit.status === 'finished' ? 'text-emerald-300' : 'text-amber-300'
+                            unit.status === 'finished' ? 'text-emerald-300' : unit.status === 'stopped' ? 'text-amber-300' : 'text-cyan-300'
                           }`}>
                             <Clock className={`w-3 h-3 shrink-0 ${
-                              unit.status === 'finished' ? 'text-emerald-400' : 'text-amber-400'
+                              unit.status === 'finished' ? 'text-emerald-400' : unit.status === 'stopped' ? 'text-amber-400' : 'text-cyan-400'
                             }`} />
                             {getMachineEndDateTime(unit)}
                           </span>
-                        </div>
-
-                        <div>
-                          <span className="text-[10px] text-slate-400 block font-medium">Request By</span>
-                          <span className="font-semibold text-indigo-300 flex items-center gap-1 truncate mt-0.5">
-                            <User className="w-3 h-3 text-indigo-400 shrink-0" />
-                            {unit.requestBy}
-                          </span>
-                        </div>
+                        )}
                       </div>
-                    ) : (
-                      <div className="flex items-start justify-between gap-8 text-xs">
-                        <div>
-                          <span className="text-[10px] text-slate-400 block font-medium">Start Date & Time</span>
-                          <span className="font-mono text-[11px] font-bold text-slate-200 flex items-center gap-1 mt-0.5">
-                            <Clock className="w-3 h-3 text-cyan-400 shrink-0" />
-                            {getMachineStartDateTime(unit)}
-                          </span>
-                        </div>
 
-                        <div className="text-right shrink-0">
-                          <span className="text-[10px] text-slate-400 block font-medium">Request By</span>
-                          <span className="font-semibold text-indigo-300 flex items-center justify-end gap-1 truncate mt-0.5">
-                            <User className="w-3 h-3 text-indigo-400 shrink-0" />
-                            {unit.requestBy}
-                          </span>
-                        </div>
+                      <div>
+                        <span className="text-[10px] text-slate-400 block font-medium">Request By</span>
+                        <span className="font-semibold text-indigo-300 flex items-center gap-1 truncate mt-0.5">
+                          <User className="w-3 h-3 text-indigo-400 shrink-0" />
+                          {unit.requestBy}
+                        </span>
                       </div>
-                    )}
+                    </div>
                   </div>
 
                   {/* Separate Horizontal Row for Done & Pending Hours in Running format */}
@@ -573,27 +559,29 @@ export const ProtoUnitsModule: React.FC<ProtoUnitsModuleProps> = ({
                             onNavigateToGenerateReport(unit.iduSerialNumber || unit.oduSerialNumber || '');
                           } else {
                             exportUnitToPDF({
+                              unit: unit,
                               title: 'Proto Unit Inspection Report',
                               unitType: 'Proto Testing Unit',
                               modelName: unit.modelName,
                               serialNumber: `IDU: ${unit.iduSerialNumber} | ODU: ${unit.oduSerialNumber}`,
+                              iduSerialNumber: unit.iduSerialNumber,
+                              oduSerialNumber: unit.oduSerialNumber,
+                              station: unit.station || 'Station 01',
                               status: 'PASSED',
-                              details: [
-                                { label: 'Testing Station', value: unit.station || 'Station 01' },
-                                { label: 'Requested By', value: unit.requestBy },
-                                { label: 'Required Duration', value: `${unit.requiredHour} Hours` },
-                                { label: 'Created At', value: unit.createdAt }
-                              ],
-                              purpose: unit.testPurpose,
-                              remarks: unit.remarks || 'No remarks provided.',
-                              extraInfo: [
-                                { label: 'IDU PCB Supplier / Code', value: `${unit.partsInfo?.iduPcbSupplier || 'N/A'} (${unit.partsInfo?.iduPcbPartCode || 'N/A'})` },
-                                { label: 'IDU Motor Supplier / Code', value: `${unit.partsInfo?.iduMotorSupplier || 'N/A'} (${unit.partsInfo?.iduMotorPartCode || 'N/A'})` },
-                                { label: 'ODU PCB Supplier / Code', value: `${unit.partsInfo?.oduPcbSupplier || 'N/A'} (${unit.partsInfo?.oduPcbPartCode || 'N/A'})` },
-                                { label: 'ODU Compressor Supplier / Code', value: `${unit.partsInfo?.oduCompressorSupplier || 'N/A'} (${unit.partsInfo?.oduCompressorPartCode || 'N/A'})` },
-                                { label: 'ODU Motor Supplier / Code', value: `${unit.partsInfo?.oduMotorSupplier || 'N/A'} (${unit.partsInfo?.oduMotorPartCode || 'N/A'})` },
-                                { label: 'ODU EEV Supplier / Code', value: `${unit.partsInfo?.oduEevSupplier || 'N/A'} (${unit.partsInfo?.oduEevPartCode || 'N/A'})` }
-                              ],
+                              sampleType: unit.sampleType || 'Proto Unit',
+                              requestBy: unit.requestBy,
+                              testPurpose: unit.testPurpose,
+                              requiredHour: `${unit.requiredHour} Hours`,
+                              elapsedHours: `${unit.doneHour || unit.requiredHour} Hours`,
+                              pendingHours: '0 Hours',
+                              testCommenced: unit.reportDetails?.testCommenced || unit.createdAt,
+                              testCompleted: unit.reportDetails?.testCompleted || unit.endDateTime || unit.completedAt || 'Completed',
+                              createdAt: unit.createdAt,
+                              updatedAt: unit.updatedAt,
+                              namePlate: unit.namePlate,
+                              partsInfo: unit.partsInfo,
+                              photos: unit.photos,
+                              remarks: unit.remarks || 'Machine testing completed successfully with zero defects.',
                               observations: unit.observations || []
                             });
                           }
