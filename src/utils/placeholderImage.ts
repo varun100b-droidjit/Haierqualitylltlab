@@ -40,9 +40,10 @@ export const PICTURE_NOT_AVAILABLE_SVG = `data:image/svg+xml;utf8,${encodeURICom
 `)}`;
 
 /**
- * High-resolution JPG image asset exported for web preview, reports, and downloads
+ * High-resolution SVG and canvas image data exported for web preview, reports, and downloads.
+ * Uses self-contained data URIs so it never fails with 404, network drops, or bundling path issues.
  */
-export const PICTURE_NOT_AVAILABLE_IMAGE = placeholderJpg;
+export const PICTURE_NOT_AVAILABLE_IMAGE = PICTURE_NOT_AVAILABLE_SVG;
 
 let cachedJpegDataUrl: string | null = null;
 
@@ -134,7 +135,7 @@ export function getPictureNotAvailableDataUrlSync(): string {
 }
 
 /**
- * Checks if a given photo URL is empty, missing, or "NA"
+ * Checks if a given photo URL is empty, missing, or a placeholder
  */
 export function isPhotoMissing(url?: string | null): boolean {
   if (!url) return true;
@@ -144,7 +145,11 @@ export function isPhotoMissing(url?: string | null): boolean {
     trimmed === 'NA' ||
     trimmed === 'N/A' ||
     trimmed === 'null' ||
-    trimmed === 'undefined'
+    trimmed === 'undefined' ||
+    trimmed.includes('picture_not_available') ||
+    trimmed.includes('stored_in_idb') ||
+    trimmed.includes('/src/assets/images/') ||
+    trimmed.startsWith('data:image/svg+xml')
   );
 }
 

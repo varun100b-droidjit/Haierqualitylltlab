@@ -10,7 +10,7 @@ import {
 import { db, collection, doc, setDoc, deleteDoc, getDocs, onSnapshot } from './firebase';
 import { requireOnlineForSave } from './networkManager';
 import { cleanForFirestore, enforceFirestoreDocSizeLimit } from './firestoreSanitizer';
-import { safeLocalStorageSet, idbSaveAll, idbGetAll } from '../lib/indexedDbStorage';
+import { safeLocalStorageSet, idbSaveAll, idbGetAll, restorePhotosFromIdb } from '../lib/indexedDbStorage';
 
 const STORAGE_KEY_FIELD_UNITS = 'llt_field_units_v2';
 const DELETED_FIELD_UNITS_KEY = 'llt_deleted_field_units_v1';
@@ -57,6 +57,18 @@ const INITIAL_FIELD_UNITS: FieldUnit[] = [];
 let fieldUnitsCache: FieldUnit[] = loadLocalFieldUnits();
 const subscribers: Set<() => void> = new Set();
 
+// Asynchronously hydrate full fidelity photos from IndexedDB on startup
+if (typeof window !== 'undefined') {
+  idbGetAll<FieldUnit>('field_units').then(idbUnits => {
+    if (idbUnits && idbUnits.length > 0) {
+      fieldUnitsCache = restorePhotosFromIdb(fieldUnitsCache, idbUnits);
+      notifySubscribers();
+    }
+  }).catch(err => {
+    console.warn('[FieldStore] IDB hydration note:', err);
+  });
+}
+
 // Local Inter-Tab Broadcast Channel
 const localFieldBus = typeof window !== 'undefined' && 'BroadcastChannel' in window 
   ? new BroadcastChannel('llt_field_bus') 
@@ -64,7 +76,14 @@ const localFieldBus = typeof window !== 'undefined' && 'BroadcastChannel' in win
 
 if (localFieldBus) {
   localFieldBus.onmessage = () => {
-    fieldUnitsCache = loadLocalFieldUnits();
+    const loaded = loadLocalFieldUnits();
+    fieldUnitsCache = restorePhotosFromIdb(loaded, fieldUnitsCache);
+    idbGetAll<FieldUnit>('field_units').then(idbUnits => {
+      if (idbUnits && idbUnits.length > 0) {
+        fieldUnitsCache = restorePhotosFromIdb(fieldUnitsCache, idbUnits);
+        notifySubscribers();
+      }
+    }).catch(() => {});
     notifySubscribers();
   };
 }
@@ -73,7 +92,14 @@ if (localFieldBus) {
 if (typeof window !== 'undefined') {
   window.addEventListener('storage', (e) => {
     if (e.key === STORAGE_KEY_FIELD_UNITS) {
-      fieldUnitsCache = loadLocalFieldUnits();
+      const loaded = loadLocalFieldUnits();
+      fieldUnitsCache = restorePhotosFromIdb(loaded, fieldUnitsCache);
+      idbGetAll<FieldUnit>('field_units').then(idbUnits => {
+        if (idbUnits && idbUnits.length > 0) {
+          fieldUnitsCache = restorePhotosFromIdb(fieldUnitsCache, idbUnits);
+          notifySubscribers();
+        }
+      }).catch(() => {});
       notifySubscribers();
     }
   });
@@ -179,6 +205,16 @@ function mergeWithLocalCache(remoteUnits: FieldUnit[]): FieldUnit[] {
   // 1. All valid remote units from Firestore / cloud
   remoteUnits.forEach(rem => {
     if (!rem || !rem.id || deleted.has(rem.id)) return;
+    const local = fieldUnitsCache.find(l => l.id === rem.id);
+    if (local && local.photos && typeof local.photos === 'object') {
+      const mergedPhotos: Record<string, string> = { ...(rem.photos || {}) };
+      Object.entries(local.photos).forEach(([k, v]) => {
+        if (typeof v === 'string' && v.startsWith('data:image/') && (!mergedPhotos[k] || !mergedPhotos[k].startsWith('data:image/'))) {
+          mergedPhotos[k] = v;
+        }
+      });
+      rem.photos = mergedPhotos;
+    }
     map.set(rem.id, rem);
   });
 
@@ -316,7 +352,20 @@ function loadLocalFieldUnits(): FieldUnit[] {
     if (raw !== null) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
-        return parsed.filter((u: any) => u && u.id !== 'field-101' && u.id !== 'field-102' && u.id !== 'field-103');
+        const filtered = parsed.filter((u: any) => u && u.id !== 'field-101' && u.id !== 'field-102' && u.id !== 'field-103');
+        return filtered.map((u: any) => {
+          if (!u || typeof u !== 'object') return u;
+          if (u.photos && typeof u.photos === 'object') {
+            const cleanPhotos: Record<string, string> = {};
+            Object.entries(u.photos).forEach(([k, v]) => {
+              if (typeof v === 'string' && !v.includes('stored_in_idb') && (v.startsWith('data:') || v.startsWith('http') || v.startsWith('blob:') || v.length > 80)) {
+                cleanPhotos[k] = v;
+              }
+            });
+            return { ...u, photos: cleanPhotos };
+          }
+          return u;
+        });
       }
     }
     return [];
@@ -328,8 +377,10 @@ function loadLocalFieldUnits(): FieldUnit[] {
 function saveLocalFieldUnits(units: FieldUnit[]) {
   const clean = (units || []).filter(u => u && u.id !== 'field-101' && u.id !== 'field-102' && u.id !== 'field-103');
   fieldUnitsCache = clean;
-  safeLocalStorageSet(STORAGE_KEY_FIELD_UNITS, clean);
+  // Always persist full data with all photos to IndexedDB
   idbSaveAll('field_units', clean);
+  // Persist clean copy to localStorage
+  safeLocalStorageSet(STORAGE_KEY_FIELD_UNITS, clean);
   if (localFieldBus) {
     try { localFieldBus.postMessage({ timestamp: Date.now() }); } catch {}
   }

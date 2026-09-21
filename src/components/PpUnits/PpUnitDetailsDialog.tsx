@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { 
   X, 
   Cpu, 
@@ -17,13 +18,15 @@ import {
   Layers,
   ArrowRightLeft,
   Calendar,
-  Sparkles
+  ImageIcon
 } from 'lucide-react';
 import { PpUnit } from '../../types';
 import { updatePpUnit, togglePpUnitStatus } from '../../services/ppUnitStore';
 import { exportUnitToPDF } from '../../utils/pdfExport';
 import { formatShortDateTime } from '../../utils/dateFormatter';
 import { formatHoursToHHMM } from '../../services/shiftStore';
+import { PICTURE_NOT_AVAILABLE_SVG, isPhotoMissing } from '../../utils/placeholderImage';
+import { PHOTO_FIELD_DEFINITIONS, getPhotoUrlForContentControl } from '../../utils/photoManager';
 
 interface PpUnitDetailsDialogProps {
   unit: PpUnit | null;
@@ -45,7 +48,7 @@ export const PpUnitDetailsDialog: React.FC<PpUnitDetailsDialogProps> = ({
   const [observationInput, setObservationInput] = useState('');
 
   // Keep internal state synced when prop changes
-  React.useEffect(() => {
+  useEffect(() => {
     setCurrentUnit(unit);
   }, [unit]);
 
@@ -94,8 +97,8 @@ export const PpUnitDetailsDialog: React.FC<PpUnitDetailsDialogProps> = ({
   const pendingHHMM = formatHoursToHHMM(pendingHours);
 
   const handleToggleStatus = () => {
-    const newStatus = currentUnit.status === 'live' ? 'finished' : 'live';
-    const updated = togglePpUnitStatus(currentUnit.id, newStatus);
+    const nextStatus = currentUnit.status === 'live' ? 'finished' : 'live';
+    const updated = togglePpUnitStatus(currentUnit.id, nextStatus);
     if (updated) {
       setCurrentUnit(updated);
       if (onUpdateUnit) onUpdateUnit(updated);
@@ -127,22 +130,22 @@ export const PpUnitDetailsDialog: React.FC<PpUnitDetailsDialogProps> = ({
     }
   };
 
-  const photoList: { label: string; url: string }[] = [];
-  if (currentUnit.photos) {
-    const p = currentUnit.photos;
-    if (p.PHOTO_Indoor_Unit || p.indoorUnitPhoto) photoList.push({ label: '1. Indoor Unit', url: (p.PHOTO_Indoor_Unit || p.indoorUnitPhoto)! });
-    if (p.PHOTO_Product_Packing || p.productPhoto) photoList.push({ label: '2. Product Packing', url: (p.PHOTO_Product_Packing || p.productPhoto)! });
-    if (p.PHOTO_Packing_Box || p.packingBoxPhoto) photoList.push({ label: '3. Packing Box', url: (p.PHOTO_Packing_Box || p.packingBoxPhoto)! });
-    if (p.PHOTO_IDU_Motor || p.iduMotorPhoto) photoList.push({ label: '4. IDU Motor', url: (p.PHOTO_IDU_Motor || p.iduMotorPhoto)! });
-    if (p.PHOTO_IDU_PCB || p.iduPcbPhoto) photoList.push({ label: '5. IDU PCB', url: (p.PHOTO_IDU_PCB || p.iduPcbPhoto)! });
-    if (p.PHOTO_IDU_Product_Name_Plate || p.PHOTO_IDU_Name_Plate || p.iduNameplatePhoto) photoList.push({ label: '6. IDU Product Name Plate', url: (p.PHOTO_IDU_Product_Name_Plate || p.PHOTO_IDU_Name_Plate || p.iduNameplatePhoto)! });
-    if (p.PHOTO_Remote || p.remotePhoto || p.stickerPhoto) photoList.push({ label: '7. Remote', url: (p.PHOTO_Remote || p.remotePhoto || p.stickerPhoto)! });
-    if (p.PHOTO_ODU_Name_Plate || p.oduNameplatePhoto) photoList.push({ label: '8. ODU Name Plate', url: (p.PHOTO_ODU_Name_Plate || p.oduNameplatePhoto)! });
-    if (p.PHOTO_ODU_Motor || p.oduMotorPhoto) photoList.push({ label: '9. ODU Motor', url: (p.PHOTO_ODU_Motor || p.oduMotorPhoto)! });
-    if (p.PHOTO_ODU_PCB || p.oduPcbPhoto) photoList.push({ label: '10. ODU PCB', url: (p.PHOTO_ODU_PCB || p.oduPcbPhoto)! });
-    if (p.PHOTO_Electronic_Expansion_Valve || p.PHOTO_EEV || p.oduEevPhoto || p.eevPhoto) photoList.push({ label: '11. Electronic Expansion Valve', url: (p.PHOTO_Electronic_Expansion_Valve || p.PHOTO_EEV || p.oduEevPhoto || p.eevPhoto)! });
-    if (p.PHOTO_ODU_Compressor || p.PHOTO_Compressor || p.oduCompressorPhoto || p.compressorPhoto) photoList.push({ label: '12. ODU Compressor', url: (p.PHOTO_ODU_Compressor || p.PHOTO_Compressor || p.oduCompressorPhoto || p.compressorPhoto)! });
-  }
+  // Standardized 12-slot photo mapping with real data and fallback support
+  const photoDefinitions = PHOTO_FIELD_DEFINITIONS.map(def => {
+    const rawUrl = getPhotoUrlForContentControl(currentUnit.photos, def.photoKey);
+    const isMissing = isPhotoMissing(rawUrl);
+    return {
+      def,
+      label: def.label,
+      key: def.photoKey,
+      legacyKey: def.id,
+      url: isMissing ? PICTURE_NOT_AVAILABLE_SVG : rawUrl!.trim(),
+      isPlaceholder: isMissing
+    };
+  });
+
+  const photoList = photoDefinitions;
+  const uploadedCount = photoList.filter(p => !p.isPlaceholder).length;
 
   const observationsList = currentUnit.observations || [];
 
@@ -491,30 +494,206 @@ export const PpUnitDetailsDialog: React.FC<PpUnitDetailsDialogProps> = ({
             </div>
           </div>
 
-          {/* Photos Attachments */}
-          {photoList.length > 0 && (
-            <div className="bg-slate-950/60 p-4 rounded-xl border border-slate-800/80 space-y-3">
-              <span className="text-xs font-bold text-cyan-400 uppercase tracking-wider block">
-                Attached Component Photos ({photoList.length})
-              </span>
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-                {photoList.map((photo, index) => (
-                  <div
-                    key={index}
-                    onClick={() => photo.url && setSelectedPhoto({ url: photo.url, label: photo.label })}
-                    className="group relative bg-slate-900 border border-slate-800 rounded-xl p-2 cursor-pointer hover:border-cyan-500 transition-all flex flex-col items-center justify-between gap-1.5"
-                  >
-                    <div className="w-full h-24 bg-slate-950 rounded-lg overflow-hidden flex items-center justify-center p-1">
-                      <img src={photo.url} alt={photo.label} className="w-full h-full object-contain" />
-                    </div>
-                    <span className="text-[10px] font-bold text-slate-300 truncate w-full text-center">
-                      {photo.label}
-                    </span>
-                  </div>
-                ))}
-              </div>
+          {/* Notification Toast for Photo Actions */}
+          {photoToast && (
+            <div className="bg-emerald-950/80 border border-emerald-700/80 px-4 py-2.5 rounded-xl flex items-center gap-2 text-xs text-emerald-200 animate-in fade-in duration-200">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span className="font-medium">{photoToast}</span>
             </div>
           )}
+
+          {/* Unit Photos Gallery with Instant Upload/Replace */}
+          <div className="bg-slate-950/60 p-4 rounded-xl border border-slate-800 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2.5">
+              <div className="flex items-center gap-2">
+                <ImageIcon className="w-4 h-4 text-cyan-400" />
+                <h4 className="text-xs font-bold text-cyan-300 uppercase tracking-wider">Unit Photos Gallery (Fixed 6 cm × 4 cm Centered View)</h4>
+              </div>
+              
+              <div className="flex items-center gap-2">
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
+                  uploadedCount === 0 
+                    ? 'bg-amber-950/70 border-amber-800/70 text-amber-300'
+                    : 'bg-emerald-950/70 border-emerald-800/70 text-emerald-300'
+                }`}>
+                  {uploadedCount} / 12 Uploaded
+                </span>
+
+                {/* Hidden Bulk File Input */}
+                <input
+                  ref={bulkFileInputRef}
+                  type="file"
+                  multiple
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    handleBulkUploadFiles(e.target.files);
+                    e.target.value = '';
+                  }}
+                />
+
+                <button
+                  type="button"
+                  onClick={() => bulkFileInputRef.current?.click()}
+                  disabled={isBulkUploading}
+                  className="px-2.5 py-1 bg-cyan-600 hover:bg-cyan-500 text-white font-medium text-[11px] rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+                  title="Select multiple component photos to automatically map and upload"
+                >
+                  {isBulkUploading ? (
+                    <RefreshCw className="w-3 h-3 animate-spin text-white" />
+                  ) : (
+                    <Upload className="w-3 h-3" />
+                  )}
+                  <span>Bulk Upload</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowFullPhotoManager(prev => !prev)}
+                  className={`px-2.5 py-1 text-[11px] font-medium rounded-lg border transition-colors cursor-pointer flex items-center gap-1 ${
+                    showFullPhotoManager
+                      ? 'bg-cyan-950 border-cyan-700 text-cyan-200'
+                      : 'bg-slate-900 border-slate-700 text-slate-300 hover:text-white'
+                  }`}
+                >
+                  <Layers className="w-3 h-3" />
+                  <span>{showFullPhotoManager ? 'Hide Uploader' : 'Manage All'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Inline Full Photo Manager Toggle */}
+            {showFullPhotoManager && (
+              <div className="p-3 bg-slate-900/90 border border-slate-800 rounded-xl space-y-3 animate-in fade-in duration-200">
+                <PhotoUploadSection
+                  photos={currentUnit.photos || {}}
+                  onChange={(updated) => {
+                    const saved = updatePpUnit(currentUnit.id, { photos: updated });
+                    if (saved) {
+                      setCurrentUnit(saved);
+                      if (onUpdateUnit) onUpdateUnit(saved);
+                      if (onStatusChanged) onStatusChanged();
+                    }
+                  }}
+                  title="Photo Upload & Dropzone Manager"
+                  subtitle="Drag and drop or select files to update all 11 standardized inspection slots"
+                />
+              </div>
+            )}
+
+            {/* 12-Slot Standard Inspection Photos Grid */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+              {photoList.map((p, idx) => (
+                <div key={idx} className="bg-slate-900/90 border border-slate-800 hover:border-slate-700 rounded-xl p-2.5 flex flex-col items-center justify-between gap-2 transition-colors">
+                  <div className="flex items-center justify-between w-full gap-1 min-w-0">
+                    <span className="text-[11px] text-slate-200 font-semibold truncate flex-1" title={p.label}>
+                      {p.label}
+                    </span>
+                    {p.isPlaceholder ? (
+                      <span className="text-[9px] font-medium text-amber-300 bg-amber-950/70 border border-amber-800/70 px-1.5 py-0.5 rounded shrink-0">
+                        No Photo
+                      </span>
+                    ) : (
+                      <span className="text-[9px] font-medium text-emerald-300 bg-emerald-950/70 border border-emerald-800/70 px-1.5 py-0.5 rounded shrink-0">
+                        ✓ Uploaded
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Thumbnail Container: fixed 4:3 ratio matching standard 6cm × 4cm */}
+                  <div 
+                    onClick={() => setSelectedPhoto({ url: p.url, label: p.label })}
+                    className={`w-full aspect-[4/3] rounded-lg border flex items-center justify-center overflow-hidden cursor-pointer relative group shadow-inner ${
+                      p.isPlaceholder ? 'bg-white border-slate-300' : 'bg-slate-950 border-slate-800'
+                    }`}
+                  >
+                    <img 
+                      src={p.url} 
+                      alt={p.label} 
+                      className="w-full h-full object-contain p-1 select-none" 
+                      loading="lazy"
+                      onError={(e) => {
+                        const img = e.currentTarget as HTMLImageElement;
+                        if (!img.src.startsWith('data:image/svg+xml')) {
+                          img.src = PICTURE_NOT_AVAILABLE_SVG;
+                        }
+                      }}
+                    />
+                    
+                    {uploadingKey === p.key ? (
+                      <div className="absolute inset-0 bg-slate-950/80 flex flex-col items-center justify-center gap-1">
+                        <RefreshCw className="w-5 h-5 text-cyan-400 animate-spin" />
+                        <span className="text-[9px] text-cyan-200">Saving...</span>
+                      </div>
+                    ) : (
+                      <div className="absolute inset-0 bg-slate-950/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                        <Eye className="w-5 h-5 text-cyan-400 drop-shadow" />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Hidden File Input for this specific slot */}
+                  <input
+                    ref={(el) => { fileInputRefs.current[p.key] = el; }}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      if (e.target.files?.[0]) {
+                        handleUploadSinglePhoto(e.target.files[0], p.key, p.legacyKey);
+                      }
+                      e.target.value = '';
+                    }}
+                  />
+
+                  {/* Card Action Controls */}
+                  <div className="w-full pt-1 border-t border-slate-800/80">
+                    {p.isPlaceholder ? (
+                      <button
+                        type="button"
+                        onClick={() => fileInputRefs.current[p.key]?.click()}
+                        disabled={uploadingKey === p.key}
+                        className="w-full py-1 px-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg text-[10px] font-semibold flex items-center justify-center gap-1 transition-colors cursor-pointer disabled:opacity-50"
+                      >
+                        <Camera className="w-3 h-3" />
+                        <span>Upload Photo</span>
+                      </button>
+                    ) : (
+                      <div className="flex items-center gap-1 w-full">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedPhoto({ url: p.url, label: p.label })}
+                          className="flex-1 py-1 px-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded text-[10px] font-medium flex items-center justify-center gap-0.5 transition-colors cursor-pointer"
+                          title="Preview full size"
+                        >
+                          <Eye className="w-2.5 h-2.5 text-cyan-400" />
+                          <span>View</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => fileInputRefs.current[p.key]?.click()}
+                          disabled={uploadingKey === p.key}
+                          className="flex-1 py-1 px-1 bg-slate-800 hover:bg-slate-700 text-cyan-300 rounded text-[10px] font-medium flex items-center justify-center gap-0.5 transition-colors cursor-pointer disabled:opacity-50"
+                          title="Replace this photo"
+                        >
+                          <RefreshCw className="w-2.5 h-2.5" />
+                          <span>Change</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveSinglePhoto(p.key, p.legacyKey)}
+                          className="p-1 bg-slate-800 hover:bg-rose-900/70 text-slate-400 hover:text-rose-300 rounded text-[10px] transition-colors cursor-pointer"
+                          title="Remove photo (revert to placeholder)"
+                        >
+                          <Trash2 className="w-2.5 h-2.5" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
 
           {/* Observation Notes & Logs */}
           <div className="bg-slate-950/60 p-4 rounded-xl border border-slate-800/80 space-y-3">

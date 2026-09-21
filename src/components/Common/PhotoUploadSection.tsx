@@ -33,7 +33,7 @@ import {
   getPhotosGroupedBySection
 } from '../../utils/photoManager';
 import { compressImageFile, CompressionResult } from '../../services/photoSettingsStore';
-import { PICTURE_NOT_AVAILABLE_IMAGE } from '../../utils/placeholderImage';
+import { PICTURE_NOT_AVAILABLE_IMAGE, isPhotoMissing } from '../../utils/placeholderImage';
 
 export interface PhotoFieldConfig {
   key: string;
@@ -127,28 +127,28 @@ export const PhotoUploadSection: React.FC<PhotoUploadSectionProps> = ({
 
   // Helper to get photo URL from either exact key or legacy camelCase key
   const getPhotoValue = (config: PhotoFieldConfig): string => {
+    let val = '';
     if (photos[config.key] && photos[config.key] !== 'NA' && photos[config.key]?.trim() !== '') {
-      return photos[config.key]!.trim();
+      val = photos[config.key]!.trim();
+    } else if (config.legacyKey && photos[config.legacyKey] && photos[config.legacyKey] !== 'NA' && photos[config.legacyKey]?.trim() !== '') {
+      val = photos[config.legacyKey]!.trim();
+    } else if (config.key === 'PHOTO_Electronic_Expansion_Valve') {
+      if (photos.PHOTO_EEV && photos.PHOTO_EEV !== 'NA') val = photos.PHOTO_EEV;
+      else if (photos.eevPhoto && photos.eevPhoto !== 'NA') val = photos.eevPhoto;
+    } else if (config.key === 'PHOTO_ODU_Compressor') {
+      if (photos.PHOTO_Compressor && photos.PHOTO_Compressor !== 'NA') val = photos.PHOTO_Compressor;
+      else if (photos.compressorPhoto && photos.compressorPhoto !== 'NA') val = photos.compressorPhoto;
+    } else if (config.key === 'PHOTO_IDU_Product_Name_Plate') {
+      if (photos.PHOTO_IDU_Name_Plate && photos.PHOTO_IDU_Name_Plate !== 'NA') val = photos.PHOTO_IDU_Name_Plate;
+    } else if (config.key === 'PHOTO_Remote') {
+      if (photos.stickerPhoto && photos.stickerPhoto !== 'NA') val = photos.stickerPhoto;
     }
-    if (config.legacyKey && photos[config.legacyKey] && photos[config.legacyKey] !== 'NA' && photos[config.legacyKey]?.trim() !== '') {
-      return photos[config.legacyKey]!.trim();
+
+    // Ignore broken/corrupt placeholder strings and unuploaded placeholders
+    if (isPhotoMissing(val)) {
+      return '';
     }
-    // Also check aliases
-    if (config.key === 'PHOTO_Electronic_Expansion_Valve') {
-      if (photos.PHOTO_EEV && photos.PHOTO_EEV !== 'NA') return photos.PHOTO_EEV;
-      if (photos.eevPhoto && photos.eevPhoto !== 'NA') return photos.eevPhoto;
-    }
-    if (config.key === 'PHOTO_ODU_Compressor') {
-      if (photos.PHOTO_Compressor && photos.PHOTO_Compressor !== 'NA') return photos.PHOTO_Compressor;
-      if (photos.compressorPhoto && photos.compressorPhoto !== 'NA') return photos.compressorPhoto;
-    }
-    if (config.key === 'PHOTO_IDU_Product_Name_Plate') {
-      if (photos.PHOTO_IDU_Name_Plate && photos.PHOTO_IDU_Name_Plate !== 'NA') return photos.PHOTO_IDU_Name_Plate;
-    }
-    if (config.key === 'PHOTO_Remote') {
-      if (photos.stickerPhoto && photos.stickerPhoto !== 'NA') return photos.stickerPhoto;
-    }
-    return '';
+    return val;
   };
 
   const processSingleFile = async (file: File): Promise<CompressionResult | null> => {
@@ -609,6 +609,12 @@ export const PhotoUploadSection: React.FC<PhotoUploadSectionProps> = ({
                       alt={config.label}
                       className="w-full h-full object-contain p-1 transition-transform group-hover:scale-105"
                       loading="lazy"
+                      onError={(e) => {
+                        const img = e.currentTarget as HTMLImageElement;
+                        if (!img.src.startsWith('data:image/svg+xml')) {
+                          img.src = PICTURE_NOT_AVAILABLE_IMAGE;
+                        }
+                      }}
                     />
 
                     {/* Hover overlay with Quick Actions */}

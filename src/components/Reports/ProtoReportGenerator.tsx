@@ -29,7 +29,8 @@ import {
   FolderDown,
   Folder,
   Loader2,
-  Share2
+  Share2,
+  Trash2
 } from 'lucide-react';
 import { ProtoUnit, PpUnit, ProtoUnitParts, ProtoUnitPhotos } from '../../types';
 import { getProtoUnits, updateProtoUnit } from '../../services/protoUnitStore';
@@ -42,6 +43,8 @@ import {
   updateSavedReport,
   getSavedReports, 
   findSavedReportForUnit, 
+  findSavedReportByModelName,
+  deleteSavedReport,
   subscribeReportRoom, 
   ReportTagType, 
   ReportCategoryKey, 
@@ -60,6 +63,12 @@ import {
   DocxGenerationResult 
 } from '../../utils/docxGenerator';
 import { buildNormalizedPhotos } from '../../utils/photoManager';
+import { 
+  getMachineEndDateTime, 
+  getMachineStartDateTime, 
+  getTestCompletedDate, 
+  getTestCommencedDate 
+} from '../../utils/dateFormatter';
 
 interface ProtoReportGeneratorProps {
   masterTemplate: MasterTemplate | null;
@@ -394,9 +403,9 @@ export const ProtoReportGenerator: React.FC<ProtoReportGeneratorProps> = ({
       materialCode: (unit as any).materialCode || 'NA',
       version: (unit as any).version || 'NA',
 
-      sampleReceivedDate: report.sampleReceived || unit.createdAt?.slice(0, 10) || 'NA',
-      testCommencedDate: report.testCommenced || unit.createdAt?.slice(0, 10) || 'NA',
-      testCompletedDate: report.testCompleted || unit.updatedAt?.slice(0, 10) || 'NA',
+      sampleReceivedDate: getTestCommencedDate(unit),
+      testCommencedDate: getTestCommencedDate(unit),
+      testCompletedDate: getTestCompletedDate(unit),
 
       coolingCapacity: nameplate.coolingCapacity || '5200 W (1.5 Ton)',
       ratedCoolingPower: nameplate.ratedCoolingPower || nameplate.ratedPower || '1450 W',
@@ -526,8 +535,24 @@ export const ProtoReportGenerator: React.FC<ProtoReportGeneratorProps> = ({
     Version: formData.version,
 
     Sample_Received: formData.sampleReceivedDate,
+    "Sample Received": formData.sampleReceivedDate,
+    sampleReceived: formData.sampleReceivedDate,
     Test_Commenced: formData.testCommencedDate,
+    "Test Commenced": formData.testCommencedDate,
+    testCommenced: formData.testCommencedDate,
+    Start_Date_Time: formData.testCommencedDate,
+    "Start Date & Time": formData.testCommencedDate,
+
     Test_Completed: formData.testCompletedDate,
+    "Test Completed": formData.testCompletedDate,
+    testCompleted: formData.testCompletedDate,
+    Test_Completed_Date: formData.testCompletedDate,
+    "Test Completed Date": formData.testCompletedDate,
+    End_Date_Time: formData.testCompletedDate,
+    "End Date & Time": formData.testCompletedDate,
+    endDateTime: formData.testCompletedDate,
+    End_Date: formData.testCompletedDate,
+    "End Date": formData.testCompletedDate,
 
     Cooling_capacity: formData.coolingCapacity,
     Cooling_Capacity: formData.coolingCapacity,
@@ -604,15 +629,22 @@ export const ProtoReportGenerator: React.FC<ProtoReportGeneratorProps> = ({
   const targetTag: ReportTagType = (reportType === 'reliability' || reportType === 'ce-report') ? 'C Experience' : 'C Simulation';
   const targetCategoryKey: ReportCategoryKey = targetTag === 'C Experience' ? 'cs-experience' : 'cs-simulation';
 
-  // Check if a report for this machine already exists in the Report Room under the target tag
+  // Check if a report for this model already exists in the Report Room under the target tag
   const existingReportInRoom = useMemo(() => {
+    const currentModel = (formData.modelName || selectedUnit?.modelName || '').trim();
+    // 1. Strict model check: As per requirement, if report for this model is in Report Room, cannot regenerate
+    if (currentModel && currentModel !== 'NA' && currentModel !== '') {
+      const byModel = findSavedReportByModelName(currentModel, targetTag);
+      if (byModel) return byModel;
+    }
+    // 2. Also check by unit / serial
     if (!selectedSerialNo && !selectedUnit) return null;
     return findSavedReportForUnit({
       id: selectedUnit?.id,
       serialNo: selectedSerialNo,
       iduSerialNumber: (selectedUnit as any)?.iduSerialNumber,
       oduSerialNumber: (selectedUnit as any)?.oduSerialNumber,
-      modelName: formData.modelName || selectedUnit?.modelName
+      modelName: currentModel
     }, targetTag);
   }, [selectedSerialNo, selectedUnit, formData.modelName, targetTag, savedReportsList]);
 
@@ -696,6 +728,11 @@ export const ProtoReportGenerator: React.FC<ProtoReportGeneratorProps> = ({
   };
 
   const handleGenerateDocxDownload = async () => {
+    if (existingReportInRoom) {
+      alert(`⚠️ Model "${existingReportInRoom.modelName}" ka report pehle se Report Room me maujood hai (Report #${existingReportInRoom.reportNo}).\n\nNiyam anusar jab tak Report Room me is Model ka report hai, dubara report generate nahi kiya ja sakta. Agar naya report generate karna chahte hain to pehle Report Room se purana report delete karein.`);
+      return;
+    }
+
     const tpl = masterTemplate || getMasterTemplate(reportType);
     if (!tpl?.base64Data) {
       alert("Master Report Template is not available. Please upload a template or reload.");
@@ -718,10 +755,19 @@ export const ProtoReportGenerator: React.FC<ProtoReportGeneratorProps> = ({
     });
   };
 
+  const handleDeleteExistingReportFromRoom = () => {
+    if (!existingReportInRoom) return;
+    const confirmed = window.confirm(
+      `Kya aap Model "${existingReportInRoom.modelName}" ka Report #${existingReportInRoom.reportNo} Report Room se delete karna chahte hain?\n\nDelete karne ke baad aap is model ka naya report generate kar sakenge.`
+    );
+    if (confirmed) {
+      deleteSavedReport(existingReportInRoom.id);
+    }
+  };
+
   const handleGenerateReportAndNavigate = async () => {
-    // Check if report already exists in Report Room and user has not unlocked overwrite
-    if (existingReportInRoom && !allowRegenerate) {
-      alert(`⚠️ This machine's report is already generated and available in the Report Room (Report #${existingReportInRoom.reportNo} under ${existingReportInRoom.tag}).\n\nTo view or download the report, please click "Open Report Room" or "Preview Report". If you specifically want to update/overwrite the report, please check "Unlock Re-generation".`);
+    if (existingReportInRoom) {
+      alert(`⚠️ Model "${existingReportInRoom.modelName}" ka report pehle se Report Room me maujood hai (Report #${existingReportInRoom.reportNo} under ${existingReportInRoom.tag}).\n\nNiyam: Jab tak Report Room me is Model ka report maujood hai, dubara naya report generate nahi kiya ja sakta.\n\nAgar aapko naya report generate karna hai to pehle Report Room me jakar is model ka purana report delete karein.`);
       return;
     }
 
@@ -852,11 +898,14 @@ export const ProtoReportGenerator: React.FC<ProtoReportGeneratorProps> = ({
               className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white font-bold text-xs focus:outline-none focus:border-cyan-500 transition-colors"
             >
               <option value="">-- All Models ({availableModels.length}) --</option>
-              {availableModels.map((model) => (
-                <option key={model} value={model}>
-                  Model: {model}
-                </option>
-              ))}
+              {availableModels.map((model) => {
+                const rep = findSavedReportByModelName(model, targetTag);
+                return (
+                  <option key={model} value={model}>
+                    {model} {rep ? `[🔒 Generated in Room: #${rep.reportNo}]` : `[✅ Ready to Generate]`}
+                  </option>
+                );
+              })}
             </select>
           </div>
 
@@ -876,7 +925,7 @@ export const ProtoReportGenerator: React.FC<ProtoReportGeneratorProps> = ({
                 filteredUnitsList.map((unit) => {
                   const serial = unit.iduSerialNumber || unit.oduSerialNumber || unit.id;
                   const unitTypeTag = (unit as any).unitType ? ` [${(unit as any).unitType}]` : '';
-                  const repInRoom = findSavedReportForUnit({
+                  const repInRoom = findSavedReportByModelName(unit.modelName, targetTag) || findSavedReportForUnit({
                     id: unit.id,
                     serialNo: serial,
                     iduSerialNumber: unit.iduSerialNumber,
@@ -884,7 +933,9 @@ export const ProtoReportGenerator: React.FC<ProtoReportGeneratorProps> = ({
                     modelName: unit.modelName
                   }, targetTag);
 
-                  const statusLabel = repInRoom ? ` [✅ REPORT IN ROOM: #${repInRoom.reportNo}]` : '';
+                  const statusLabel = repInRoom 
+                    ? ` [🔒 REPORT IN ROOM: #${repInRoom.reportNo} - BLOCKED]` 
+                    : ' [✅ READY TO GENERATE]';
 
                   return (
                     <option key={unit.id} value={unit.id}>
@@ -914,26 +965,26 @@ export const ProtoReportGenerator: React.FC<ProtoReportGeneratorProps> = ({
 
       {/* Existing Report Room Banner (Duplicate Report Prevention & Quick Actions) */}
       {existingReportInRoom && (
-        <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-cyan-950/80 via-slate-900 to-slate-950 border-2 border-cyan-500/60 shadow-xl space-y-3 animate-in fade-in slide-in-from-top-2">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-cyan-800/40 pb-3">
+        <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-amber-950/70 via-slate-900 to-slate-950 border-2 border-amber-500/60 shadow-xl space-y-3 animate-in fade-in slide-in-from-top-2">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-amber-800/40 pb-3">
             <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-xl bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shrink-0">
-                <FolderArchive className="w-5 h-5" />
+              <div className="p-2.5 rounded-xl bg-amber-500/20 text-amber-300 border border-amber-500/40 shrink-0">
+                <Lock className="w-5 h-5" />
               </div>
               <div>
                 <div className="flex items-center gap-2 flex-wrap">
                   <h4 className="text-sm font-black text-white">
-                    Report Already Generated & Available in Report Room
+                    Report Already Generated — Duplicate Report Blocked
                   </h4>
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-cyan-950 text-cyan-300 border border-cyan-800">
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-950 text-amber-300 border border-amber-800">
                     Report #{existingReportInRoom.reportNo}
                   </span>
                   <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-950 text-purple-300 border border-purple-800">
                     Tag: {existingReportInRoom.tag}
                   </span>
                 </div>
-                <p className="text-xs text-slate-300 mt-0.5">
-                  Is machine ka report pehle se <strong>Report Room</strong> me saved hai. Duplicate report dubara generate karne ki zaroorat nahi hai.
+                <p className="text-xs text-amber-200/90 mt-0.5">
+                  Model <strong>{existingReportInRoom.modelName}</strong> ka report pehle se <strong>Report Room</strong> me saved hai. Niyam: Jab tak Report Room me is Model ka report hai, dubara report generate nahi hoga.
                 </p>
               </div>
             </div>
@@ -960,10 +1011,20 @@ export const ProtoReportGenerator: React.FC<ProtoReportGeneratorProps> = ({
                 <Eye className="w-3.5 h-3.5 text-cyan-400" />
                 <span>View Report</span>
               </button>
+
+              <button
+                type="button"
+                onClick={handleDeleteExistingReportFromRoom}
+                className="px-3.5 py-1.5 rounded-xl bg-rose-950/60 hover:bg-rose-900/80 text-rose-300 border border-rose-700/60 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 shadow-md"
+                title="Report Room se purana report delete karein taaki naya report generate ho sake"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                <span>Delete to Re-generate</span>
+              </button>
             </div>
           </div>
 
-          {/* Detailed Info & Re-generation Unlock Controls */}
+          {/* Detailed Info */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-slate-300 bg-slate-950/60 p-3 rounded-xl border border-slate-800">
             <div className="space-y-1">
               <div className="flex items-center gap-3 flex-wrap font-mono text-[11px]">
@@ -974,21 +1035,9 @@ export const ProtoReportGenerator: React.FC<ProtoReportGeneratorProps> = ({
                 <span>Generated Date: <strong className="text-slate-300">{existingReportInRoom.generatedDate}</strong></span>
               </div>
               <p className="text-[11px] text-slate-400">
-                Aap upar diye gaye button se seedha Report Room me jakar report dekh sakte hain ya PDF/DOCX download kar sakte hain.
+                Note: Jin model ka report generate nahi hua hai, unka report generate hoga. Is model ka report dubara generate karne ke liye pehle Report Room se delete karein.
               </p>
             </div>
-
-            <label className="flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 cursor-pointer select-none shrink-0 hover:bg-slate-800 transition-colors">
-              <input
-                type="checkbox"
-                checked={allowRegenerate}
-                onChange={(e) => setAllowRegenerate(e.target.checked)}
-                className="rounded border-slate-700 text-cyan-600 focus:ring-cyan-500 w-4 h-4 cursor-pointer"
-              />
-              <span className="text-xs font-semibold text-slate-200">
-                {allowRegenerate ? '🔓 Re-generation Unlocked' : '🔒 Unlock Re-generation (Overwrite)'}
-              </span>
-            </label>
           </div>
         </div>
       )}
@@ -1753,22 +1802,28 @@ export const ProtoReportGenerator: React.FC<ProtoReportGeneratorProps> = ({
           </button>
 
           {/* Primary Generate Report Button or Locked State when already in Report Room */}
-          {existingReportInRoom && !allowRegenerate ? (
-            <button
-              type="button"
-              onClick={() => {
-                if (onNavigateToReportRoom) {
-                  onNavigateToReportRoom();
-                } else {
-                  setIsPreviewOpen(true);
-                }
-              }}
-              className="flex-1 sm:flex-none px-6 py-3 rounded-xl font-bold text-xs sm:text-sm transition-all flex items-center justify-center gap-2.5 cursor-pointer shadow-lg active:scale-95 bg-slate-800 hover:bg-slate-750 text-cyan-300 border-2 border-cyan-500/50 shadow-cyan-950/40"
-              title="Report is already generated and available in Report Room. Click to open Report Room."
-            >
-              <Lock className="w-4 h-4 text-amber-400" />
-              <span>Report in Room (#{existingReportInRoom.reportNo})</span>
-            </button>
+          {existingReportInRoom ? (
+            <div className="flex items-center gap-2">
+              {onNavigateToReportRoom && (
+                <button
+                  type="button"
+                  onClick={onNavigateToReportRoom}
+                  className="flex-1 sm:flex-none px-4 py-3 rounded-xl font-bold text-xs sm:text-sm bg-cyan-950/80 hover:bg-cyan-900 text-cyan-300 border border-cyan-700/60 transition-all flex items-center justify-center gap-2 cursor-pointer shadow-md active:scale-95"
+                >
+                  <FolderArchive className="w-4 h-4 text-cyan-400" />
+                  <span>Open Report Room</span>
+                </button>
+              )}
+              <button
+                type="button"
+                disabled={true}
+                className="flex-1 sm:flex-none px-5 py-3 rounded-xl font-bold text-xs sm:text-sm bg-slate-900 text-amber-300 border-2 border-amber-600/60 cursor-not-allowed opacity-90 flex items-center justify-center gap-2.5 shadow-lg shadow-amber-950/30"
+                title="Is Model ka report pehle se Report Room me maujood hai. Dubara generate karne ke liye pehle Report Room se purana report delete karein."
+              >
+                <Lock className="w-4 h-4 text-amber-400" />
+                <span>Report Generated (#{existingReportInRoom.reportNo})</span>
+              </button>
+            </div>
           ) : (
             <button
               type="button"
@@ -1776,9 +1831,7 @@ export const ProtoReportGenerator: React.FC<ProtoReportGeneratorProps> = ({
               onClick={handleGenerateReportAndNavigate}
               className={`flex-1 sm:flex-none px-6 py-3 rounded-xl font-black text-xs sm:text-sm transition-all flex items-center justify-center gap-2.5 cursor-pointer shadow-lg active:scale-95 ${
                 isFormValid && !isGenerating
-                  ? existingReportInRoom
-                    ? 'bg-gradient-to-r from-amber-600 via-orange-600 to-amber-700 hover:from-amber-500 hover:to-orange-500 text-white shadow-amber-950/80 ring-2 ring-amber-400/40'
-                    : 'bg-gradient-to-r from-cyan-500 via-blue-600 to-indigo-600 hover:from-cyan-400 hover:to-indigo-500 text-white shadow-cyan-950/80 ring-2 ring-cyan-400/40'
+                  ? 'bg-gradient-to-r from-cyan-500 via-blue-600 to-indigo-600 hover:from-cyan-400 hover:to-indigo-500 text-white shadow-cyan-950/80 ring-2 ring-cyan-400/40'
                   : 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed opacity-60'
               }`}
             >
@@ -1786,11 +1839,6 @@ export const ProtoReportGenerator: React.FC<ProtoReportGeneratorProps> = ({
                 <>
                   <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
                   <span>Generating DOCX Report...</span>
-                </>
-              ) : existingReportInRoom ? (
-                <>
-                  <Sparkles className="w-4 h-4 text-amber-200" />
-                  <span>Overwrite Report in Room</span>
                 </>
               ) : (
                 <>

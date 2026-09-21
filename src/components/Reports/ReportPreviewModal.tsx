@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { downloadFile, downloadElementAsPdf, generateDocxBlob, generateReportBundleZip } from '../../utils/docxGenerator';
 import { MasterTemplate, getMasterTemplate } from '../../services/reportTemplateStore';
+import { PICTURE_NOT_AVAILABLE_SVG } from '../../utils/placeholderImage';
 
 interface ReportPreviewModalProps {
   isOpen: boolean;
@@ -888,6 +889,12 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
                       alt="Indoor Unit" 
                       crossOrigin="anonymous"
                       className="w-full h-full object-contain" 
+                      onError={(e) => {
+                        const img = e.currentTarget as HTMLImageElement;
+                        if (!img.src.startsWith('data:image/svg+xml')) {
+                          img.src = PICTURE_NOT_AVAILABLE_SVG;
+                        }
+                      }}
                     />
                   ) : (
                     <div className="text-slate-400 text-xs flex flex-col items-center gap-1.5 text-center">
@@ -1078,6 +1085,12 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
                           alt={item.label} 
                           crossOrigin="anonymous"
                           className="w-full h-full object-contain p-1" 
+                          onError={(e) => {
+                            const img = e.currentTarget as HTMLImageElement;
+                            if (!img.src.startsWith('data:image/svg+xml')) {
+                              img.src = PICTURE_NOT_AVAILABLE_SVG;
+                            }
+                          }}
                         />
                       ) : (
                         <span className="text-[9px] font-medium text-slate-400">No Photo</span>

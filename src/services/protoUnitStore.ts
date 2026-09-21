@@ -1,5 +1,6 @@
-import { ProtoUnit } from '../types';
+import { ProtoUnit, ReportDetails } from '../types';
 import { addLabNotification } from './unitStore';
+import { formatShortDateTime, getMachineEndDateTime, getMachineStartDateTime } from '../utils/dateFormatter';
 import { 
   syncProtoUnitToSupabase, 
   deleteProtoUnitFromSupabase, 
@@ -11,7 +12,8 @@ import { db, collection, doc, setDoc, deleteDoc, getDocs, onSnapshot } from './f
 import { requireOnlineForSave } from './networkManager';
 import { buildNormalizedPhotos } from '../utils/photoManager';
 import { cleanForFirestore, enforceFirestoreDocSizeLimit } from './firestoreSanitizer';
-import { safeLocalStorageSet, idbSaveAll, idbGetAll } from '../lib/indexedDbStorage';
+import { safeLocalStorageSet, idbSaveAll, idbGetAll, restorePhotosFromIdb } from '../lib/indexedDbStorage';
+import { isPhotoMissing } from '../utils/placeholderImage';
 
 const STORAGE_KEY_PROTO_UNITS = 'llt_proto_units_v1';
 const DELETED_PROTO_UNITS_KEY = 'llt_deleted_proto_units_v1';
@@ -54,6 +56,18 @@ const INITIAL_PROTO_UNITS: ProtoUnit[] = [];
 let protoUnitsCache: ProtoUnit[] = loadLocalProtoUnits();
 const listeners: Set<() => void> = new Set();
 
+// Asynchronously hydrate full fidelity photos from IndexedDB on startup
+if (typeof window !== 'undefined') {
+  idbGetAll<ProtoUnit>('proto_units').then(idbUnits => {
+    if (idbUnits && idbUnits.length > 0) {
+      protoUnitsCache = restorePhotosFromIdb(protoUnitsCache, idbUnits);
+      notifyListeners();
+    }
+  }).catch(err => {
+    console.warn('[ProtoStore] IDB hydration note:', err);
+  });
+}
+
 // Local Inter-Tab Broadcast Channel
 const localProtoBus = typeof window !== 'undefined' && 'BroadcastChannel' in window 
   ? new BroadcastChannel('llt_proto_bus') 
@@ -61,7 +75,14 @@ const localProtoBus = typeof window !== 'undefined' && 'BroadcastChannel' in win
 
 if (localProtoBus) {
   localProtoBus.onmessage = () => {
-    protoUnitsCache = loadLocalProtoUnits();
+    const loaded = loadLocalProtoUnits();
+    protoUnitsCache = restorePhotosFromIdb(loaded, protoUnitsCache);
+    idbGetAll<ProtoUnit>('proto_units').then(idbUnits => {
+      if (idbUnits && idbUnits.length > 0) {
+        protoUnitsCache = restorePhotosFromIdb(protoUnitsCache, idbUnits);
+        notifyListeners();
+      }
+    }).catch(() => {});
     notifyListeners();
   };
 }
@@ -70,7 +91,14 @@ if (localProtoBus) {
 if (typeof window !== 'undefined') {
   window.addEventListener('storage', (e) => {
     if (e.key === STORAGE_KEY_PROTO_UNITS) {
-      protoUnitsCache = loadLocalProtoUnits();
+      const loaded = loadLocalProtoUnits();
+      protoUnitsCache = restorePhotosFromIdb(loaded, protoUnitsCache);
+      idbGetAll<ProtoUnit>('proto_units').then(idbUnits => {
+        if (idbUnits && idbUnits.length > 0) {
+          protoUnitsCache = restorePhotosFromIdb(protoUnitsCache, idbUnits);
+          notifyListeners();
+        }
+      }).catch(() => {});
       notifyListeners();
     }
   });
@@ -177,6 +205,19 @@ function mergeWithLocalCache(remoteUnits: ProtoUnit[]): ProtoUnit[] {
   // 1. All valid remote units from Firestore / cloud
   remoteUnits.forEach(rem => {
     if (!rem || !rem.id || deleted.has(rem.id)) return;
+    const local = protoUnitsCache.find(l => l.id === rem.id);
+    // If local has valid photos and remote has missing/empty photos, preserve local photos
+    if (local && local.photos && typeof local.photos === 'object') {
+      const mergedPhotos: Record<string, string> = { ...(rem.photos || {}) };
+      Object.entries(local.photos).forEach(([k, v]) => {
+        if (typeof v === 'string' && !isPhotoMissing(v)) {
+          if (isPhotoMissing(mergedPhotos[k])) {
+            mergedPhotos[k] = v;
+          }
+        }
+      });
+      rem.photos = mergedPhotos;
+    }
     map.set(rem.id, rem);
   });
 
@@ -318,8 +359,10 @@ export function subscribeProtoUnitStore(callback: () => void) {
 function saveLocalProtoUnits(data: ProtoUnit[]) {
   const clean = (data || []).filter(u => u && u.id !== 'proto-101' && u.id !== 'proto-102');
   protoUnitsCache = clean;
-  safeLocalStorageSet(STORAGE_KEY_PROTO_UNITS, clean);
+  // Always persist full data with all photos to IndexedDB
   idbSaveAll('proto_units', clean);
+  // Persist clean copy to localStorage
+  safeLocalStorageSet(STORAGE_KEY_PROTO_UNITS, clean);
   if (localProtoBus) {
     try { localProtoBus.postMessage({ timestamp: Date.now() }); } catch {}
   }
@@ -333,7 +376,43 @@ function loadLocalProtoUnits(): ProtoUnit[] {
     if (raw !== null) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
-        return parsed.filter((u: any) => u && u.id !== 'proto-101' && u.id !== 'proto-102');
+        const filtered = parsed.filter((u: any) => u && u.id !== 'proto-101' && u.id !== 'proto-102');
+        return filtered.map((u: any) => {
+          if (!u || typeof u !== 'object') return u;
+
+          // Clean legacy placeholder markers from photos object
+          let photos = u.photos;
+          if (u.photos && typeof u.photos === 'object') {
+            const cleanPhotos: Record<string, string> = {};
+            Object.entries(u.photos).forEach(([k, v]) => {
+              if (typeof v === 'string' && !v.includes('stored_in_idb') && (v.startsWith('data:') || v.startsWith('http') || v.startsWith('blob:') || v.length > 80)) {
+                cleanPhotos[k] = v;
+              }
+            });
+            photos = cleanPhotos;
+          }
+
+          // Test Completed gets data strictly from Machine End Date & Time when completed/stopped
+          const isDoneOrStopped = u.status === 'finished' || u.status === 'stopped' || (Number(u.doneHour) >= 1045);
+          const machineEnd = getMachineEndDateTime(u);
+          const machineStart = getMachineStartDateTime(u);
+          const existingReport = u.reportDetails || {};
+
+          const resolvedTestCompleted = isDoneOrStopped && machineEnd && machineEnd !== 'N/A' && machineEnd !== 'In Progress'
+            ? machineEnd
+            : (existingReport.testCompleted || 'In Progress');
+
+          return {
+            ...u,
+            photos,
+            endDateTime: isDoneOrStopped ? (u.endDateTime || machineEnd) : u.endDateTime,
+            reportDetails: {
+              ...existingReport,
+              testCommenced: existingReport.testCommenced || machineStart,
+              testCompleted: resolvedTestCompleted,
+            }
+          };
+        });
       }
     }
     return [];
@@ -395,13 +474,39 @@ export function addProtoUnit(unit: Omit<ProtoUnit, 'id' | 'createdAt' | 'updated
 
   const normalized = buildNormalizedPhotos(sanitizedUnit.photos || {});
 
+  const numericDone = Number(sanitizedUnit.doneHour) || 0;
+  const initialStatus: 'live' | 'stopped' | 'finished' = (numericDone >= 1045) 
+    ? 'finished' 
+    : (sanitizedUnit.status || 'live');
+
+  // Compute end date time
+  const req = Number(sanitizedUnit.requiredHour) || 1045;
+  const pendingHours = Math.max(0, req - numericDone);
+  const estCompDate = new Date(Date.now() + pendingHours * 3600 * 1000);
+  const estEndStr = formatShortDateTime(estCompDate.toISOString());
+
+  // End Date & Time value (whatever is in End Date & Time is automatically in Test Completed)
+  const autoEndDateTime = initialStatus === 'finished'
+    ? (sanitizedUnit.endDateTime || formattedDate)
+    : (sanitizedUnit.endDateTime || sanitizedUnit.reportDetails?.testCompleted || estEndStr);
+
+  const existingReport = sanitizedUnit.reportDetails || {};
+  const syncedReport: ReportDetails = {
+    ...existingReport,
+    testCommenced: existingReport.testCommenced || formattedDate.slice(0, 10),
+    testCompleted: autoEndDateTime, // End Date & Time and Test Completed are automatically identical
+  };
+
   const newUnit: ProtoUnit = {
     ...sanitizedUnit,
     photos: normalized.photos,
     id: `proto-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-    status: sanitizedUnit.status || 'live',
+    status: initialStatus,
     createdAt: formattedDate,
     updatedAt: formattedDate,
+    endDateTime: autoEndDateTime,
+    ...(initialStatus === 'finished' ? { completedAt: autoEndDateTime } : {}),
+    reportDetails: syncedReport,
   };
   (newUnit as any)._pendingSync = true;
   unmarkProtoUnitDeleted(newUnit.id);
@@ -426,15 +531,42 @@ export function updateProtoUnitStatus(id: string, status: 'live' | 'finished' | 
     return;
   }
   const formattedDate = getFormattedNow();
+  const currentDateStr = formattedDate.slice(0, 10);
 
   let targetUnit: ProtoUnit | null = null;
   const updated = protoUnitsCache.map(u => {
     if (u.id === id) {
+      const isFinishing = status === 'finished';
+      const existingReport = u.reportDetails || {};
+      
+      // End Date & Time automatically drives Test Completed
+      const machineEndDateTime = isFinishing 
+        ? formattedDate 
+        : (status === 'stopped' ? formattedDate : (u.endDateTime || ''));
+
+      const updatedReportDetails: ReportDetails = {
+        ...existingReport,
+        // Start date is preserved from Test Commenced
+        testCommenced: existingReport.testCommenced || u.createdAt?.slice(0, 10) || currentDateStr,
+        // Whatever data is in End Date & Time is automatically in Test Completed
+        testCompleted: isFinishing 
+          ? formattedDate 
+          : (status === 'stopped' ? formattedDate : (existingReport.testCompleted || '')),
+      };
+
       targetUnit = {
         ...u,
         status,
         ...(typeof doneHour === 'number' ? { doneHour } : {}),
         updatedAt: formattedDate,
+        ...(isFinishing ? { 
+          completedAt: formattedDate,
+          endDateTime: formattedDate,
+          reportDetails: updatedReportDetails
+        } : (status === 'stopped' ? {
+          endDateTime: formattedDate,
+          reportDetails: updatedReportDetails
+        } : {})),
       };
       return targetUnit;
     }
@@ -446,6 +578,50 @@ export function updateProtoUnitStatus(id: string, status: 'live' | 'finished' | 
     syncProtoUnitToSupabase(targetUnit);
     syncProtoUnitToFirestore(targetUnit);
   }
+}
+
+export function transferProtoUnitToLive(id: string, initialDoneHour: number = 0): ProtoUnit | null {
+  if (!requireOnlineForSave(`Transfer Proto Unit to Live`)) {
+    return null;
+  }
+  const formattedDate = getFormattedNow();
+  const currentDateStr = formattedDate.slice(0, 10);
+  let transferredUnit: ProtoUnit | null = null;
+
+  const updated = protoUnitsCache.map(u => {
+    if (u.id === id) {
+      transferredUnit = {
+        ...u,
+        status: 'live' as const,
+        doneHour: initialDoneHour,
+        createdAt: formattedDate,
+        updatedAt: formattedDate,
+        endDateTime: undefined,
+        completedAt: undefined,
+        reportDetails: {
+          ...(u.reportDetails || {}),
+          testCommenced: currentDateStr,
+          testCompleted: '', // Reset completion date since unit is back in live testing
+        }
+      };
+      return transferredUnit;
+    }
+    return u;
+  });
+
+  saveLocalProtoUnits(updated);
+
+  if (transferredUnit) {
+    syncProtoUnitToSupabase(transferredUnit);
+    syncProtoUnitToFirestore(transferredUnit);
+    addLabNotification(
+      `Proto Unit Transferred to Live: ${(transferredUnit as ProtoUnit).modelName}`,
+      `Station: ${(transferredUnit as ProtoUnit).station || 'Station 01'} | Resumed live testing from ${initialDoneHour}h`,
+      'info'
+    );
+  }
+
+  return transferredUnit;
 }
 
 export function updateProtoUnit(id: string, updates: Partial<ProtoUnit>): ProtoUnit | null {
@@ -463,10 +639,25 @@ export function updateProtoUnit(id: string, updates: Partial<ProtoUnit>): ProtoU
 
   const updated = protoUnitsCache.map(u => {
     if (u.id === id) {
-      updatedUnit = {
+      const merged = {
         ...u,
         ...normalizedUpdates,
         updatedAt: formattedDate,
+      };
+
+      // Auto-sync End Date & Time and Test Completed
+      const autoEndDateTime = getMachineEndDateTime(merged);
+      const existingReport = merged.reportDetails || {};
+      const syncedTestCompleted = normalizedUpdates.reportDetails?.testCompleted || normalizedUpdates.endDateTime || (autoEndDateTime !== 'N/A' ? autoEndDateTime : '');
+
+      updatedUnit = {
+        ...merged,
+        endDateTime: (syncedTestCompleted && syncedTestCompleted !== 'N/A') ? syncedTestCompleted : merged.endDateTime,
+        reportDetails: {
+          ...existingReport,
+          testCommenced: existingReport.testCommenced || getMachineStartDateTime(merged),
+          testCompleted: (syncedTestCompleted && syncedTestCompleted !== 'N/A') ? syncedTestCompleted : (existingReport.testCompleted || ''),
+        }
       };
       return updatedUnit;
     }

@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { ProtoUnit, ProtoUnitParts, ProtoUnitPhotos, ReportDetails, NamePlateDetails } from '../../types';
 import { addProtoUnit, updateProtoUnit, generate5DigitSerial, getProtoUnits } from '../../services/protoUnitStore';
+import { getMachineEndDateTime, getMachineStartDateTime } from '../../utils/dateFormatter';
 import { ALL_STATIONS, getOccupiedStations } from '../../utils/stationManager';
 import { PhotoUploadSection } from '../Common/PhotoUploadSection';
 import { compressImageFile } from '../../services/photoSettingsStore';
@@ -195,9 +196,11 @@ export const AddProtoUnitDialog: React.FC<AddProtoUnitDialogProps> = ({
         setDoneHour(String(initialUnit.doneHour ?? 0));
 
         setReportNo(initialUnit.reportDetails?.reportNo || '');
-        setSampleReceived(initialUnit.reportDetails?.sampleReceived || '');
-        setTestCommenced(initialUnit.reportDetails?.testCommenced || '');
-        setTestCompleted(initialUnit.reportDetails?.testCompleted || '');
+        const machineStart = getMachineStartDateTime(initialUnit);
+        const machineEnd = getMachineEndDateTime(initialUnit);
+        setSampleReceived(initialUnit.reportDetails?.sampleReceived || machineStart);
+        setTestCommenced(initialUnit.reportDetails?.testCommenced || machineStart);
+        setTestCompleted(initialUnit.reportDetails?.testCompleted || (machineEnd !== 'N/A' ? machineEnd : ''));
 
         setCoolingCapacity(initialUnit.namePlate?.coolingCapacity || '');
         setRatedCoolingPower(initialUnit.namePlate?.ratedCoolingPower || '');
@@ -696,6 +699,12 @@ export const AddProtoUnitDialog: React.FC<AddProtoUnitDialogProps> = ({
       }
     });
 
+    const numericDone = Number(doneHour) || 0;
+    const numericReq = Number(requiredHour) || 1045;
+    const effectiveStatus: 'live' | 'stopped' | 'finished' = (numericDone >= 1045 || (numericReq > 0 && numericDone >= numericReq && numericReq >= 1045))
+      ? 'finished'
+      : targetStatus;
+
     if (initialUnit) {
       updateProtoUnit(initialUnit.id, {
         modelName: val(modelName),
@@ -705,14 +714,15 @@ export const AddProtoUnitDialog: React.FC<AddProtoUnitDialogProps> = ({
         oduSerialNumber: val(oduSerialNumber),
         requestBy: val(requestBy),
         testPurpose: val(testPurpose),
-        requiredHour: Number(requiredHour) || 72,
-        doneHour: Number(doneHour) || 0,
+        requiredHour: numericReq,
+        doneHour: numericDone,
         reportDetails,
         namePlate,
         partsInfo,
         photos: completePhotos,
         remarks: val(remarks),
-        status: targetStatus,
+        status: effectiveStatus,
+        endDateTime: val(testCompleted),
       });
     } else {
       addProtoUnit({
@@ -723,14 +733,15 @@ export const AddProtoUnitDialog: React.FC<AddProtoUnitDialogProps> = ({
         oduSerialNumber: val(oduSerialNumber),
         requestBy: val(requestBy),
         testPurpose: val(testPurpose),
-        requiredHour: Number(requiredHour) || 72,
-        doneHour: Number(doneHour) || 0,
+        requiredHour: numericReq,
+        doneHour: numericDone,
         reportDetails,
         namePlate,
         partsInfo,
         photos: completePhotos,
         remarks: val(remarks),
-        status: targetStatus,
+        status: effectiveStatus,
+        endDateTime: val(testCompleted),
       });
     }
 
@@ -1161,12 +1172,15 @@ export const AddProtoUnitDialog: React.FC<AddProtoUnitDialogProps> = ({
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Test Completed</label>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Test Completed <span className="text-[10px] text-cyan-400 font-normal">(Auto-synced with End Date & Time)</span>
+                </label>
                 <input
-                  type="date"
+                  type="text"
+                  placeholder="YYYY-MM-DD HH:MM"
                   value={testCompleted}
                   onChange={(e) => setTestCompleted(e.target.value)}
-                  className="w-full px-3.5 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-cyan-500 transition-colors [color-scheme:dark]"
+                  className="w-full px-3.5 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs font-mono text-cyan-300 focus:outline-none focus:border-cyan-500 transition-colors [color-scheme:dark]"
                 />
               </div>
             </div>

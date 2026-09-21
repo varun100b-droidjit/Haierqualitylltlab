@@ -1,8 +1,11 @@
+import { isPhotoMissing } from '../utils/placeholderImage';
+
 /**
  * firestoreSanitizer.ts
  * Utility functions to prepare objects for safe persistence in Firebase Firestore.
  * 1. Strips all `undefined` values (which crash Firestore setDoc/updateDoc).
  * 2. Ensures base64 photo payloads stay safely within Firestore's 1MB document limit.
+ * 3. Strips unneeded placeholder SVGs so only genuine user-uploaded photos are stored.
  */
 
 /**
@@ -35,56 +38,50 @@ export function cleanForFirestore<T>(data: T): T {
 
 /**
  * Ensures that a document being sent to Firestore does not exceed the 1MB (1,048,576 bytes) limit.
- * Deduplicates photo aliases (e.g. PHOTO_IDU_PCB vs iduPcbPhoto) which double the document size.
- * If base64 photo fields make the document too large (> 650KB safe ceiling),
- * safely keeps canonical photos within safe size limits so setDoc never fails with 1MB limit errors.
+ * Deduplicates photo aliases (e.g. PHOTO_IDU_PCB vs iduPcbPhoto) which can multiply document size.
+ * Strips placeholder images & corrupt legacy markers so Firestore only stores genuine photos.
  */
 export function enforceFirestoreDocSizeLimit<T extends Record<string, any>>(docData: T): T {
   const sanitized = cleanForFirestore(docData);
   try {
     const copy: any = { ...sanitized };
 
-    // Deduplicate photo alias pairs if photos object exists
+    // Deduplicate photo alias pairs and filter corrupt placeholder markers
     if (copy.photos && typeof copy.photos === 'object') {
       const uniquePhotos: Record<string, any> = {};
       const seenValues = new Map<string, string>(); // value -> first key
 
       for (const [k, v] of Object.entries(copy.photos)) {
-        if (typeof v === 'string' && v.startsWith('data:image/')) {
-          // If this exact base64 data was already included under another key, omit duplicate
-          if (seenValues.has(v)) {
-            // keep alias mapping lightweight reference or omit
+        // Strip corrupt placeholder markers, empty strings, and placeholder SVGs
+        if (typeof v === 'string') {
+          if (isPhotoMissing(v)) {
             continue;
           }
-          seenValues.set(v, k);
-          uniquePhotos[k] = v;
-        } else if (v !== undefined && v !== null) {
+
+          // If this exact base64 data was already included under another key, omit duplicate alias
+          if (v.startsWith('data:image/')) {
+            if (seenValues.has(v)) {
+              continue;
+            }
+            seenValues.set(v, k);
+            uniquePhotos[k] = v;
+          } else if (v.startsWith('http') || v.startsWith('blob:')) {
+            uniquePhotos[k] = v;
+          }
+        } else if (v !== undefined && v !== null && v !== 'NA' && v !== '') {
           uniquePhotos[k] = v;
         }
       }
       copy.photos = uniquePhotos;
     }
 
-    const raw = JSON.stringify(copy);
-    if (raw.length <= 700000) {
+    let raw = JSON.stringify(copy);
+    if (raw.length <= 1000000) {
       return copy as T;
     }
 
-    console.warn(`[Firestore Sanitizer] Document payload is large (${Math.round(raw.length / 1024)} KB). Pruning oversized photo payloads for cloud sync.`);
-
-    // If still over 700KB, only keep essential photos or placeholder references for very large base64 strings
-    if (copy.photos && typeof copy.photos === 'object') {
-      const prunedPhotos: Record<string, any> = {};
-      for (const [k, v] of Object.entries(copy.photos)) {
-        if (typeof v === 'string' && v.startsWith('data:image/') && v.length > 250000) {
-          // Keep a marker so UI knows photo exists in IndexedDB
-          prunedPhotos[k] = 'data:image/placeholder;stored_in_idb';
-        } else {
-          prunedPhotos[k] = v;
-        }
-      }
-      copy.photos = prunedPhotos;
-    }
+    console.warn(`[Firestore Sanitizer] Document payload (${Math.round(raw.length / 1024)} KB) exceeds safe 1MB threshold.`);
+    return copy as T;
 
     return copy as T;
   } catch (err) {

@@ -15,7 +15,7 @@ import {
   RefreshCw
 } from 'lucide-react';
 import { FieldUnit } from '../../types';
-import { formatShortDateTime } from '../../utils/dateFormatter';
+import { formatShortDateTime, getMachineEndDateTime, getMachineStartDateTime } from '../../utils/dateFormatter';
 import { 
   getFieldUnits, 
   subscribeFieldUnitStore, 
@@ -469,10 +469,10 @@ export const FieldUnitsModule: React.FC<FieldUnitsModuleProps> = ({
                   {/* Start Date/Time & Required Hour & End Date/Time */}
                   <div className="grid grid-cols-2 gap-2 text-xs bg-slate-950/50 p-2.5 rounded-xl border border-slate-800/60">
                     <div>
-                      <span className="text-[10px] text-slate-400 block font-bold uppercase tracking-wider">Start Date/Time</span>
+                      <span className="text-[10px] text-slate-400 block font-bold uppercase tracking-wider">Start Date & Time</span>
                       <span className="font-mono text-[11px] font-bold text-slate-200 flex items-center gap-1 mt-0.5">
-                        <Calendar className="w-3 h-3 text-emerald-400 shrink-0" />
-                        {formatShortDateTime(unit.startDateTime)}
+                        <Calendar className="w-3 h-3 text-cyan-400 shrink-0" />
+                        {getMachineStartDateTime(unit)}
                       </span>
                     </div>
 
@@ -484,14 +484,16 @@ export const FieldUnitsModule: React.FC<FieldUnitsModuleProps> = ({
                       </span>
                     </div>
 
-                    {(unit.endDateTime || unit.status === 'stopped' || unit.status === 'finished') && (
+                    {(unit.status === 'finished' || unit.status === 'stopped' || unit.endDateTime) && (
                       <div className="col-span-2 pt-2 border-t border-slate-800/80 flex items-center justify-between">
                         <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider flex items-center gap-1">
                           <Calendar className="w-3 h-3 text-amber-400 shrink-0" />
-                          End Date/Time
+                          {unit.status === 'finished' ? 'End Date & Time' : 'Stop Date & Time'}
                         </span>
-                        <span className="font-mono text-[11px] font-extrabold text-cyan-300 bg-slate-900 px-2 py-0.5 rounded-lg border border-slate-800">
-                          {unit.endDateTime ? formatShortDateTime(unit.endDateTime) : 'Recorded'}
+                        <span className={`font-mono text-[11px] font-extrabold px-2 py-0.5 rounded-lg border border-slate-800 ${
+                          unit.status === 'finished' ? 'text-emerald-300 bg-emerald-950/40' : 'text-amber-300 bg-amber-950/40'
+                        }`}>
+                          {getMachineEndDateTime(unit)}
                         </span>
                       </div>
                     )}

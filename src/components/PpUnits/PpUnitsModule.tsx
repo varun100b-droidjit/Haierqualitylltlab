@@ -17,7 +17,7 @@ import {
   RefreshCw
 } from 'lucide-react';
 import { PpUnit } from '../../types';
-import { formatShortDateTime } from '../../utils/dateFormatter';
+import { formatShortDateTime, getMachineEndDateTime, getMachineStartDateTime } from '../../utils/dateFormatter';
 import { 
   getPpUnits, 
   subscribePpUnitStore, 
@@ -407,7 +407,7 @@ export const PpUnitsModule: React.FC<PpUnitsModuleProps> = ({
                           <span className="text-[10px] text-slate-400 block font-medium">Start Date & Time</span>
                           <span className="font-mono text-[11px] font-bold text-slate-200 flex items-center gap-1 mt-0.5">
                             <Clock className="w-3 h-3 text-cyan-400 shrink-0" />
-                            {formatShortDateTime(unit.createdAt)}
+                            {getMachineStartDateTime(unit)}
                           </span>
                         </div>
 
@@ -415,9 +415,13 @@ export const PpUnitsModule: React.FC<PpUnitsModuleProps> = ({
                           <span className="text-[10px] text-slate-400 block font-medium">
                             {unit.status === 'finished' ? 'End Date & Time' : 'Stop Date & Time'}
                           </span>
-                          <span className="font-mono text-[11px] font-bold text-emerald-300 flex items-center gap-1 mt-0.5">
-                            <Clock className="w-3 h-3 text-emerald-400 shrink-0" />
-                            {formatShortDateTime(unit.updatedAt || unit.createdAt)}
+                          <span className={`font-mono text-[11px] font-bold flex items-center gap-1 mt-0.5 ${
+                            unit.status === 'finished' ? 'text-emerald-300' : 'text-amber-300'
+                          }`}>
+                            <Clock className={`w-3 h-3 shrink-0 ${
+                              unit.status === 'finished' ? 'text-emerald-400' : 'text-amber-400'
+                            }`} />
+                            {getMachineEndDateTime(unit)}
                           </span>
                         </div>
 
@@ -435,7 +439,7 @@ export const PpUnitsModule: React.FC<PpUnitsModuleProps> = ({
                           <span className="text-[10px] text-slate-400 block font-medium">Start Date & Time</span>
                           <span className="font-mono text-[11px] font-bold text-slate-200 flex items-center gap-1 mt-0.5">
                             <Clock className="w-3 h-3 text-cyan-400 shrink-0" />
-                            {formatShortDateTime(unit.createdAt)}
+                            {getMachineStartDateTime(unit)}
                           </span>
                         </div>
 

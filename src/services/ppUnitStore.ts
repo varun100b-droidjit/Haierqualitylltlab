@@ -1,5 +1,6 @@
 import { PpUnit } from '../types';
 import { addLabNotification } from './unitStore';
+import { formatShortDateTime, getMachineEndDateTime, getMachineStartDateTime } from '../utils/dateFormatter';
 import { 
   syncPpUnitToSupabase, 
   deletePpUnitFromSupabase, 
@@ -11,7 +12,8 @@ import { db, collection, doc, setDoc, deleteDoc, getDocs, onSnapshot } from './f
 import { requireOnlineForSave } from './networkManager';
 import { buildNormalizedPhotos } from '../utils/photoManager';
 import { cleanForFirestore, enforceFirestoreDocSizeLimit } from './firestoreSanitizer';
-import { safeLocalStorageSet, idbSaveAll, idbGetAll } from '../lib/indexedDbStorage';
+import { safeLocalStorageSet, idbSaveAll, idbGetAll, restorePhotosFromIdb } from '../lib/indexedDbStorage';
+import { isPhotoMissing } from '../utils/placeholderImage';
 
 const STORAGE_KEY_PP_UNITS = 'llt_pp_units_v1';
 const DELETED_PP_UNITS_KEY = 'llt_deleted_pp_units_v1';
@@ -54,6 +56,18 @@ const INITIAL_PP_UNITS: PpUnit[] = [];
 let ppUnitsCache: PpUnit[] = loadLocalPpUnits();
 const listeners: Set<() => void> = new Set();
 
+// Asynchronously hydrate full fidelity photos from IndexedDB on startup
+if (typeof window !== 'undefined') {
+  idbGetAll<PpUnit>('pp_units').then(idbUnits => {
+    if (idbUnits && idbUnits.length > 0) {
+      ppUnitsCache = restorePhotosFromIdb(ppUnitsCache, idbUnits);
+      notifyListeners();
+    }
+  }).catch(err => {
+    console.warn('[PpStore] IDB hydration note:', err);
+  });
+}
+
 // Local Inter-Tab Broadcast Channel
 const localPpBus = typeof window !== 'undefined' && 'BroadcastChannel' in window 
   ? new BroadcastChannel('llt_pp_bus') 
@@ -61,7 +75,14 @@ const localPpBus = typeof window !== 'undefined' && 'BroadcastChannel' in window
 
 if (localPpBus) {
   localPpBus.onmessage = () => {
-    ppUnitsCache = loadLocalPpUnits();
+    const loaded = loadLocalPpUnits();
+    ppUnitsCache = restorePhotosFromIdb(loaded, ppUnitsCache);
+    idbGetAll<PpUnit>('pp_units').then(idbUnits => {
+      if (idbUnits && idbUnits.length > 0) {
+        ppUnitsCache = restorePhotosFromIdb(ppUnitsCache, idbUnits);
+        notifyListeners();
+      }
+    }).catch(() => {});
     notifyListeners();
   };
 }
@@ -70,7 +91,14 @@ if (localPpBus) {
 if (typeof window !== 'undefined') {
   window.addEventListener('storage', (e) => {
     if (e.key === STORAGE_KEY_PP_UNITS) {
-      ppUnitsCache = loadLocalPpUnits();
+      const loaded = loadLocalPpUnits();
+      ppUnitsCache = restorePhotosFromIdb(loaded, ppUnitsCache);
+      idbGetAll<PpUnit>('pp_units').then(idbUnits => {
+        if (idbUnits && idbUnits.length > 0) {
+          ppUnitsCache = restorePhotosFromIdb(ppUnitsCache, idbUnits);
+          notifyListeners();
+        }
+      }).catch(() => {});
       notifyListeners();
     }
   });
@@ -176,6 +204,19 @@ function mergeWithLocalCache(remoteUnits: PpUnit[]): PpUnit[] {
   // 1. All valid remote units from Firestore / cloud
   remoteUnits.forEach(rem => {
     if (!rem || !rem.id || deleted.has(rem.id)) return;
+    const local = ppUnitsCache.find(l => l.id === rem.id);
+    // If local has valid photos and remote has missing/empty photos, preserve local photos
+    if (local && local.photos && typeof local.photos === 'object') {
+      const mergedPhotos: Record<string, string> = { ...(rem.photos || {}) };
+      Object.entries(local.photos).forEach(([k, v]) => {
+        if (typeof v === 'string' && !isPhotoMissing(v)) {
+          if (isPhotoMissing(mergedPhotos[k])) {
+            mergedPhotos[k] = v;
+          }
+        }
+      });
+      rem.photos = mergedPhotos;
+    }
     map.set(rem.id, rem);
   });
 
@@ -318,8 +359,10 @@ export function subscribePpUnitStore(callback: () => void) {
 function saveLocalPpUnits(data: PpUnit[]) {
   const clean = (data || []).filter(u => u && !u.id.startsWith('pp-idu-') && !u.id.startsWith('pp-odu-'));
   ppUnitsCache = clean;
-  safeLocalStorageSet(STORAGE_KEY_PP_UNITS, clean);
+  // Always persist full data with all photos to IndexedDB
   idbSaveAll('pp_units', clean);
+  // Persist clean copy to localStorage
+  safeLocalStorageSet(STORAGE_KEY_PP_UNITS, clean);
   if (localPpBus) {
     try { localPpBus.postMessage({ timestamp: Date.now() }); } catch {}
   }
@@ -333,7 +376,43 @@ function loadLocalPpUnits(): PpUnit[] {
     if (raw !== null) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
-        return parsed.filter((u: any) => u && !u.id.startsWith('pp-idu-') && !u.id.startsWith('pp-odu-'));
+        const filtered = parsed.filter((u: any) => u && !u.id.startsWith('pp-idu-') && !u.id.startsWith('pp-odu-'));
+        return filtered.map((u: any) => {
+          if (!u || typeof u !== 'object') return u;
+
+          // Clean legacy placeholder markers from photos object
+          let photos = u.photos;
+          if (u.photos && typeof u.photos === 'object') {
+            const cleanPhotos: Record<string, string> = {};
+            Object.entries(u.photos).forEach(([k, v]) => {
+              if (typeof v === 'string' && !v.includes('stored_in_idb') && (v.startsWith('data:') || v.startsWith('http') || v.startsWith('blob:') || v.length > 80)) {
+                cleanPhotos[k] = v;
+              }
+            });
+            photos = cleanPhotos;
+          }
+
+          // Test Completed gets data strictly from Machine End Date & Time when completed/stopped
+          const isDoneOrStopped = u.status === 'finished' || u.status === 'stopped' || (Number(u.doneHour) >= 1045);
+          const machineEnd = getMachineEndDateTime(u);
+          const machineStart = getMachineStartDateTime(u);
+          const existingReport = u.reportDetails || {};
+
+          const resolvedTestCompleted = isDoneOrStopped && machineEnd && machineEnd !== 'N/A' && machineEnd !== 'In Progress'
+            ? machineEnd
+            : (existingReport.testCompleted || 'In Progress');
+
+          return {
+            ...u,
+            photos,
+            endDateTime: isDoneOrStopped ? (u.endDateTime || machineEnd) : u.endDateTime,
+            reportDetails: {
+              ...existingReport,
+              testCommenced: existingReport.testCommenced || machineStart,
+              testCompleted: resolvedTestCompleted,
+            }
+          };
+        });
       }
     }
     return [];
@@ -455,10 +534,23 @@ export function togglePpUnitStatus(id: string, newStatus: 'live' | 'finished' | 
   let targetUnit: PpUnit | null = null;
   const updated = ppUnitsCache.map(u => {
     if (u.id === id) {
+      const isFinOrStopped = newStatus === 'finished' || newStatus === 'stopped';
+      const resolvedEnd = isFinOrStopped ? formattedDate : u.endDateTime;
+      const currentReport = u.reportDetails || {};
+
       targetUnit = {
         ...u,
         status: newStatus,
         updatedAt: formattedDate,
+        ...(isFinOrStopped ? {
+          endDateTime: resolvedEnd,
+          completedAt: newStatus === 'finished' ? formattedDate : (u as any).completedAt,
+          reportDetails: {
+            ...currentReport,
+            testCommenced: currentReport.testCommenced || getMachineStartDateTime(u),
+            testCompleted: formattedDate,
+          }
+        } : {})
       };
       return targetUnit;
     }
@@ -482,11 +574,24 @@ export function updatePpUnitStatus(id: string, status: 'live' | 'finished' | 'st
   let targetUnit: PpUnit | null = null;
   const updated = ppUnitsCache.map(u => {
     if (u.id === id) {
+      const isFinOrStopped = status === 'finished' || status === 'stopped';
+      const resolvedEnd = isFinOrStopped ? formattedDate : u.endDateTime;
+      const currentReport = u.reportDetails || {};
+
       targetUnit = {
         ...u,
         status,
         ...(typeof finalDoneHours === 'number' ? { doneHour: finalDoneHours } : {}),
         updatedAt: formattedDate,
+        ...(isFinOrStopped ? {
+          endDateTime: resolvedEnd,
+          completedAt: status === 'finished' ? formattedDate : (u as any).completedAt,
+          reportDetails: {
+            ...currentReport,
+            testCommenced: currentReport.testCommenced || getMachineStartDateTime(u),
+            testCompleted: formattedDate,
+          }
+        } : {})
       };
       return targetUnit;
     }

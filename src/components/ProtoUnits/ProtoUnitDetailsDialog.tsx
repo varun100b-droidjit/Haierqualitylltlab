@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { 
   X, 
   Cpu, 
@@ -8,7 +9,6 @@ import {
   FileText, 
   Settings, 
   ImageIcon, 
-  CheckCircle2, 
   Calendar, 
   Eye, 
   ArrowRightLeft,
@@ -17,18 +17,29 @@ import {
   Download
 } from 'lucide-react';
 import { ProtoUnit } from '../../types';
-import { formatShortDateTime } from '../../utils/dateFormatter';
-import { updateProtoUnitStatus, addProtoUnitObservation, deleteProtoUnitObservation } from '../../services/protoUnitStore';
+import { 
+  formatShortDateTime, 
+  getMachineEndDateTime, 
+  getMachineStartDateTime, 
+  getTestCompletedDate, 
+  getTestCommencedDate 
+} from '../../utils/dateFormatter';
+import { 
+  updateProtoUnitStatus, 
+  addProtoUnitObservation, 
+  deleteProtoUnitObservation,
+  transferProtoUnitToLive
+} from '../../services/protoUnitStore';
 import { exportUnitToPDF } from '../../utils/pdfExport';
 import { useIsShiftActiveNow } from '../../services/shiftStore';
-import { PICTURE_NOT_AVAILABLE_IMAGE, isPhotoMissing } from '../../utils/placeholderImage';
-
+import { PICTURE_NOT_AVAILABLE_SVG, isPhotoMissing } from '../../utils/placeholderImage';
+import { PHOTO_FIELD_DEFINITIONS, getPhotoUrlForContentControl } from '../../utils/photoManager';
 
 interface ProtoUnitDetailsDialogProps {
   unit: ProtoUnit | null;
   isOpen: boolean;
   onClose: () => void;
-  onStatusChanged?: () => void;
+  onStatusChanged?: (newStatus?: 'live' | 'finished' | 'stopped') => void;
 }
 
 export const ProtoUnitDetailsDialog: React.FC<ProtoUnitDetailsDialogProps> = ({
@@ -40,12 +51,16 @@ export const ProtoUnitDetailsDialog: React.FC<ProtoUnitDetailsDialogProps> = ({
   const [selectedPhoto, setSelectedPhoto] = useState<{ url: string; label: string } | null>(null);
   const [currentUnit, setCurrentUnit] = useState<ProtoUnit | null>(unit);
   const [observationInput, setObservationInput] = useState('');
+  const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
+  const [transferHours, setTransferHours] = useState<string>('0');
 
   const isShiftActive = useIsShiftActiveNow();
 
   useEffect(() => {
     setCurrentUnit(unit);
     setObservationInput('');
+    setIsTransferModalOpen(false);
+    setTransferHours('0');
   }, [unit]);
 
   if (!isOpen || !currentUnit) return null;
@@ -53,8 +68,20 @@ export const ProtoUnitDetailsDialog: React.FC<ProtoUnitDetailsDialogProps> = ({
   const handleToggleStatus = () => {
     const nextStatus = currentUnit.status === 'live' ? 'finished' : 'live';
     updateProtoUnitStatus(currentUnit.id, nextStatus);
-    if (onStatusChanged) onStatusChanged();
+    if (onStatusChanged) onStatusChanged(nextStatus);
     onClose();
+  };
+
+  const handleConfirmTransferToLive = () => {
+    if (!currentUnit) return;
+    const initialHours = Math.max(0, Math.min(1044, Number(transferHours) || 0));
+    const transferred = transferProtoUnitToLive(currentUnit.id, initialHours);
+    if (transferred) {
+      setCurrentUnit(transferred);
+      if (onStatusChanged) onStatusChanged('live');
+      setIsTransferModalOpen(false);
+      onClose();
+    }
   };
 
   const handleAddObservation = () => {
@@ -76,29 +103,22 @@ export const ProtoUnitDetailsDialog: React.FC<ProtoUnitDetailsDialogProps> = ({
     }
   };
 
-  const photoDefinitions = [
-    { label: 'Indoor Unit', url: currentUnit.photos?.PHOTO_Indoor_Unit || currentUnit.photos?.indoorUnitPhoto },
-    { label: '1. Product Packing', url: currentUnit.photos?.PHOTO_Product_Packing || currentUnit.photos?.productPhoto },
-    { label: '2. Packing Box', url: currentUnit.photos?.PHOTO_Packing_Box || currentUnit.photos?.packingBoxPhoto },
-    { label: '3. IDU Motor', url: currentUnit.photos?.PHOTO_IDU_Motor || currentUnit.photos?.iduMotorPhoto },
-    { label: '4. IDU PCB', url: currentUnit.photos?.PHOTO_IDU_PCB || currentUnit.photos?.iduPcbPhoto },
-    { label: '5. IDU Product Name Plate', url: currentUnit.photos?.PHOTO_IDU_Product_Name_Plate || currentUnit.photos?.PHOTO_IDU_Name_Plate || currentUnit.photos?.iduNameplatePhoto },
-    { label: '6. Remote', url: currentUnit.photos?.PHOTO_Remote || currentUnit.photos?.remotePhoto || currentUnit.photos?.stickerPhoto },
-    { label: '7. ODU Name Plate', url: currentUnit.photos?.PHOTO_ODU_Name_Plate || currentUnit.photos?.oduNameplatePhoto },
-    { label: '8. ODU Motor', url: currentUnit.photos?.PHOTO_ODU_Motor || currentUnit.photos?.oduMotorPhoto },
-    { label: '9. ODU PCB', url: currentUnit.photos?.PHOTO_ODU_PCB || currentUnit.photos?.oduPcbPhoto },
-    { label: '10. Electronic Expansion Valve', url: currentUnit.photos?.PHOTO_Electronic_Expansion_Valve || currentUnit.photos?.PHOTO_EEV || currentUnit.photos?.oduEevPhoto || currentUnit.photos?.eevPhoto },
-    { label: '11. ODU Compressor', url: currentUnit.photos?.PHOTO_ODU_Compressor || currentUnit.photos?.PHOTO_Compressor || currentUnit.photos?.oduCompressorPhoto || currentUnit.photos?.compressorPhoto },
-  ];
-
-  const photoList: { label: string; url: string; isPlaceholder: boolean }[] = photoDefinitions.map(p => {
-    const isMissing = isPhotoMissing(p.url);
+  // Standardized 12-slot photo mapping with real data and fallback support
+  const photoDefinitions = PHOTO_FIELD_DEFINITIONS.map(def => {
+    const rawUrl = getPhotoUrlForContentControl(currentUnit.photos, def.photoKey);
+    const isMissing = isPhotoMissing(rawUrl);
     return {
-      label: p.label,
-      url: isMissing ? PICTURE_NOT_AVAILABLE_IMAGE : p.url!.trim(),
+      def,
+      label: def.label,
+      key: def.photoKey,
+      legacyKey: def.id,
+      url: isMissing ? PICTURE_NOT_AVAILABLE_SVG : rawUrl!.trim(),
       isPlaceholder: isMissing
     };
   });
+
+  const photoList = photoDefinitions;
+  const uploadedCount = photoList.filter(p => !p.isPlaceholder).length;
 
   const observationsList = currentUnit.observations || [];
 
@@ -130,8 +150,14 @@ export const ProtoUnitDetailsDialog: React.FC<ProtoUnitDetailsDialogProps> = ({
                   {unit.status === 'live' ? '🟢 LIVE' : unit.status === 'stopped' ? '⏸️ STOPPED' : '✅ PASSED'}
                 </span>
               </div>
-              <p className="text-xs text-slate-400">
-                Created on: <span className="text-slate-200 font-mono">{formatShortDateTime(unit.createdAt)}</span>
+              <p className="text-xs text-slate-400 flex flex-wrap items-center gap-2 mt-1">
+                <span>Start: <span className="text-slate-200 font-mono font-medium">{getMachineStartDateTime(unit)}</span></span>
+                {(unit.status === 'finished' || unit.status === 'stopped' || unit.endDateTime) && (
+                  <>
+                    <span className="text-slate-600">•</span>
+                    <span>{unit.status === 'finished' ? 'End Date & Time:' : 'Stop Date & Time:'} <span className="text-emerald-300 font-mono font-bold">{getMachineEndDateTime(unit)}</span></span>
+                  </>
+                )}
               </p>
             </div>
           </div>
@@ -196,15 +222,17 @@ export const ProtoUnitDetailsDialog: React.FC<ProtoUnitDetailsDialogProps> = ({
                 </div>
                 <div>
                   <span className="text-slate-400 block text-[10px]">Sample Received</span>
-                  <span className="text-white font-medium">{unit.reportDetails.sampleReceived || 'N/A'}</span>
+                  <span className="text-white font-medium">{unit.reportDetails.sampleReceived || unit.reportDetails.testCommenced || unit.createdAt?.slice(0, 10) || 'N/A'}</span>
                 </div>
                 <div>
                   <span className="text-slate-400 block text-[10px]">Test Commenced</span>
-                  <span className="text-white font-medium">{unit.reportDetails.testCommenced || 'N/A'}</span>
+                  <span className="text-cyan-300 font-medium font-mono">{getTestCommencedDate(unit)}</span>
                 </div>
                 <div>
                   <span className="text-slate-400 block text-[10px]">Test Completed</span>
-                  <span className="text-white font-medium">{unit.reportDetails.testCompleted || 'N/A'}</span>
+                  <span className={`font-mono font-medium ${unit.status === 'finished' ? 'text-emerald-300 font-bold' : unit.status === 'stopped' ? 'text-amber-300 font-bold' : 'text-slate-300'}`}>
+                    {getTestCompletedDate(unit)}
+                  </span>
                 </div>
               </div>
             </div>
@@ -366,48 +394,79 @@ export const ProtoUnitDetailsDialog: React.FC<ProtoUnitDetailsDialogProps> = ({
             </div>
           </div>
 
-          {/* Parts Pictures */}
+          {/* Notification Toast for Photo Actions */}
+          {photoToast && (
+            <div className="bg-emerald-950/80 border border-emerald-700/80 px-4 py-2.5 rounded-xl flex items-center gap-2 text-xs text-emerald-200 animate-in fade-in duration-200">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span className="font-medium">{photoToast}</span>
+            </div>
+          )}
+
+          {/* Unit Photos Gallery with Instant Upload/Replace */}
           <div className="bg-slate-950/60 p-4 rounded-xl border border-slate-800 space-y-3">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2.5">
               <div className="flex items-center gap-2">
                 <ImageIcon className="w-4 h-4 text-purple-400" />
                 <h4 className="text-xs font-bold text-purple-300 uppercase tracking-wider">Unit Photos Gallery (Fixed 6 cm × 4 cm Centered View)</h4>
               </div>
-              <span className="text-[10px] font-mono text-slate-400 bg-slate-900 border border-slate-800 px-2 py-0.5 rounded">6cm × 4cm</span>
+              
+              <div className="flex items-center gap-2">
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
+                  uploadedCount === 0 
+                    ? 'bg-amber-950/70 border-amber-800/70 text-amber-300'
+                    : 'bg-emerald-950/70 border-emerald-800/70 text-emerald-300'
+                }`}>
+                  {uploadedCount} / 12 Uploaded
+                </span>
+              </div>
             </div>
-            {photoList.length > 0 ? (
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                {photoList.map((p, idx) => (
-                  <div key={idx} className="bg-slate-900 border border-slate-800 rounded-xl p-3 flex flex-col items-center gap-2">
-                    <div className="flex items-center justify-between w-full gap-1">
-                      <span className="text-[10px] text-slate-300 font-bold uppercase truncate">{p.label}</span>
-                      {p.isPlaceholder ? (
-                        <span className="text-[9px] font-mono text-amber-400 bg-amber-950/60 border border-amber-800/60 px-1.5 py-0.5 rounded shrink-0">
-                          Auto
-                        </span>
-                      ) : (
-                        <span className="text-[9px] font-mono text-emerald-400 bg-emerald-950/60 border border-emerald-800/60 px-1.5 py-0.5 rounded shrink-0">
-                          ✓
-                        </span>
-                      )}
-                    </div>
-                    <div 
-                      onClick={() => setSelectedPhoto({ url: p.url, label: p.label })}
-                      className={`w-[150px] h-[100px] rounded border flex items-center justify-center overflow-hidden cursor-pointer relative group ${
-                        p.isPlaceholder ? 'bg-white border-slate-700' : 'bg-slate-950 border-slate-800'
-                      }`}
-                    >
-                      <img src={p.url} alt={p.label} className="w-full h-full object-contain p-1" />
-                      <div className="absolute inset-0 bg-slate-950/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                        <Eye className="w-5 h-5 text-cyan-400" />
-                      </div>
+
+            {/* 12-Slot Standard Inspection Photos Grid */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+              {photoList.map((p, idx) => (
+                <div 
+                  key={idx} 
+                  onClick={() => setSelectedPhoto({ url: p.url, label: p.label })}
+                  className="bg-slate-900/90 border border-slate-800 hover:border-slate-700 rounded-xl p-2.5 flex flex-col items-center justify-between gap-2 transition-colors cursor-pointer group"
+                >
+                  <div className="flex items-center justify-between w-full gap-1 min-w-0">
+                    <span className="text-[11px] text-slate-200 font-semibold truncate flex-1" title={p.label}>
+                      {p.label}
+                    </span>
+                    {p.isPlaceholder ? (
+                      <span className="text-[9px] font-medium text-amber-300 bg-amber-950/70 border border-amber-800/70 px-1.5 py-0.5 rounded shrink-0">
+                        No Photo
+                      </span>
+                    ) : (
+                      <span className="text-[9px] font-medium text-emerald-300 bg-emerald-950/70 border border-emerald-800/70 px-1.5 py-0.5 rounded shrink-0">
+                        ✓ Uploaded
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Thumbnail Container: fixed 4:3 ratio matching standard 6cm × 4cm */}
+                  <div className={`w-full aspect-[4/3] rounded-lg border flex items-center justify-center overflow-hidden relative shadow-inner ${
+                    p.isPlaceholder ? 'bg-white border-slate-300' : 'bg-slate-950 border-slate-800'
+                  }`}>
+                    <img 
+                      src={p.url} 
+                      alt={p.label} 
+                      className="w-full h-full object-contain p-1 select-none" 
+                      loading="lazy"
+                      onError={(e) => {
+                        const img = e.currentTarget as HTMLImageElement;
+                        if (!img.src.startsWith('data:image/svg+xml')) {
+                          img.src = PICTURE_NOT_AVAILABLE_SVG;
+                        }
+                      }}
+                    />
+                    <div className="absolute inset-0 bg-slate-950/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                      <Eye className="w-5 h-5 text-cyan-400 drop-shadow" />
                     </div>
                   </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-xs text-slate-500 italic">No component photos uploaded for this record.</p>
-            )}
+                </div>
+              ))}
+            </div>
           </div>
 
           {/* Remarks */}
@@ -491,53 +550,70 @@ export const ProtoUnitDetailsDialog: React.FC<ProtoUnitDetailsDialogProps> = ({
 
         </div>
 
-        {/* Footer Actions with strictly 2 buttons: Save PDF and Close */}
-        <div className="flex items-center justify-between px-6 py-4 bg-slate-950/80 border-t border-slate-800 gap-3">
-          <button
-            onClick={() => {
-              let targetUnit = currentUnit;
-              if (observationInput.trim()) {
-                const updated = addProtoUnitObservation(currentUnit.id, observationInput.trim());
-                if (updated) {
-                  targetUnit = updated;
-                  setCurrentUnit(updated);
-                  setObservationInput('');
+        {/* Footer Actions: Generate Report, Transfer to Live (if finished), and Close */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between px-4 sm:px-6 py-3.5 sm:py-4 bg-slate-950/90 border-t border-slate-800 gap-3">
+          <div className="flex items-center gap-2.5 flex-1 flex-wrap sm:flex-nowrap">
+            <button
+              onClick={() => {
+                let targetUnit = currentUnit;
+                if (observationInput.trim()) {
+                  const updated = addProtoUnitObservation(currentUnit.id, observationInput.trim());
+                  if (updated) {
+                    targetUnit = updated;
+                    setCurrentUnit(updated);
+                    setObservationInput('');
+                  }
                 }
-              }
-              exportUnitToPDF({
-                title: 'Proto Unit Inspection Report',
-                unitType: 'Proto Testing Unit',
-                modelName: targetUnit.modelName,
-                serialNumber: `IDU: ${targetUnit.iduSerialNumber} | ODU: ${targetUnit.oduSerialNumber}`,
-                status: targetUnit.status === 'live' ? 'LIVE TESTING' : targetUnit.status === 'stopped' ? 'STOPPED' : 'PASSED',
-                details: [
-                  { label: 'Testing Station', value: targetUnit.station || 'Station 01' },
-                  { label: 'Requested By', value: targetUnit.requestBy },
-                  { label: 'Required Duration', value: `${targetUnit.requiredHour} Hours` },
-                  { label: 'Created At', value: targetUnit.createdAt }
-                ],
-                purpose: targetUnit.testPurpose,
-                remarks: targetUnit.remarks || 'No remarks provided.',
-                extraInfo: [
-                  { label: 'IDU PCB Supplier / Code', value: `${targetUnit.partsInfo?.iduPcbSupplier || 'N/A'} (${targetUnit.partsInfo?.iduPcbPartCode || 'N/A'})` },
-                  { label: 'IDU Motor Supplier / Code', value: `${targetUnit.partsInfo?.iduMotorSupplier || 'N/A'} (${targetUnit.partsInfo?.iduMotorPartCode || 'N/A'})` },
-                  { label: 'ODU PCB Supplier / Code', value: `${targetUnit.partsInfo?.oduPcbSupplier || 'N/A'} (${targetUnit.partsInfo?.oduPcbPartCode || 'N/A'})` },
-                  { label: 'ODU Compressor Supplier / Code', value: `${targetUnit.partsInfo?.oduCompressorSupplier || 'N/A'} (${targetUnit.partsInfo?.oduCompressorPartCode || 'N/A'})` },
-                  { label: 'ODU Motor Supplier / Code', value: `${targetUnit.partsInfo?.oduMotorSupplier || 'N/A'} (${targetUnit.partsInfo?.oduMotorPartCode || 'N/A'})` },
-                  { label: 'ODU EEV Supplier / Code', value: `${targetUnit.partsInfo?.oduEevSupplier || 'N/A'} (${targetUnit.partsInfo?.oduEevPartCode || 'N/A'})` }
-                ],
-                observations: targetUnit.observations || []
-              });
-            }}
-            className="px-5 py-2.5 rounded-xl text-xs font-extrabold text-slate-950 bg-gradient-to-r from-cyan-400 to-emerald-400 hover:from-cyan-300 hover:to-emerald-300 shadow-md transition-all flex items-center gap-2 cursor-pointer active:scale-95"
-          >
-            <FileText className="w-4 h-4 stroke-[2.5]" />
-            <span>{currentUnit.status === 'finished' ? 'Generate Report' : 'Save PDF'}</span>
-          </button>
+                exportUnitToPDF({
+                  title: 'Proto Unit Inspection Report',
+                  unitType: 'Proto Testing Unit',
+                  modelName: targetUnit.modelName,
+                  serialNumber: `IDU: ${targetUnit.iduSerialNumber} | ODU: ${targetUnit.oduSerialNumber}`,
+                  status: targetUnit.status === 'live' ? 'LIVE TESTING' : targetUnit.status === 'stopped' ? 'STOPPED' : 'PASSED',
+                  details: [
+                    { label: 'Testing Station', value: targetUnit.station || 'Station 01' },
+                    { label: 'Requested By', value: targetUnit.requestBy },
+                    { label: 'Required Duration', value: `${targetUnit.requiredHour} Hours` },
+                    { label: 'Test Commenced', value: getTestCommencedDate(targetUnit) },
+                    { label: 'Test Completed', value: getTestCompletedDate(targetUnit) }
+                  ],
+                  purpose: targetUnit.testPurpose,
+                  remarks: targetUnit.remarks || 'No remarks provided.',
+                  extraInfo: [
+                    { label: 'IDU PCB Supplier / Code', value: `${targetUnit.partsInfo?.iduPcbSupplier || 'N/A'} (${targetUnit.partsInfo?.iduPcbPartCode || 'N/A'})` },
+                    { label: 'IDU Motor Supplier / Code', value: `${targetUnit.partsInfo?.iduMotorSupplier || 'N/A'} (${targetUnit.partsInfo?.iduMotorPartCode || 'N/A'})` },
+                    { label: 'ODU PCB Supplier / Code', value: `${targetUnit.partsInfo?.oduPcbSupplier || 'N/A'} (${targetUnit.partsInfo?.oduPcbPartCode || 'N/A'})` },
+                    { label: 'ODU Compressor Supplier / Code', value: `${targetUnit.partsInfo?.oduCompressorSupplier || 'N/A'} (${targetUnit.partsInfo?.oduCompressorPartCode || 'N/A'})` },
+                    { label: 'ODU Motor Supplier / Code', value: `${targetUnit.partsInfo?.oduMotorSupplier || 'N/A'} (${targetUnit.partsInfo?.oduMotorPartCode || 'N/A'})` },
+                    { label: 'ODU EEV Supplier / Code', value: `${targetUnit.partsInfo?.oduEevSupplier || 'N/A'} (${targetUnit.partsInfo?.oduEevPartCode || 'N/A'})` }
+                  ],
+                  observations: targetUnit.observations || []
+                });
+              }}
+              className="flex-1 sm:flex-initial px-4 py-2.5 rounded-xl text-xs font-extrabold text-slate-950 bg-gradient-to-r from-cyan-400 to-emerald-400 hover:from-cyan-300 hover:to-emerald-300 shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95"
+            >
+              <FileText className="w-4 h-4 stroke-[2.5]" />
+              <span>{currentUnit.status === 'finished' ? 'Generate Report' : 'Save PDF'}</span>
+            </button>
+
+            {/* Transfer to Live Symbol Button for Finished Units */}
+            {currentUnit.status === 'finished' && (
+              <button
+                type="button"
+                id="btn-transfer-proto-live"
+                onClick={() => setIsTransferModalOpen(true)}
+                className="flex-1 sm:flex-initial px-3.5 py-2.5 rounded-xl text-xs font-black text-amber-200 bg-amber-950/90 hover:bg-amber-900 border-2 border-amber-500/80 shadow-md hover:shadow-amber-950/70 transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95 group"
+                title="Machine ko wapas Live Testing me Transfer karein"
+              >
+                <ArrowRightLeft className="w-4 h-4 text-amber-400 group-hover:rotate-180 transition-transform duration-300 stroke-[2.5]" />
+                <span>Transfer to Live</span>
+              </button>
+            )}
+          </div>
 
           <button
             onClick={onClose}
-            className="px-5 py-2.5 rounded-xl text-xs font-bold text-slate-300 bg-slate-800 hover:bg-slate-700 border border-slate-700 transition-colors cursor-pointer"
+            className="w-full sm:w-auto px-5 py-2.5 rounded-xl text-xs font-bold text-slate-300 bg-slate-800 hover:bg-slate-700 border border-slate-700 transition-colors cursor-pointer text-center"
           >
             Close
           </button>
@@ -545,24 +621,121 @@ export const ProtoUnitDetailsDialog: React.FC<ProtoUnitDetailsDialogProps> = ({
 
       </div>
 
-      {/* Image viewer modal */}
-      {selectedPhoto && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md">
-          <div className="relative max-w-3xl w-full bg-slate-900 border border-slate-800 rounded-2xl p-4 overflow-hidden">
-            <div className="flex items-center justify-between mb-3 pb-2 border-b border-slate-800">
-              <h4 className="text-sm font-bold text-white">{selectedPhoto.label}</h4>
+      {/* Transfer to Live Confirmation Modal */}
+      {isTransferModalOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="w-full max-w-md bg-slate-900 border-2 border-amber-500/80 rounded-3xl p-6 sm:p-7 shadow-2xl shadow-amber-950/80 relative text-white space-y-5 animate-in zoom-in-95 duration-150">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="p-3 rounded-2xl bg-amber-500/20 text-amber-400 border border-amber-500/40">
+                  <ArrowRightLeft className="w-6 h-6 stroke-[2.5]" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-white">Transfer to Live Testing</h3>
+                  <p className="text-xs text-amber-200/80 mt-0.5">
+                    Machine ko wapas Live section me bhej rahe hain
+                  </p>
+                </div>
+              </div>
               <button
-                onClick={() => setSelectedPhoto(null)}
-                className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg"
+                onClick={() => setIsTransferModalOpen(false)}
+                className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <div className="max-h-[70vh] overflow-auto flex items-center justify-center rounded-xl bg-slate-950 p-2">
-              <img src={selectedPhoto.url} alt={selectedPhoto.label} className="max-h-[65vh] object-contain rounded-lg" />
+
+            <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-2.5 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">Model Name:</span>
+                <span className="font-bold text-white">{currentUnit.modelName}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">Station:</span>
+                <span className="font-mono text-cyan-300 font-bold">{currentUnit.station || 'Station 01'}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">Previous Completed Hours:</span>
+                <span className="font-mono font-bold text-emerald-400">{currentUnit.doneHour ?? 1045} hrs</span>
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="block text-xs font-bold text-slate-300">
+                Live Testing Start Hours (Done Hours)
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min="0"
+                  max="1044"
+                  value={transferHours}
+                  onChange={(e) => setTransferHours(e.target.value)}
+                  className="flex-1 bg-slate-950 border border-slate-700 focus:border-amber-500 rounded-xl px-3.5 py-2.5 text-sm font-mono text-white focus:outline-none"
+                  placeholder="0"
+                />
+                <span className="text-xs font-bold text-slate-400">hrs</span>
+              </div>
+              <p className="text-[11px] text-slate-400">
+                * Default <strong>0 hrs</strong> se shuru hoga taaki Machine nayi live testing 1045 hours tak run ho sake.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setIsTransferModalOpen(false)}
+                className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-300 bg-slate-800 hover:bg-slate-700 border border-slate-700 transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmTransferToLive}
+                className="px-5 py-2.5 rounded-xl text-xs font-black text-slate-950 bg-gradient-to-r from-amber-400 to-orange-400 hover:from-amber-300 hover:to-orange-300 shadow-lg shadow-amber-950/60 flex items-center gap-2 transition-all active:scale-95 cursor-pointer"
+              >
+                <ArrowRightLeft className="w-4 h-4 stroke-[2.5]" />
+                <span>Confirm Transfer to Live</span>
+              </button>
             </div>
           </div>
         </div>
+      )}
+
+      {/* Image viewer modal rendered directly into document.body */}
+      {selectedPhoto && typeof document !== 'undefined' && createPortal(
+        <div 
+          className="fixed inset-0 z-[9999] flex items-center justify-center p-4 sm:p-6 bg-slate-950/90 backdrop-blur-md"
+          onClick={() => setSelectedPhoto(null)}
+        >
+          <div 
+            className="relative max-w-4xl w-full bg-slate-900 border border-slate-700 rounded-2xl p-4 overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-150"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-3 pb-2.5 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <ImageIcon className="w-4 h-4 text-cyan-400" />
+                <h4 className="text-sm font-bold text-white">{selectedPhoto.label}</h4>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedPhoto(null)}
+                className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                title="Close Viewer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="max-h-[75vh] overflow-auto flex items-center justify-center rounded-xl bg-slate-950 p-2 sm:p-4 border border-slate-800/80">
+              <img 
+                src={selectedPhoto.url} 
+                alt={selectedPhoto.label} 
+                className="max-h-[70vh] max-w-full object-contain rounded-lg shadow-lg" 
+              />
+            </div>
+          </div>
+        </div>,
+        document.body
       )}
     </div>
   );

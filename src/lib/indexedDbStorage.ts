@@ -1,3 +1,5 @@
+import { isPhotoMissing } from '../utils/placeholderImage';
+
 /**
  * IndexedDB Storage Helper for High-Capacity Client-Side Storage
  * Handles large items like high-resolution base64 images and reports without 5MB localStorage quota limitations.
@@ -41,14 +43,28 @@ export function getIndexedDb(): Promise<IDBDatabase> {
   return dbPromise;
 }
 
-export async function idbSaveAll<T extends { id: string }>(storeName: string, items: T[]): Promise<void> {
+export async function idbSaveAll<T extends { id: string; photos?: any }>(storeName: string, items: T[]): Promise<void> {
   try {
     const db = await getIndexedDb();
+    
+    // Non-destructively preserve high-res photos already present in IDB
+    let finalItems = items;
+    if (storeName === 'proto_units' || storeName === 'pp_units' || storeName === 'field_units') {
+      try {
+        const existing = await idbGetAll<T>(storeName);
+        if (existing && existing.length > 0) {
+          finalItems = restorePhotosFromIdb(items, existing);
+        }
+      } catch (mergeErr) {
+        console.warn(`[IndexedDB] Non-destructive merge note for ${storeName}:`, mergeErr);
+      }
+    }
+
     return new Promise((resolve, reject) => {
       const tx = db.transaction(storeName, 'readwrite');
       const store = tx.objectStore(storeName);
       store.clear();
-      items.forEach((item) => store.put(item));
+      finalItems.forEach((item) => store.put(item));
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
@@ -75,7 +91,8 @@ export async function idbGetAll<T>(storeName: string): Promise<T[]> {
 
 /**
  * Safely stores an array in localStorage.
- * If quota is exceeded, strips large base64 photo strings and saves a lightweight version.
+ * If quota is exceeded, saves metadata without writing corrupt fake image strings.
+ * IndexedDB continues to store the 100% full quality records with all photos.
  */
 export function safeLocalStorageSet(key: string, data: any[]): boolean {
   try {
@@ -83,9 +100,9 @@ export function safeLocalStorageSet(key: string, data: any[]): boolean {
     localStorage.setItem(key, raw);
     return true;
   } catch (err) {
-    console.warn(`[Storage] LocalStorage quota exceeded for ${key}. Falling back to lightweight metadata.`);
+    console.warn(`[Storage] LocalStorage quota exceeded for ${key}. Falling back to metadata while IndexedDB preserves photos.`);
     try {
-      // Strip large base64 photos to stay well within quota (< 50KB)
+      // Save metadata without corrupting photos with broken dummy data: URLs
       const lightweight = data.map((item) => {
         if (!item || typeof item !== 'object') return item;
         const copy = { ...item };
@@ -93,8 +110,14 @@ export function safeLocalStorageSet(key: string, data: any[]): boolean {
           const strippedPhotos: Record<string, string> = {};
           Object.entries(copy.photos).forEach(([pKey, pVal]) => {
             if (typeof pVal === 'string') {
+              // Strip missing or placeholder images
+              if (isPhotoMissing(pVal)) {
+                return;
+              }
+              // Keep small identifiers/keys, omit large strings if over quota
               if (pVal.startsWith('data:image/') && pVal.length > 500) {
-                strippedPhotos[pKey] = 'data:image/placeholder;stored_in_idb';
+                // Omit large base64 from lightweight copy so IndexedDB holds full version
+                return;
               } else {
                 strippedPhotos[pKey] = pVal;
               }
@@ -112,4 +135,59 @@ export function safeLocalStorageSet(key: string, data: any[]): boolean {
       return false;
     }
   }
+}
+
+/**
+ * Merges loaded items with high-fidelity records from IndexedDB so full photos
+ * are always restored into memory if localStorage was trimmed.
+ */
+export function restorePhotosFromIdb<T extends { id: string; photos?: any }>(
+  currentItems: T[],
+  idbItems: T[]
+): T[] {
+  if (!idbItems || idbItems.length === 0) return currentItems || [];
+  const idbMap = new Map<string, T>();
+  idbItems.forEach(item => {
+    if (item && item.id) idbMap.set(item.id, item);
+  });
+
+  const processedIds = new Set<string>();
+  const result: T[] = (currentItems || []).map(item => {
+    if (!item || !item.id) return item;
+    processedIds.add(item.id);
+    const idbRecord = idbMap.get(item.id);
+    if (!idbRecord || !idbRecord.photos) return item;
+
+    // Check if idbRecord has real photos that current item lacks
+    const mergedPhotos: Record<string, string> = { ...(item.photos || {}) };
+    let hasAdditions = false;
+
+    Object.entries(idbRecord.photos).forEach(([k, v]) => {
+      if (typeof v === 'string' && !isPhotoMissing(v)) {
+        const currentVal = mergedPhotos[k];
+        if (isPhotoMissing(currentVal)) {
+          mergedPhotos[k] = v;
+          hasAdditions = true;
+        }
+      }
+    });
+
+    if (hasAdditions) {
+      return {
+        ...item,
+        photos: mergedPhotos
+      };
+    }
+    return item;
+  });
+
+  // Preserve any items from IDB that were missing entirely
+  idbItems.forEach(item => {
+    if (item && item.id && !processedIds.has(item.id)) {
+      result.push(item);
+      processedIds.add(item.id);
+    }
+  });
+
+  return result;
 }

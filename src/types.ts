@@ -213,6 +213,8 @@ export interface ProtoUnit {
   status: 'live' | 'finished' | 'stopped';
   createdAt: string; // Formatted date time e.g., '2026-07-30 14:30'
   updatedAt: string;
+  endDateTime?: string; // Machine End Date & Time (auto-synchronized with Test Completed)
+  completedAt?: string; // Formatted date time when machine completed
 }
 
 export interface PpUnit {
@@ -243,6 +245,8 @@ export interface PpUnit {
   isModelOnly?: boolean;
   createdAt: string; // Formatted date time e.g., '2026-07-30 14:30'
   updatedAt: string;
+  endDateTime?: string; // Machine End Date & Time (auto-synchronized with Test Completed)
+  completedAt?: string; // Formatted date time when machine completed
 }
 
 export interface FieldUnit {
@@ -261,6 +265,7 @@ export interface FieldUnit {
   status: 'live' | 'stopped' | 'finished';
   remarks?: string;
   observations?: ObservationNote[];
+  photos?: ProtoUnitPhotos;
   createdAt: string;
   updatedAt: string;
 }

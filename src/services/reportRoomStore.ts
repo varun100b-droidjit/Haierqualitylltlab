@@ -1,5 +1,5 @@
 import { addNotification } from './unitStore';
-import { idbSaveAll, idbGetAll, safeLocalStorageSet } from '../lib/indexedDbStorage';
+import { idbSaveAll, idbGetAll, safeLocalStorageSet, restorePhotosFromIdb } from '../lib/indexedDbStorage';
 import { 
   syncReportRoomToSupabase, 
   deleteReportRoomFromSupabase, 
@@ -94,6 +94,18 @@ const INITIAL_SAVED_REPORTS: SavedReport[] = [];
 
 let savedReportsCache: SavedReport[] = loadLocalReports();
 let listeners: ((reports: SavedReport[]) => void)[] = [];
+
+// Asynchronously hydrate full fidelity photos from IndexedDB on startup
+if (typeof window !== 'undefined') {
+  idbGetAll<SavedReport>('saved_reports').then(idbReports => {
+    if (idbReports && idbReports.length > 0) {
+      savedReportsCache = restorePhotosFromIdb(savedReportsCache, idbReports);
+      notifyListeners(savedReportsCache);
+    }
+  }).catch(err => {
+    console.warn('[ReportRoom] IDB hydration note:', err);
+  });
+}
 
 // Local Inter-Tab Broadcast Channel
 const localReportBus = typeof window !== 'undefined' && 'BroadcastChannel' in window 
@@ -299,7 +311,20 @@ function loadLocalReports(): SavedReport[] {
     if (raw !== null) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
-        return parsed.filter((r: any) => r && r.id !== 'rep-cs-101' && r.id !== 'rep-ce-102');
+        const filtered = parsed.filter((r: any) => r && r.id !== 'rep-cs-101' && r.id !== 'rep-ce-102');
+        return filtered.map((r: any) => {
+          if (!r || typeof r !== 'object') return r;
+          if (r.photos && typeof r.photos === 'object') {
+            const cleanPhotos: Record<string, string> = {};
+            Object.entries(r.photos).forEach(([k, v]) => {
+              if (typeof v === 'string' && !v.includes('stored_in_idb') && (v.startsWith('data:image/') || v.startsWith('http') || v.startsWith('blob:'))) {
+                cleanPhotos[k] = v;
+              }
+            });
+            return { ...r, photos: cleanPhotos };
+          }
+          return r;
+        });
       }
     }
     return [];
@@ -457,6 +482,28 @@ export function getReportCounts(): { total: number; cSimulation: number; cExperi
   };
 }
 
+/**
+ * Strict Model-Level Check: Checks if a report for this model is currently present in Report Room.
+ * As per specification: "Report Generate me koi ek model ka report generate ho gya to us model ka report
+ * Dubara Generate nhi hoga jab tak Report Room me Us Model ka Report hai. Aur Haa jin Model ka Report
+ * Generate nhi hua hai. Unka Report Generate hoga."
+ */
+export function findSavedReportByModelName(
+  modelName: string,
+  tag?: ReportTagType
+): SavedReport | null {
+  if (!modelName) return null;
+  const cleanModel = modelName.trim().toLowerCase();
+  if (!cleanModel || cleanModel === 'na' || cleanModel === 'all') return null;
+
+  const all = getSavedReports();
+  return all.find(r => {
+    const matchTag = !tag || r.tag === tag || (tag === 'C Simulation' && r.reportType === 'cs-simulation') || (tag === 'C Experience' && r.reportType === 'cs-experience');
+    if (!matchTag) return false;
+    return r.modelName && r.modelName.trim().toLowerCase() === cleanModel;
+  }) || null;
+}
+
 export function findSavedReportForUnit(
   unitOrIdentifier: { id?: string; serialNo?: string; iduSerialNumber?: string; oduSerialNumber?: string; modelName?: string } | string,
   tag?: ReportTagType
@@ -464,37 +511,36 @@ export function findSavedReportForUnit(
   const all = getSavedReports();
   if (typeof unitOrIdentifier === 'string') {
     const term = unitOrIdentifier.trim().toLowerCase();
-    if (!term) return null;
+    if (!term || term === 'na') return null;
     return all.find(r => {
       const matchTag = !tag || r.tag === tag || (tag === 'C Simulation' && r.reportType === 'cs-simulation') || (tag === 'C Experience' && r.reportType === 'cs-experience');
       if (!matchTag) return false;
       return (
-        (r.serialNo && r.serialNo.toLowerCase() === term) ||
-        (r.modelName && r.modelName.toLowerCase() === term) ||
-        (r.reportNo && r.reportNo.toLowerCase() === term) ||
+        (r.modelName && r.modelName.trim().toLowerCase() === term) ||
+        (r.serialNo && r.serialNo.trim().toLowerCase() === term) ||
+        (r.reportNo && r.reportNo.trim().toLowerCase() === term) ||
         (r.id && r.id.toLowerCase() === term)
       );
     }) || null;
   }
 
   const { id, serialNo, iduSerialNumber, oduSerialNumber, modelName } = unitOrIdentifier;
+  const cleanModel = (modelName || '').trim().toLowerCase();
+
   return all.find(r => {
     const matchTag = !tag || r.tag === tag || (tag === 'C Simulation' && r.reportType === 'cs-simulation') || (tag === 'C Experience' && r.reportType === 'cs-experience');
     if (!matchTag) return false;
+
+    // Strict model match: If a report exists for this model in the Report Room
+    if (cleanModel && cleanModel !== 'na' && r.modelName && r.modelName.trim().toLowerCase() === cleanModel) {
+      return true;
+    }
 
     // Check serial matches
     if (serialNo && r.serialNo && r.serialNo.toLowerCase() === serialNo.toLowerCase()) return true;
     if (iduSerialNumber && r.serialNo && r.serialNo.toLowerCase() === iduSerialNumber.toLowerCase()) return true;
     if (oduSerialNumber && r.serialNo && r.serialNo.toLowerCase() === oduSerialNumber.toLowerCase()) return true;
     if (id && (r.id === id || r.dataValuesMap?.unitId === id)) return true;
-
-    // Check model name match
-    if (modelName && r.modelName && r.modelName.toLowerCase() === modelName.toLowerCase()) {
-      if (serialNo && (r.serialNo === serialNo || r.reportNo?.includes(serialNo))) return true;
-      if (iduSerialNumber && (r.serialNo === iduSerialNumber || r.reportNo?.includes(iduSerialNumber))) return true;
-      if (oduSerialNumber && (r.serialNo === oduSerialNumber || r.reportNo?.includes(oduSerialNumber))) return true;
-      if (r.serialNo === '58192' && iduSerialNumber === '58192') return true;
-    }
 
     return false;
   }) || null;

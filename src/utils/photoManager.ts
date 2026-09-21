@@ -2,7 +2,7 @@
  * Standard Photo Field Mapping and Management Module
  * Maps UI Photo inputs to Word Report Picture Content Controls and handles storage/retrieval.
  */
-import { PICTURE_NOT_AVAILABLE_IMAGE } from './placeholderImage';
+import { PICTURE_NOT_AVAILABLE_IMAGE, isPhotoMissing } from './placeholderImage';
 
 export type ReportSectionCategory = 'packaging' | 'idu' | 'odu' | 'refrigeration';
 
@@ -365,68 +365,66 @@ export function buildNormalizedPhotos(rawPhotos: Record<string, string | undefin
 }
 
 /**
- * Retrieves the image URL from a photos object for a specific Picture Content Control key
+ * Retrieves the image URL from a photos object for a specific Picture Content Control key.
+ * Always prioritizes genuine uploaded photos over placeholders.
  */
 export function getPhotoUrlForContentControl(photos: any, searchKey: string): string | null {
   if (!photos || typeof photos !== 'object') return null;
 
-  // 1. Check in photoRecords array if present
+  const cleanSearch = searchKey.trim().replace(/[\s_]+/g, '').toLowerCase();
+
+  // Find corresponding definition
+  const matchedDef = PHOTO_FIELD_DEFINITIONS.find(def =>
+    def.photoKey.toLowerCase() === searchKey.toLowerCase() ||
+    def.id.toLowerCase() === searchKey.toLowerCase() ||
+    def.photoKey.replace(/[\s_]+/g, '').toLowerCase() === cleanSearch ||
+    def.id.replace(/[\s_]+/g, '').toLowerCase() === cleanSearch ||
+    def.aliases.some(a => a.toLowerCase() === searchKey.toLowerCase() || a.replace(/[\s_]+/g, '').toLowerCase() === cleanSearch)
+  );
+
+  // Collect candidate keys in order of preference
+  const candidateKeys: string[] = [searchKey];
+  if (matchedDef) {
+    candidateKeys.push(matchedDef.photoKey, matchedDef.id, ...matchedDef.aliases, matchedDef.label);
+  }
+
+  // 1. First Pass: Check in photoRecords array for genuine photo
   if (Array.isArray(photos.photoRecords)) {
     const rec = photos.photoRecords.find(
-      (r: any) => r.photoKey === searchKey || r.photoKey?.toLowerCase() === searchKey.toLowerCase()
+      (r: any) => (r.photoKey === searchKey || r.photoKey?.toLowerCase() === searchKey.toLowerCase() || candidateKeys.includes(r.photoKey)) &&
+        typeof r.photoUrl === 'string' && !isPhotoMissing(r.photoUrl)
     );
-    if (rec && rec.photoUrl && rec.photoUrl !== 'NA' && typeof rec.photoUrl === 'string' && rec.photoUrl.trim() !== '') {
+    if (rec && rec.photoUrl) {
       return rec.photoUrl.trim();
     }
   }
 
-  // 2. Direct match
-  if (photos[searchKey] && typeof photos[searchKey] === 'string' && photos[searchKey] !== 'NA' && photos[searchKey].trim() !== '') {
-    return photos[searchKey].trim();
-  }
-
-  const cleanSearch = searchKey.trim().replace(/[\s_]+/g, '').toLowerCase();
-
-  // 3. Match against definitions and aliases
-  for (const def of PHOTO_FIELD_DEFINITIONS) {
-    const matchesDef = def.photoKey.toLowerCase() === searchKey.toLowerCase() ||
-      def.id.toLowerCase() === searchKey.toLowerCase() ||
-      def.photoKey.replace(/[\s_]+/g, '').toLowerCase() === cleanSearch ||
-      def.id.replace(/[\s_]+/g, '').toLowerCase() === cleanSearch ||
-      def.aliases.some(a => a.toLowerCase() === searchKey.toLowerCase() || a.replace(/[\s_]+/g, '').toLowerCase() === cleanSearch);
-
-    if (matchesDef) {
-      // Check def.photoKey, def.id, and def.aliases in photos
-      const checkKeys = [def.photoKey, def.id, ...def.aliases, def.label];
-      for (const k of checkKeys) {
-        if (photos[k] && typeof photos[k] === 'string' && photos[k] !== 'NA' && photos[k].trim() !== '') {
-          return photos[k].trim();
-        }
-      }
-
-      // Check case-insensitive / stripped keys across the entire photos object
-      for (const [k, v] of Object.entries(photos)) {
-        if (!v || v === 'NA' || typeof v !== 'string' || v.trim() === '') continue;
-        const cleanK = k.replace(/[\s_]+/g, '').toLowerCase();
-        if (
-          cleanK === cleanSearch ||
-          cleanK === def.photoKey.replace(/[\s_]+/g, '').toLowerCase() ||
-          cleanK === def.id.replace(/[\s_]+/g, '').toLowerCase() ||
-          cleanK === def.label.replace(/[\s_]+/g, '').toLowerCase() ||
-          def.aliases.some(a => a.replace(/[\s_]+/g, '').toLowerCase() === cleanK)
-        ) {
-          return v.trim();
-        }
-      }
+  // 2. Second Pass: Check candidate keys for a genuine non-placeholder photo
+  for (const k of candidateKeys) {
+    const val = photos[k];
+    if (typeof val === 'string' && !isPhotoMissing(val)) {
+      return val.trim();
     }
   }
 
-  // 4. Fallback search across any key matching cleanSearch
+  // 3. Third Pass: Check stripped/case-insensitive keys across entire photos object for genuine photo
   for (const [k, v] of Object.entries(photos)) {
-    if (!v || v === 'NA' || typeof v !== 'string' || v.trim() === '') continue;
+    if (typeof v !== 'string' || isPhotoMissing(v)) continue;
     const cleanK = k.replace(/[\s_]+/g, '').toLowerCase();
-    if (cleanK === cleanSearch || cleanK.includes(cleanSearch) || cleanSearch.includes(cleanK)) {
+    if (cleanK === cleanSearch || (matchedDef && (
+      cleanK === matchedDef.photoKey.replace(/[\s_]+/g, '').toLowerCase() ||
+      cleanK === matchedDef.id.replace(/[\s_]+/g, '').toLowerCase() ||
+      matchedDef.aliases.some(a => a.replace(/[\s_]+/g, '').toLowerCase() === cleanK)
+    ))) {
       return v.trim();
+    }
+  }
+
+  // 4. Fourth Pass: If no genuine photo was found, check if a placeholder exists under candidate keys
+  for (const k of candidateKeys) {
+    const val = photos[k];
+    if (typeof val === 'string' && val.trim() !== '' && val !== 'NA' && val !== 'null') {
+      return val.trim();
     }
   }
 
