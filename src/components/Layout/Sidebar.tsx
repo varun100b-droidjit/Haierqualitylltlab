@@ -34,6 +34,7 @@ import { subscribeELTRecords, getELTRecords } from '../../services/eltBsrStore';
 import { subscribeSmogUnits, getSmogUnits, LeakUnitRecord } from '../Smog/SmogModule';
 import { useAuth } from '../../context/AuthContext';
 import { AuthRole } from '../../types';
+import { SidebarAutoRefreshControl } from './SidebarAutoRefreshControl';
 
 export type TabType = 
   | 'dashboard' 
@@ -468,7 +469,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     </button>
                   );
                 })}
+
+                {/* Auto-Refresh Control directly below User Management */}
+                <SidebarAutoRefreshControl onOpenSettings={() => handleNavClick('settings')} />
               </>
+            )}
+
+            {adminNavItems.length === 0 && (
+              <SidebarAutoRefreshControl onOpenSettings={() => handleNavClick('settings')} />
             )}
           </nav>
         </div>

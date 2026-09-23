@@ -222,3 +222,31 @@ export async function deleteUnitPhotosFromServer(unitId: string): Promise<void> 
     console.warn(`[CloudPhotoService] Error deleting server photos for unit ${unitId}:`, err);
   }
 }
+
+/**
+ * Deletes a single specific photo for a unit directly from the Firebase Firestore server.
+ */
+export async function deleteSinglePhotoFromServer(unitId: string, photoKey: string): Promise<void> {
+  if (!db || !unitId || !photoKey) return;
+
+  try {
+    const docId = sanitizeDocId(unitId, photoKey);
+    await deleteDoc(doc(db, COLLECTION_NAME, docId)).catch(() => {});
+
+    // Also query by unitId and photoKey to catch any variants/aliases
+    const colRef = collection(db, COLLECTION_NAME);
+    const q = query(colRef, where('unitId', '==', unitId), where('photoKey', '==', photoKey));
+    const snapshot = await getDocs(q);
+
+    if (!snapshot.empty) {
+      const batch = writeBatch(db);
+      snapshot.forEach(docSnap => {
+        batch.delete(docSnap.ref);
+      });
+      await batch.commit();
+    }
+    console.log(`[CloudPhotoService] Successfully deleted server photo '${photoKey}' for unit ${unitId}.`);
+  } catch (err) {
+    console.warn(`[CloudPhotoService] Error deleting single photo '${photoKey}' from server:`, err);
+  }
+}

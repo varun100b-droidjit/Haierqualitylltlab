@@ -221,7 +221,12 @@ export async function purgeAllSupabaseAndFirebaseData(): Promise<{
       'pp_unit_measurements',
       'activityLogs',
       'labNotifications',
-      'megha_chat_records'
+      'megha_chat_records',
+      'unit_photos',
+      'cloud_unit_photos',
+      'model_master',
+      'elt_records',
+      'bsr_records'
     ];
 
     for (const colName of firestoreCollections) {

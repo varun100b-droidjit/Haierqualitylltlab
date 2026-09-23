@@ -24,6 +24,7 @@ import {
   Cloud
 } from 'lucide-react';
 import { ProtoUnitPhotos } from '../../types';
+import { deleteSinglePhotoFromServer } from '../../services/cloudPhotoService';
 import { 
   PHOTO_FIELD_DEFINITIONS, 
   REPORT_PHOTO_SECTIONS, 
@@ -83,6 +84,7 @@ export const PHOTO_UPLOAD_CONFIGS: PhotoFieldConfig[] = PHOTO_FIELD_DEFINITIONS.
 export interface PhotoUploadSectionProps {
   photos: Record<string, string | undefined>;
   onChange: (updatedPhotos: Record<string, string>) => void;
+  unitId?: string;
   title?: string;
   subtitle?: string;
   readOnly?: boolean;
@@ -95,6 +97,7 @@ export interface PhotoUploadSectionProps {
 export const PhotoUploadSection: React.FC<PhotoUploadSectionProps> = ({
   photos,
   onChange,
+  unitId,
   title = 'Inspection Photos',
   subtitle,
   readOnly = false,
@@ -321,6 +324,16 @@ export const PhotoUploadSection: React.FC<PhotoUploadSectionProps> = ({
       delete updated.remotePhoto;
     }
     onChange(updated);
+
+    // Delete isolated photo document from Firestore server if unitId is provided
+    if (unitId) {
+      deleteSinglePhotoFromServer(unitId, config.key).catch(err => {
+        console.warn('Error deleting photo from server:', err);
+      });
+      if (config.legacyKey) {
+        deleteSinglePhotoFromServer(unitId, config.legacyKey).catch(() => {});
+      }
+    }
   };
 
   const handleRotatePhoto = (config: PhotoFieldConfig) => {

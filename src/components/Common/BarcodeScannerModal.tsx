@@ -182,6 +182,179 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
     }
   };
 
+  // Helper to sanitize scanned barcode
+  const sanitizeBarcode = (raw: string): string => {
+    let clean = (raw || '').replace(/[\r\n\t]/g, '').trim().toUpperCase();
+    // Strip AIM Symbology identifier prefix (e.g. ]C1, ]d2, ]Q3, ]e0) if emitted by scanner
+    if (clean.startsWith(']') && clean.length > 3) {
+      clean = clean.replace(/^\][A-Z0-9]{2}/, '');
+    }
+    // Strip common serial prefixes if attached
+    if (clean.startsWith('SN:') || clean.startsWith('S/N:')) {
+      clean = clean.replace(/^S\/?N:\s*/, '');
+    }
+    return clean.trim();
+  };
+
+  // Add scanned machine to list (matching Smog Scanner pattern)
+  const addScannedMachine = (rawSerial: string, explicitModel?: string) => {
+    if (!rawSerial) return;
+    const cleanSerial = sanitizeBarcode(rawSerial);
+    if (!cleanSerial) return;
+
+    // RULE: Barcode MUST start with 'A'
+    if (!cleanSerial.startsWith('A')) {
+      playRejectBeep();
+      setBatchError(`Invalid Barcode "${cleanSerial}": Only barcodes starting with 'A' are accepted.`);
+      if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+      setScanFeedbackToast({
+        serial: cleanSerial,
+        model: "Rejected: Must start with 'A'",
+        isError: true
+      });
+      toastTimeoutRef.current = setTimeout(() => {
+        setScanFeedbackToast(null);
+      }, 3000);
+      return;
+    }
+
+    const currentProcess = selectedProcessRef.current;
+
+    let modelName = explicitModel?.trim() || '';
+    let materialCode = '';
+    let prefix = '';
+    let matchStatus: 'idle' | 'matched' | 'not_found' = 'idle';
+    let rowError: string | undefined = undefined;
+    let originalELTDateTime: string | undefined = undefined;
+
+    if (currentProcess === 'SEND_ELT') {
+      const prefix9 = cleanSerial.length >= 9 ? cleanSerial.slice(0, 9) : cleanSerial;
+      prefix = prefix9;
+      materialCode = prefix9;
+      const matched = findModelByPrefix(prefix9);
+
+      if (matched && matched.modelName) {
+        modelName = modelName || matched.modelName;
+        materialCode = matched.materialCode || prefix9;
+        matchStatus = 'matched';
+      } else if (modelName) {
+        matchStatus = 'matched';
+      } else {
+        matchStatus = 'not_found';
+        rowError = `Prefix "${prefix9}" not in Model Sheet`;
+      }
+
+      if (findInELTRecords(cleanSerial)) {
+        rowError = `Already in ELT Record!`;
+      }
+    } else {
+      // RETURN BSR PROCESS: Check in ELT Records
+      const existingInELT = findInELTRecords(cleanSerial);
+      if (existingInELT) {
+        modelName = existingInELT.modelName;
+        materialCode = existingInELT.materialCode;
+        prefix = existingInELT.materialCode;
+        matchStatus = 'matched';
+        originalELTDateTime = `${existingInELT.eltDate} ${existingInELT.eltTime}`;
+      } else {
+        matchStatus = 'not_found';
+        rowError = 'Serial Number not found in ELT Record';
+      }
+    }
+
+    // Check duplicate in current batch
+    if (machineRows.some(r => sanitizeBarcode(r.serialNumber) === cleanSerial)) {
+      setBatchError(`Machine ${cleanSerial} already scanned in this list.`);
+      if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+      setScanFeedbackToast({
+        serial: cleanSerial,
+        model: 'Duplicate in current list',
+        isError: true
+      });
+      toastTimeoutRef.current = setTimeout(() => setScanFeedbackToast(null), 2500);
+      return;
+    }
+
+    playScanBeep();
+    setSuccessBanner(null);
+    setBatchError(null);
+
+    const newItem: MachineEntryRow = {
+      id: `row-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      serialNumber: cleanSerial,
+      modelName,
+      materialCode,
+      prefix,
+      matchStatus,
+      originalELTDateTime,
+      error: rowError
+    };
+
+    setMachineRows(prev => [newItem, ...prev]);
+    setManualSerialInput('');
+    setManualModelInput('');
+
+    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+    setScanFeedbackToast({
+      serial: cleanSerial,
+      model: modelName || (currentProcess === 'SEND_ELT' ? 'ELT Unit' : 'BSR Return'),
+      isError: Boolean(rowError)
+    });
+    toastTimeoutRef.current = setTimeout(() => {
+      setScanFeedbackToast(null);
+    }, 2500);
+  };
+
+  // Process Barcode Scanned (from camera, photo or gun)
+  const handleBarcodeScanned = (rawBarcode: string) => {
+    if (!rawBarcode) return;
+    const cleanBarcode = sanitizeBarcode(rawBarcode);
+    if (!cleanBarcode) return;
+
+    if (!cleanBarcode.startsWith('A')) {
+      playRejectBeep();
+      setBatchError(`Invalid Barcode "${cleanBarcode}": Only barcodes starting with 'A' are accepted.`);
+      if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+      setScanFeedbackToast({
+        serial: cleanBarcode,
+        model: "Rejected: Must start with 'A'",
+        isError: true
+      });
+      toastTimeoutRef.current = setTimeout(() => {
+        setScanFeedbackToast(null);
+      }, 3000);
+      return;
+    }
+
+    const now = Date.now();
+
+    // 1. Prevent duplicate spam of the exact same barcode while in camera view
+    if (cleanBarcode === lastScannedBarcodeRef.current && now - lastScanTimeRef.current < 2000) {
+      return;
+    }
+
+    // 2. Throttle: at least 500ms between any scans
+    if (isProcessingScanRef.current || now - lastScanTimeRef.current < 500) {
+      return;
+    }
+
+    isProcessingScanRef.current = true;
+    lastScanTimeRef.current = now;
+    lastScannedBarcodeRef.current = cleanBarcode;
+
+    setTimeout(() => {
+      isProcessingScanRef.current = false;
+    }, 500);
+
+    addScannedMachine(cleanBarcode);
+  };
+
+  // Keep ref synchronized on every render so camera callback always invokes latest handler
+  handleBarcodeScannedRef.current = handleBarcodeScanned;
+  useEffect(() => {
+    handleBarcodeScannedRef.current = handleBarcodeScanned;
+  });
+
   // Start Camera Function with multi-tier fallback for mobile browsers
   const startCamera = async (targetCameraId?: string) => {
     if (isStartingRef.current) return;
@@ -211,33 +384,29 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
         return;
       }
 
-      const html5QrCode = new Html5Qrcode(scannerContainerId, {
-        formatsToSupport: [
-          Html5QrcodeSupportedFormats.QR_CODE,
-          Html5QrcodeSupportedFormats.CODE_128,
-          Html5QrcodeSupportedFormats.CODE_39,
-          Html5QrcodeSupportedFormats.EAN_13,
-          Html5QrcodeSupportedFormats.EAN_8,
-          Html5QrcodeSupportedFormats.UPC_A,
-          Html5QrcodeSupportedFormats.UPC_E,
-          Html5QrcodeSupportedFormats.DATA_MATRIX
-        ],
-        verbose: false
-      });
+      const formats = [
+        Html5QrcodeSupportedFormats.CODE_128,
+        Html5QrcodeSupportedFormats.CODE_39,
+        Html5QrcodeSupportedFormats.CODE_93,
+        Html5QrcodeSupportedFormats.CODABAR,
+        Html5QrcodeSupportedFormats.ITF,
+        Html5QrcodeSupportedFormats.QR_CODE,
+        Html5QrcodeSupportedFormats.EAN_13,
+        Html5QrcodeSupportedFormats.EAN_8,
+        Html5QrcodeSupportedFormats.UPC_A,
+        Html5QrcodeSupportedFormats.UPC_E,
+        Html5QrcodeSupportedFormats.DATA_MATRIX,
+        Html5QrcodeSupportedFormats.PDF_417,
+        Html5QrcodeSupportedFormats.AZTEC
+      ];
 
-      html5QrCodeRef.current = html5QrCode;
-
-      // Dynamic qrbox that calculates bounds relative to actual camera viewfinder dimensions
-      // Do NOT set a hardcoded landscape aspectRatio to prevent OverconstrainedError on portrait screens
+      // Wide barcode scan area optimized for horizontal machine serials
       const qrConfig = {
         fps: 15,
         qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
-          const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
-          const boxSize = Math.max(Math.floor(minEdge * 0.75), 140);
-          return {
-            width: Math.min(boxSize * 1.3, viewfinderWidth - 16),
-            height: Math.min(boxSize * 0.8, viewfinderHeight - 16)
-          };
+          const w = Math.min(Math.floor(viewfinderWidth * 0.90), 380);
+          const h = Math.min(Math.floor(viewfinderHeight * 0.70), 200);
+          return { width: Math.max(w, 200), height: Math.max(h, 90) };
         }
       };
 
@@ -258,28 +427,36 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
 
       // Multi-fallback order:
       // 1. Specified target cameraId if requested
-      // 2. Rear / back camera ID if detected
-      // 3. { facingMode: 'environment' }
+      // 2. { facingMode: 'environment' } (standard mobile rear camera)
+      // 3. Rear / back camera ID if detected from enumeration
       // 4. { facingMode: 'user' } (front camera fallback)
       // 5. {} (any available camera stream)
       const attempts: any[] = [];
       if (targetCameraId) {
         attempts.push(targetCameraId);
-      } else if (cameraList.length > 0) {
-        const backCam = cameraList.find(c => /back|rear|environment|main|standard/i.test(c.label)) || cameraList[cameraList.length - 1];
-        attempts.push(backCam.id);
-        setActiveCameraId(backCam.id);
+      } else {
+        attempts.push({ facingMode: 'environment' });
+        if (cameraList.length > 0) {
+          const backCam = cameraList.find(c => /back|rear|environment|main|standard/i.test(c.label)) || cameraList[0];
+          attempts.push(backCam.id);
+        }
+        attempts.push({ facingMode: 'user' });
+        attempts.push({});
       }
-      attempts.push({ facingMode: 'environment' });
-      attempts.push({ facingMode: 'user' });
-      attempts.push({});
 
       let started = false;
       let lastErr: any = null;
 
       for (const config of attempts) {
         try {
-          await html5QrCode.start(
+          // Fresh instance per attempt to prevent broken state machine
+          const scanner = new Html5Qrcode(scannerContainerId, {
+            formatsToSupport: formats,
+            verbose: false
+          });
+          html5QrCodeRef.current = scanner;
+
+          await scanner.start(
             config,
             qrConfig,
             (decodedText) => {
@@ -288,7 +465,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
               }
             },
             () => {
-              // Frame decode error - normal while scanning
+              // Frame decode in progress
             }
           );
           started = true;
@@ -301,6 +478,12 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
           break;
         } catch (err) {
           lastErr = err;
+          try {
+            if (html5QrCodeRef.current) {
+              await html5QrCodeRef.current.clear();
+            }
+          } catch {}
+          html5QrCodeRef.current = null;
         }
       }
 
@@ -423,6 +606,43 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
     };
   }, [isOpen]);
 
+  // Support Hardware Barcode Scanner Gun (USB / Bluetooth keystrokes followed by Enter)
+  useEffect(() => {
+    if (!isOpen) return;
+    let buffer = '';
+    let lastKeyTime = 0;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't intercept if user is actively in an input field
+      const target = e.target as HTMLElement;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
+        return;
+      }
+
+      const now = Date.now();
+      // Rapid keystrokes (< 180ms) indicate hardware scanner gun input
+      if (now - lastKeyTime > 180) {
+        buffer = '';
+      }
+      lastKeyTime = now;
+
+      if (e.key === 'Enter') {
+        if (buffer.trim().length >= 3) {
+          e.preventDefault();
+          handleBarcodeScanned(buffer.trim());
+          buffer = '';
+        }
+      } else if (e.key && e.key.length === 1) {
+        buffer += e.key;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isOpen]);
+
   const resetForm = () => {
     lastScannedBarcodeRef.current = '';
     isProcessingScanRef.current = false;
@@ -458,159 +678,6 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
     lastScannedBarcodeRef.current = '';
     isProcessingScanRef.current = false;
     setMachineRows(prev => prev.filter(r => r.id !== id));
-  };
-
-  // Add scanned machine to list (matching Smog Scanner pattern)
-  const addScannedMachine = (rawSerial: string, explicitModel?: string) => {
-    if (!rawSerial) return;
-    const cleanSerial = rawSerial.trim().toUpperCase();
-    if (!cleanSerial) return;
-
-    // RULE: Barcode MUST start with 'A'
-    if (!cleanSerial.startsWith('A')) {
-      playRejectBeep();
-      setBatchError(`Invalid Barcode "${cleanSerial}": Only barcodes starting with 'A' are accepted.`);
-      if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
-      setScanFeedbackToast({
-        serial: cleanSerial,
-        model: "Rejected: Must start with 'A'",
-        isError: true
-      });
-      toastTimeoutRef.current = setTimeout(() => {
-        setScanFeedbackToast(null);
-      }, 3000);
-      return;
-    }
-
-    const currentProcess = selectedProcessRef.current;
-
-    let modelName = explicitModel?.trim() || '';
-    let materialCode = '';
-    let prefix = '';
-    let matchStatus: 'idle' | 'matched' | 'not_found' = 'idle';
-    let rowError: string | undefined = undefined;
-    let originalELTDateTime: string | undefined = undefined;
-
-    if (currentProcess === 'SEND_ELT') {
-      const prefix9 = cleanSerial.length >= 9 ? cleanSerial.slice(0, 9) : cleanSerial;
-      prefix = prefix9;
-      materialCode = prefix9;
-      const matched = findModelByPrefix(prefix9);
-
-      if (matched && matched.modelName) {
-        modelName = modelName || matched.modelName;
-        materialCode = matched.materialCode || prefix9;
-        matchStatus = 'matched';
-      } else if (modelName) {
-        matchStatus = 'matched';
-      } else {
-        matchStatus = 'not_found';
-        rowError = `Prefix "${prefix9}" not in Model Sheet`;
-      }
-
-      if (findInELTRecords(cleanSerial)) {
-        rowError = `Already in ELT Record!`;
-      }
-    } else {
-      // RETURN BSR PROCESS: Check in ELT Records
-      const existingInELT = findInELTRecords(cleanSerial);
-      if (existingInELT) {
-        modelName = existingInELT.modelName;
-        materialCode = existingInELT.materialCode;
-        prefix = existingInELT.materialCode;
-        matchStatus = 'matched';
-        originalELTDateTime = `${existingInELT.eltDate} ${existingInELT.eltTime}`;
-      } else {
-        matchStatus = 'not_found';
-        rowError = 'Serial Number not found in ELT Record';
-      }
-    }
-
-    // Check duplicate in current batch
-    if (machineRows.some(r => r.serialNumber.trim().toUpperCase() === cleanSerial)) {
-      setBatchError(`Machine ${cleanSerial} already scanned in this list.`);
-      if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
-      setScanFeedbackToast({
-        serial: cleanSerial,
-        model: 'Duplicate in current list',
-        isError: true
-      });
-      toastTimeoutRef.current = setTimeout(() => setScanFeedbackToast(null), 2500);
-      return;
-    }
-
-    playScanBeep();
-    setSuccessBanner(null);
-    setBatchError(null);
-
-    const newItem: MachineEntryRow = {
-      id: `row-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      serialNumber: cleanSerial,
-      modelName,
-      materialCode,
-      prefix,
-      matchStatus,
-      originalELTDateTime,
-      error: rowError
-    };
-
-    setMachineRows(prev => [newItem, ...prev]);
-    setManualSerialInput('');
-    setManualModelInput('');
-
-    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
-    setScanFeedbackToast({
-      serial: cleanSerial,
-      model: modelName || (currentProcess === 'SEND_ELT' ? 'ELT Unit' : 'BSR Return'),
-      isError: Boolean(rowError)
-    });
-    toastTimeoutRef.current = setTimeout(() => {
-      setScanFeedbackToast(null);
-    }, 2500);
-  };
-
-  // Process Barcode Scanned (from camera or gun)
-  const handleBarcodeScanned = (rawBarcode: string) => {
-    if (!rawBarcode) return;
-    const cleanBarcode = rawBarcode.trim().toUpperCase();
-    if (!cleanBarcode) return;
-
-    if (!cleanBarcode.startsWith('A')) {
-      playRejectBeep();
-      setBatchError(`Invalid Barcode "${cleanBarcode}": Only barcodes starting with 'A' are accepted.`);
-      if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
-      setScanFeedbackToast({
-        serial: cleanBarcode,
-        model: "Rejected: Must start with 'A'",
-        isError: true
-      });
-      toastTimeoutRef.current = setTimeout(() => {
-        setScanFeedbackToast(null);
-      }, 3000);
-      return;
-    }
-
-    const now = Date.now();
-
-    // 1. Prevent duplicate spam of the exact same barcode while in camera view
-    if (cleanBarcode === lastScannedBarcodeRef.current && now - lastScanTimeRef.current < 2200) {
-      return;
-    }
-
-    // 2. Throttle: at least 600ms between any scans
-    if (isProcessingScanRef.current || now - lastScanTimeRef.current < 600) {
-      return;
-    }
-
-    isProcessingScanRef.current = true;
-    lastScanTimeRef.current = now;
-    lastScannedBarcodeRef.current = cleanBarcode;
-
-    setTimeout(() => {
-      isProcessingScanRef.current = false;
-    }, 600);
-
-    addScannedMachine(cleanBarcode);
   };
 
   // SEND ELT: Submit all valid machines to Firebase
@@ -842,19 +909,19 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
             </div>
           )}
 
-          {/* Real-Time Camera Viewfinder with Compact Height */}
+          {/* Real-Time Camera Viewfinder with Generous Scanning Area */}
           <div className="relative rounded-2xl overflow-hidden bg-black border border-slate-800 flex flex-col items-center">
-            <div className="relative w-full h-[145px] sm:h-[165px] min-h-[145px] sm:min-h-[165px] bg-black flex items-center justify-center overflow-hidden">
+            <div className="relative w-full h-[185px] sm:h-[210px] min-h-[185px] sm:min-h-[210px] bg-black flex items-center justify-center overflow-hidden">
               {/* Dedicated Html5Qrcode host container */}
               <div 
                 id={scannerContainerId} 
-                className="w-full h-[145px] sm:h-[165px] min-h-[145px] sm:min-h-[165px] flex items-center justify-center overflow-hidden"
+                className="w-full h-[185px] sm:h-[210px] min-h-[185px] sm:min-h-[210px] flex items-center justify-center overflow-hidden"
               />
 
               {/* Scanning visual overlay with laser */}
               {isCameraActive && (
                 <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center">
-                  <div className="w-[80%] max-w-[280px] h-20 sm:h-22 border-2 border-dashed border-cyan-400/90 rounded-xl relative overflow-hidden shadow-[0_0_25px_rgba(6,182,212,0.3)]">
+                  <div className="w-[85%] max-w-[340px] h-24 sm:h-28 border-2 border-dashed border-cyan-400/90 rounded-xl relative overflow-hidden shadow-[0_0_25px_rgba(6,182,212,0.3)]">
                     <div className="w-full h-1 bg-gradient-to-r from-transparent via-cyan-400 to-transparent absolute top-0 animate-[bounce_2s_infinite]" />
                     <div className="absolute bottom-1 right-2 text-[9px] font-mono text-cyan-400 font-bold drop-shadow">
                       Point at Barcode (Starts with 'A')

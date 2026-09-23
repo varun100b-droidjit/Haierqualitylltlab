@@ -175,6 +175,9 @@ export async function deleteReportRoomFromFirestore(id: string) {
   try {
     const docRef = doc(db, 'report_room', id);
     await deleteDoc(docRef);
+    await deleteDoc(doc(db, 'saved_reports', id)).catch(() => {});
+    await deleteDoc(doc(db, 'reports', id)).catch(() => {});
+    console.log('Successfully deleted report from Firebase Firestore:', id);
   } catch (e) {
     console.warn('Firestore Report delete note:', e);
   }

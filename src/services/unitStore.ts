@@ -8,10 +8,35 @@ import {
   subscribeToLabRealtimeEvents 
 } from '../lib/supabase';
 import { requireOnlineForSave } from './networkManager';
+import { deleteUnitPhotosFromServer } from './cloudPhotoService';
 
 const STORAGE_KEY_UNITS = 'llt_lab_units_v2';
 const STORAGE_KEY_LOGS = 'llt_lab_activity_logs_v2';
 const STORAGE_KEY_NOTIFS = 'llt_lab_notifications_v2';
+const DELETED_RD_UNITS_KEY = 'llt_deleted_rd_units_v1';
+
+export function markRDUnitDeleted(id: string) {
+  try {
+    const raw = localStorage.getItem(DELETED_RD_UNITS_KEY);
+    const list: string[] = raw ? JSON.parse(raw) : [];
+    if (!list.includes(id)) {
+      list.push(id);
+      localStorage.setItem(DELETED_RD_UNITS_KEY, JSON.stringify(list));
+    }
+  } catch (e) {
+    console.warn('Error marking RD unit as deleted:', e);
+  }
+}
+
+export function getDeletedRDUnitIds(): Set<string> {
+  try {
+    const raw = localStorage.getItem(DELETED_RD_UNITS_KEY);
+    const list: string[] = raw ? JSON.parse(raw) : [];
+    return new Set(list);
+  } catch {
+    return new Set();
+  }
+}
 
 export const MOCK_UNIT_IDS = new Set([
   'unit-101', 'unit-102', 'unit-103', 'unit-104', 'unit-105',
@@ -101,8 +126,10 @@ export async function syncRDUnitToFirestore(unit: Unit) {
 export async function deleteRDUnitFromFirestore(id: string) {
   if (!db) return;
   try {
+    await deleteUnitPhotosFromServer(id);
     await deleteDoc(doc(db, 'rd_units', id));
     await deleteDoc(doc(db, 'units', id));
+    console.log('Successfully deleted R&D Unit and photos from Firebase Firestore:', id);
   } catch (e) {
     console.warn('Firestore R&D Unit delete note:', e);
   }
@@ -111,6 +138,7 @@ export async function deleteRDUnitFromFirestore(id: string) {
 export async function fetchRDUnitsFromFirestore(): Promise<Unit[] | null> {
   if (!db) return null;
   try {
+    const deleted = getDeletedRDUnitIds();
     const colRef = collection(db, 'rd_units');
     const snap = await getDocs(colRef);
     if (snap.empty) {
@@ -120,16 +148,16 @@ export async function fetchRDUnitsFromFirestore(): Promise<Unit[] | null> {
       const list: Unit[] = [];
       legacySnap.forEach(d => {
         const data = d.data() as Unit;
-        if (data && !isMockUnitId(data.id)) list.push(data);
+        if (data && !isMockUnitId(data.id) && !deleted.has(data.id)) list.push(data);
       });
       return list.length > 0 ? list : null;
     }
     const list: Unit[] = [];
     snap.forEach(d => {
       const data = d.data() as Unit;
-      if (data && !isMockUnitId(data.id)) list.push(data);
+      if (data && !isMockUnitId(data.id) && !deleted.has(data.id)) list.push(data);
     });
-    return list;
+    return list.length > 0 ? list : null;
   } catch (e) {
     console.warn('Firestore R&D Unit fetch note:', e);
     return null;
@@ -145,10 +173,11 @@ if (db) {
     const colRef = collection(db, 'rd_units');
     onSnapshot(colRef, (snap: any) => {
       if (snap) {
+        const deleted = getDeletedRDUnitIds();
         const list: Unit[] = [];
         snap.forEach((d: any) => {
           const data = d.data() as Unit;
-          if (data && !isMockUnitId(data.id)) {
+          if (data && !isMockUnitId(data.id) && !deleted.has(data.id)) {
             list.push(data);
           }
         });
@@ -164,6 +193,22 @@ if (db) {
   } catch (e) {
     console.warn('[UnitStore] Could not set up real-time listener:', e);
   }
+}
+
+// Subscribe to cross-tab & multi-device realtime events
+try {
+  subscribeToLabRealtimeEvents((event, payload) => {
+    if (event === 'rd_units_change') {
+      if (payload?.deletedId) {
+        markRDUnitDeleted(payload.deletedId);
+        unitsCache = unitsCache.filter(u => u.id !== payload.deletedId);
+        try { localStorage.setItem(STORAGE_KEY_UNITS, JSON.stringify(unitsCache)); } catch {}
+        notifyListeners();
+      }
+    }
+  });
+} catch (e) {
+  console.warn('Realtime subscription notice:', e);
 }
 
 async function initDataSync() {
@@ -188,6 +233,28 @@ async function initDataSync() {
   } catch (e) {
     console.warn('RD Units Cloud sync note:', e);
   }
+}
+
+export async function forceSyncRDUnits(): Promise<Unit[]> {
+  try {
+    const firestoreData = await fetchRDUnitsFromFirestore();
+    if (firestoreData && firestoreData.length > 0) {
+      unitsCache = normalizeUnitTimelines(firestoreData);
+      try { localStorage.setItem(STORAGE_KEY_UNITS, JSON.stringify(unitsCache)); } catch {}
+      notifyListeners();
+      return unitsCache;
+    }
+    const remoteData = await fetchRDUnitsFromSupabase();
+    if (remoteData && remoteData.length > 0) {
+      unitsCache = normalizeUnitTimelines(remoteData);
+      try { localStorage.setItem(STORAGE_KEY_UNITS, JSON.stringify(unitsCache)); } catch {}
+      notifyListeners();
+      return unitsCache;
+    }
+  } catch (e) {
+    console.warn('Error in forceSyncRDUnits:', e);
+  }
+  return unitsCache;
 }
 
 function notifyListeners() {
@@ -716,6 +783,7 @@ export async function deleteUnit(unitId: string) {
   if (!requireOnlineForSave(`Delete Unit (${unitId})`)) {
     return;
   }
+  markRDUnitDeleted(unitId);
   const target = unitsCache.find(u => u.id === unitId);
   const updatedUnits = unitsCache.filter(u => u.id !== unitId);
   saveLocalUnits(updatedUnits);
@@ -734,7 +802,14 @@ export async function deleteUnit(unitId: string) {
     saveLocalLogs([newLog, ...logsCache]);
   }
 
-  // Delete from Supabase & Firestore
+  // Broadcast deletion across all connected tabs / devices
+  try {
+    broadcastLabRealtimeEvent('rd_units_change', { deletedId: unitId, timestamp: Date.now() });
+  } catch (e) {
+    console.warn('Realtime broadcast notice:', e);
+  }
+
+  // Delete from Supabase & Firestore (including cloud photos)
   deleteRDUnitFromSupabase(unitId);
   deleteRDUnitFromFirestore(unitId);
 }
@@ -938,6 +1013,7 @@ export function addUnitObservation(id: string, text: string): Unit | null {
 
   if (updatedUnit) {
     syncRDUnitToSupabase(updatedUnit);
+    syncRDUnitToFirestore(updatedUnit);
   }
 
   return updatedUnit;
@@ -962,6 +1038,7 @@ export function deleteUnitObservation(id: string, obsId: string): Unit | null {
 
   if (updatedUnit) {
     syncRDUnitToSupabase(updatedUnit);
+    syncRDUnitToFirestore(updatedUnit);
   }
 
   return updatedUnit;

@@ -52,6 +52,7 @@ import {
   deleteUnit,
   calculateRemainingDays
 } from './services/unitStore';
+import { pauseAutoRefreshForForm, resumeAutoRefreshAfterSave } from './services/autoRefreshService';
 
 export function MainApp() {
   const { user, isAuthenticated, isLoading, isAdmin, isRandom } = useAuth();
@@ -109,6 +110,22 @@ export function MainApp() {
     });
     return unsubscribe;
   }, []);
+
+  // Pause auto-refresh whenever any modal form dialog is open, and resume after saving/closing
+  useEffect(() => {
+    const isFormModalOpen = isAddModalOpen || isAddProtoModalOpen || isAddPpModalOpen || Boolean(trackedUnit) || Boolean(editedUnit);
+    if (isFormModalOpen) {
+      pauseAutoRefreshForForm(
+        isAddModalOpen ? 'Add R&D Unit' :
+        isAddProtoModalOpen ? 'Add Proto Unit' :
+        isAddPpModalOpen ? 'Add PP Unit' :
+        trackedUnit ? 'Unit Timeline Form' :
+        editedUnit ? 'Edit Unit Details' : 'Form Dialog'
+      );
+    } else {
+      resumeAutoRefreshAfterSave();
+    }
+  }, [isAddModalOpen, isAddProtoModalOpen, isAddPpModalOpen, trackedUnit, editedUnit]);
 
   // Keyboard Shortcuts: Ctrl + Space to trigger voice command listening, Escape to stop
   useEffect(() => {

@@ -2,7 +2,7 @@
  * Network Connectivity & Cloud Direct-Save Manager
  * Ensures all mutations are persisted directly to Firebase Firestore & Supabase.
  * Actively monitors network connectivity in real-time (instant event + heartbeat probe)
- * Triggers interactive "No Internet Connection" modal when offline even if user is idle.
+ * Triggers interactive "No Internet Connection" modal when offline.
  */
 
 type NetworkModalListener = (isOpen: boolean, context?: string) => void;
@@ -32,7 +32,7 @@ function notifyModalListeners() {
  */
 export function isNetworkOnline(): boolean {
   if (typeof navigator !== 'undefined') {
-    return navigator.onLine && isOnlineState;
+    return navigator.onLine;
   }
   return true;
 }
@@ -56,54 +56,80 @@ export function closeNoInternetModal() {
 }
 
 /**
- * Actively tests connectivity by pinging a lightweight endpoint
+ * Actively tests connectivity by pinging internal /api/health or reliable endpoints
  */
 export async function testActiveConnection(): Promise<boolean> {
+  // If browser OS reports offline, return false
   if (typeof navigator !== 'undefined' && !navigator.onLine) {
     isOnlineState = false;
     notifyConnectionListeners(false);
     return false;
   }
+
+  // 1. Try local server health check first (most reliable, same origin)
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3000);
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
     
-    // Ping fast 204 endpoint or cache-busting timestamp
-    await fetch(`https://www.gstatic.com/generate_204?t=${Date.now()}`, {
-      method: 'HEAD',
-      mode: 'no-cors',
+    const response = await fetch(`/api/health?t=${Date.now()}`, {
+      method: 'GET',
       cache: 'no-store',
       signal: controller.signal,
     });
     clearTimeout(timeoutId);
     
-    const wasOffline = !isOnlineState;
+    if (response.ok) {
+      isOnlineState = true;
+      notifyConnectionListeners(true);
+      if (isModalOpenState) {
+        closeNoInternetModal();
+      }
+      return true;
+    }
+  } catch {
+    // Local probe timed out or had network issue, try lightweight fallback
+  }
+
+  // 2. Try lightweight external fallback
+  try {
+    const controller2 = new AbortController();
+    const timeoutId2 = setTimeout(() => controller2.abort(), 4000);
+    
+    await fetch(`https://www.gstatic.com/generate_204?t=${Date.now()}`, {
+      method: 'HEAD',
+      mode: 'no-cors',
+      cache: 'no-store',
+      signal: controller2.signal,
+    });
+    clearTimeout(timeoutId2);
+    
     isOnlineState = true;
     notifyConnectionListeners(true);
-    
-    // If modal was opened automatically due to background drop, auto close on recovery
-    if (wasOffline && isModalOpenState && currentModalContext.includes('Network connection lost')) {
-      setTimeout(() => {
-        closeNoInternetModal();
-      }, 600);
+    if (isModalOpenState) {
+      closeNoInternetModal();
     }
-    
     return true;
-  } catch (err) {
-    const wasOnline = isOnlineState;
-    isOnlineState = false;
-    notifyConnectionListeners(false);
-    
-    // If connection dropped in background while idle, show popup immediately
-    if (wasOnline || !isModalOpenState) {
-      triggerNoInternetModal('Internet connection lost');
+  } catch {
+    // If external probe fails (e.g. adblocker, DNS restriction, or slow mobile data)
+    // but navigator.onLine is true, trust navigator.onLine
+    if (typeof navigator !== 'undefined' && navigator.onLine) {
+      isOnlineState = true;
+      notifyConnectionListeners(true);
+      if (isModalOpenState) {
+        closeNoInternetModal();
+      }
+      return true;
     }
-    return false;
   }
+
+  // Confirmed offline
+  isOnlineState = false;
+  notifyConnectionListeners(false);
+  return false;
 }
 
 // -------------------------------------------------------------
-// Real-Time Background Listeners & Heartbeat Engine
+// Real-Time Background Listeners
 // -------------------------------------------------------------
 if (typeof window !== 'undefined') {
   // 1. Immediate OS / Browser Offline event
@@ -117,6 +143,8 @@ if (typeof window !== 'undefined') {
   // 2. Immediate OS / Browser Online event
   window.addEventListener('online', () => {
     console.log('[NetworkManager] Browser entered ONLINE mode, verifying ping...');
+    isOnlineState = true;
+    notifyConnectionListeners(true);
     testActiveConnection();
   });
 
@@ -126,23 +154,24 @@ if (typeof window !== 'undefined') {
     setTimeout(() => {
       triggerNoInternetModal('No initial internet connection');
     }, 400);
+  } else {
+    isOnlineState = true;
   }
 
-  // 4. Continuous Background Heartbeat (every 4 seconds)
-  // Even if user does no activity, detects silent network drops immediately
+  // 4. Periodic background state sync (every 30 seconds, non-intrusive)
   setInterval(() => {
-    if (typeof navigator !== 'undefined' && !navigator.onLine) {
-      if (isOnlineState || !isModalOpenState) {
+    if (typeof navigator !== 'undefined') {
+      if (!navigator.onLine && isOnlineState) {
         isOnlineState = false;
         notifyConnectionListeners(false);
         triggerNoInternetModal('Network disconnected');
+      } else if (navigator.onLine && !isOnlineState) {
+        isOnlineState = true;
+        notifyConnectionListeners(true);
+        closeNoInternetModal();
       }
-      return;
     }
-
-    // Fast background verification probe
-    testActiveConnection();
-  }, 4000);
+  }, 30000);
 }
 
 /**

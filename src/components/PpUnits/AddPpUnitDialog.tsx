@@ -1272,6 +1272,7 @@ export const AddPpUnitDialog: React.FC<AddPpUnitDialogProps> = ({
             <PhotoUploadSection
               photos={photos}
               onChange={(updated) => setPhotos(updated as ProtoUnitPhotos)}
+              unitId={initialUnit?.id}
               title="PP Unit Photo Uploads"
             />
 

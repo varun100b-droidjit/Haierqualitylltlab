@@ -30,6 +30,7 @@ import { LabShiftSelector } from '../Common/LabShiftSelector';
 import { SystemVersionCard } from './SystemVersionCard';
 import { ModelSheetManagementCard } from './ModelSheetManagementCard';
 import { PhotoQualityCard } from './PhotoQualityCard';
+import { AutoRefreshSettingsCard } from './AutoRefreshSettingsCard';
 import { 
   downloadAllMonsterData, 
   purgeAllSupabaseAndFirebaseData, 
@@ -436,6 +437,9 @@ export const SettingsModule: React.FC<SettingsModuleProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Auto-Refresh & Real-Time Sync Settings CardView */}
+      <AutoRefreshSettingsCard />
 
       {/* Photo Quality & Size Compression CardView */}
       <PhotoQualityCard />

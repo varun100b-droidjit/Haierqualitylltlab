@@ -1770,6 +1770,7 @@ export const ProtoReportGenerator: React.FC<ProtoReportGeneratorProps> = ({
       {/* 4. Photo Upload Section (11 Standard Fields) */}
       <PhotoUploadSection
         photos={photos}
+        unitId={selectedUnit?.id}
         onChange={(updated) => {
           setPhotos(updated as ProtoUnitPhotos);
           if (selectedUnit) {

@@ -283,6 +283,18 @@ export const InOutUnitsModule: React.FC<InOutUnitsModuleProps> = ({
               <Download className="w-4 h-4 text-emerald-400" />
               <span>Export Excel</span>
             </button>
+
+            {onOpenScanner && (
+              <button
+                type="button"
+                onClick={onOpenScanner}
+                className="px-3.5 py-2.5 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold text-xs flex items-center gap-2 shadow-lg shadow-cyan-950/60 transition-all cursor-pointer shrink-0 active:scale-95"
+                title="Open Scanner to Send ELT or Return BSR"
+              >
+                <ScanBarcode className="w-4 h-4 text-cyan-200" />
+                <span>Scan Barcode</span>
+              </button>
+            )}
           </div>
         </div>
 

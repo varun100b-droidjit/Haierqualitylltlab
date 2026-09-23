@@ -1,7 +1,7 @@
 import PizZip from 'pizzip';
 import Docxtemplater from 'docxtemplater';
 import { jsPDF } from 'jspdf';
-import { toJpeg } from 'html-to-image';
+import html2canvas from 'html2canvas';
 import { 
   PHOTO_FIELD_DEFINITIONS, 
   PhotoInsertionLog, 
@@ -1330,13 +1330,15 @@ export async function downloadElementAsPdf(
           `Rendering Page ${i + 1} of ${pageElements.length}...`
         );
 
-        const dataUrl = await toJpeg(pageEl, {
-          quality: 0.98,
+        const canvas = await html2canvas(pageEl, {
+          scale: 2,
+          useCORS: true,
+          allowTaint: true,
           backgroundColor: '#ffffff',
-          pixelRatio: 2,
-          cacheBust: true,
-          skipAutoScale: true
+          logging: false
         });
+
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.96);
 
         if (i > 0) {
           pdf.addPage();
@@ -1346,37 +1348,45 @@ export async function downloadElementAsPdf(
     } else {
       // Fallback single container capturing
       onProgress?.(30, 'Capturing Document...');
-      const dataUrl = await toJpeg(element, {
-        quality: 0.96,
+      const canvas = await html2canvas(element, {
+        scale: 2,
+        useCORS: true,
+        allowTaint: true,
         backgroundColor: '#ffffff',
-        pixelRatio: 2,
-        cacheBust: true,
-        skipAutoScale: true
+        logging: false
       });
 
-      const img = new Image();
-      await new Promise<void>((resolve, reject) => {
-        img.onload = () => resolve();
-        img.onerror = reject;
-        img.src = dataUrl;
-      });
+      const pageCanvasHeight = Math.floor(canvas.width * (pdfHeight / pdfWidth));
+      const totalPages = Math.max(1, Math.ceil(canvas.height / pageCanvasHeight));
 
-      const naturalWidth = img.naturalWidth || element.offsetWidth || 800;
-      const naturalHeight = img.naturalHeight || element.offsetHeight || 1200;
-      const imgWidth = pdfWidth;
-      const imgHeight = (naturalHeight * pdfWidth) / naturalWidth;
+      for (let pageIdx = 0; pageIdx < totalPages; pageIdx++) {
+        if (pageIdx > 0) {
+          pdf.addPage();
+        }
 
-      let heightLeft = imgHeight;
-      let position = 0;
+        const pageCanvas = document.createElement('canvas');
+        pageCanvas.width = canvas.width;
+        pageCanvas.height = pageCanvasHeight;
+        const pageCtx = pageCanvas.getContext('2d');
 
-      pdf.addImage(dataUrl, 'JPEG', 0, position, imgWidth, imgHeight, undefined, 'FAST');
-      heightLeft -= pdfHeight;
+        if (pageCtx) {
+          pageCtx.fillStyle = '#ffffff';
+          pageCtx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
 
-      while (heightLeft > 4) {
-        position -= pdfHeight;
-        pdf.addPage();
-        pdf.addImage(dataUrl, 'JPEG', 0, position, imgWidth, imgHeight, undefined, 'FAST');
-        heightLeft -= pdfHeight;
+          const srcY = pageIdx * pageCanvasHeight;
+          const sliceHeight = Math.min(pageCanvasHeight, canvas.height - srcY);
+
+          if (sliceHeight > 0) {
+            pageCtx.drawImage(
+              canvas,
+              0, srcY, canvas.width, sliceHeight,
+              0, 0, canvas.width, sliceHeight
+            );
+          }
+
+          const pageDataUrl = pageCanvas.toDataURL('image/jpeg', 0.96);
+          pdf.addImage(pageDataUrl, 'JPEG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
+        }
       }
     }
 
