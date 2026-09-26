@@ -190,6 +190,38 @@ export const LoginScreen: React.FC = () => {
             )}
           </button>
         </form>
+
+        {/* Quick Credentials Info / 1-Click Fill */}
+        <div className="mt-4 p-3 bg-slate-950/80 border border-slate-800 rounded-xl text-xs space-y-2">
+          <div className="flex items-center justify-between text-slate-400">
+            <span className="font-semibold text-slate-300 flex items-center gap-1.5">
+              <KeyRound className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Default Login Credentials</span>
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                setRole('admin');
+                setUserId('ADMIN01');
+                setPassword('Admin@123');
+                setLocalError(null);
+              }}
+              className="text-[11px] text-cyan-400 hover:text-cyan-300 font-bold bg-cyan-950/80 px-2 py-0.5 rounded border border-cyan-800 hover:border-cyan-600 transition-colors cursor-pointer"
+            >
+              Auto-Fill
+            </button>
+          </div>
+          <div className="grid grid-cols-2 gap-2 font-mono text-[11px] text-slate-300 bg-slate-900/80 p-2 rounded-lg border border-slate-800">
+            <div>
+              <span className="text-slate-500 block text-[10px] uppercase font-sans">User ID</span>
+              <span className="text-cyan-300 font-bold tracking-wide">ADMIN01</span>
+            </div>
+            <div>
+              <span className="text-slate-500 block text-[10px] uppercase font-sans">Password</span>
+              <span className="text-amber-300 font-bold tracking-wide">Admin@123</span>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Footer Info */}

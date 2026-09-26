@@ -1,4 +1,4 @@
-import { db, isFirebaseConfigured, collection, doc, setDoc, deleteDoc, getDocs, onSnapshot } from './firebase';
+import { db, isFirebaseConfigured, collection, doc, setDoc, deleteDoc, getDocs, onSnapshot, writeBatch } from './firebase';
 import { broadcastLabRealtimeEvent, subscribeToLabRealtimeEvents } from '../lib/supabase';
 
 export interface ELTRecord {
@@ -364,20 +364,28 @@ export async function sendMachinesToELT(
     return { success: false, addedCount: 0, duplicates };
   }
 
-  // 1. Update local cache
+  // 1. Update local cache immediately (instant UI update)
   const updatedELT = [...newRecords, ...eltCache];
   saveLocalELT(updatedELT);
   notifyELTListeners(updatedELT);
 
-  // 2. Persist to Firestore
+  // 2. High-speed Firestore batch sync (atomic single commit in background)
   if (isFirebaseConfigured && db) {
-    for (const rec of newRecords) {
+    (async () => {
       try {
-        await setDoc(doc(db, 'elt_records', rec.id), rec, { merge: true });
+        const batch = writeBatch(db);
+        for (const rec of newRecords) {
+          batch.set(doc(db, 'elt_records', rec.id), rec, { merge: true });
+        }
+        await Promise.race([
+          batch.commit(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Batch commit timeout')), 2500))
+        ]);
+        console.log(`[ELT] Fast batch synced ${newRecords.length} records to Firestore`);
       } catch (e) {
-        console.warn('Failed to write ELT record to Firestore:', e);
+        console.warn('Batch write ELT record to Firestore note:', e);
       }
-    }
+    })();
   }
 
   return { success: true, addedCount: newRecords.length, duplicates };
@@ -447,14 +455,20 @@ export async function returnMachineToBSR(
 
   // 3. Atomically sync to Firestore (Delete from elt_records, Write to bsr_records)
   if (isFirebaseConfigured && db) {
-    try {
-      // Write BSR first so data is never lost
-      await setDoc(doc(db, 'bsr_records', bsrDocId), bsrRecord, { merge: true });
-      // Then remove from ELT
-      await deleteDoc(doc(db, 'elt_records', matchingELT.id));
-    } catch (e) {
-      console.warn('Failed to execute BSR transfer in Firestore:', e);
-    }
+    (async () => {
+      try {
+        const batch = writeBatch(db);
+        batch.delete(doc(db, 'elt_records', matchingELT.id));
+        batch.set(doc(db, 'bsr_records', bsrRecord.id), bsrRecord, { merge: true });
+        await Promise.race([
+          batch.commit(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Single return timeout')), 2500))
+        ]);
+        console.log(`[BSR] Fast return synced to Firestore for ${cleanSerial}`);
+      } catch (e) {
+        console.warn('Failed to execute BSR transfer in Firestore:', e);
+      }
+    })();
   }
 
   return { success: true, bsrRecord };
@@ -535,23 +549,26 @@ export async function returnMultipleMachinesToBSR(
   saveLocalBSR(updatedBSR);
   notifyBSRListeners(updatedBSR);
 
-  // 3. Atomically sync to Firestore
+  // 3. Atomically sync to Firestore in high-speed single batch commit
   if (isFirebaseConfigured && db) {
-    for (const bsrRec of newBSRRecords) {
+    (async () => {
       try {
-        await setDoc(doc(db, 'bsr_records', bsrRec.id), bsrRec, { merge: true });
+        const batch = writeBatch(db);
+        for (const bsrRec of newBSRRecords) {
+          batch.set(doc(db, 'bsr_records', bsrRec.id), bsrRec, { merge: true });
+        }
+        for (const eltId of deletedELTIds) {
+          batch.delete(doc(db, 'elt_records', eltId));
+        }
+        await Promise.race([
+          batch.commit(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Batch commit timeout')), 2500))
+        ]);
+        console.log(`[BSR] Fast batch returned ${newBSRRecords.length} machines to BSR in Firestore`);
       } catch (e: any) {
-        errors.push(`Failed to save ${bsrRec.serialNumber} to BSR: ${e.message}`);
+        console.warn('Batch write BSR record to Firestore note:', e);
       }
-    }
-
-    for (const eltId of deletedELTIds) {
-      try {
-        await deleteDoc(doc(db, 'elt_records', eltId));
-      } catch (e: any) {
-        errors.push(`Failed to remove ELT record ${eltId}: ${e.message}`);
-      }
-    }
+    })();
   }
 
   return { success: true, returnedCount: newBSRRecords.length, notFound, errors };

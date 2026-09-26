@@ -162,6 +162,37 @@ export const SmogBarcodeScannerModal: React.FC<SmogBarcodeScannerModalProps> = (
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const scannerContainerId = 'smog-barcode-reader-viewfinder';
 
+  // Omnidirectional (360° All-Angle: Sidha, Ulta, Left, Right) & Rapid 1-by-1 scanning refs
+  const omniIntervalRef = useRef<any>(null);
+  const nativeBarcodeDetectorRef = useRef<any>(null);
+  const [isScanSuccessFlashing, setIsScanSuccessFlashing] = useState<boolean>(false);
+  const flashTimeoutRef = useRef<any>(null);
+  const scannedSerialsSetRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    scannedSerialsSetRef.current = new Set(scannedMachines.map(m => m.serialNumber.trim().toUpperCase()));
+  }, [scannedMachines]);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && 'BarcodeDetector' in window) {
+      try {
+        nativeBarcodeDetectorRef.current = new (window as any).BarcodeDetector({
+          formats: ['code_128', 'code_39', 'code_93', 'codabar', 'itf', 'ean_13', 'ean_8', 'upc_a', 'upc_e', 'qr_code', 'data_matrix']
+        });
+      } catch (e) {
+        try {
+          nativeBarcodeDetectorRef.current = new (window as any).BarcodeDetector();
+        } catch {}
+      }
+    }
+  }, []);
+
+  const triggerScanFlash = () => {
+    setIsScanSuccessFlashing(true);
+    if (flashTimeoutRef.current) clearTimeout(flashTimeoutRef.current);
+    flashTimeoutRef.current = setTimeout(() => setIsScanSuccessFlashing(false), 450);
+  };
+
   // Throttling and duplicate prevention
   const lastScannedBarcodeRef = useRef<string>('');
   const lastScanTimeRef = useRef<number>(0);
@@ -281,9 +312,9 @@ export const SmogBarcodeScannerModal: React.FC<SmogBarcodeScannerModalProps> = (
 
     // Check duplicate in active batch
     if (scannedMachines.some(m => m.serialNumber === cleanSerial)) {
-      setToastFeedback({ serial: cleanSerial, model: 'Already scanned in this batch!', isError: true });
       if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
-      toastTimeoutRef.current = setTimeout(() => setToastFeedback(null), 2500);
+      setToastFeedback({ serial: cleanSerial, model: 'Already in batch (Point at next machine)', isError: false });
+      toastTimeoutRef.current = setTimeout(() => setToastFeedback(null), 1800);
       return;
     }
 
@@ -322,14 +353,21 @@ export const SmogBarcodeScannerModal: React.FC<SmogBarcodeScannerModalProps> = (
     toastTimeoutRef.current = setTimeout(() => setToastFeedback(null), 2500);
   };
 
-  // Handle barcode scanned from camera or scanner gun
+  // Handle barcode scanned from camera or scanner gun (Omnidirectional & 1-by-1 Sequential)
   const handleBarcodeScanned = (rawBarcode: string) => {
     if (!rawBarcode) return;
     const cleanBarcode = rawBarcode.trim().toUpperCase();
     if (!cleanBarcode) return;
 
+    const now = Date.now();
+
     // RULE: Barcode MUST start with 'A'
     if (!cleanBarcode.startsWith('A')) {
+      if (cleanBarcode === lastScannedBarcodeRef.current && now - lastScanTimeRef.current < 2500) {
+        return;
+      }
+      lastScannedBarcodeRef.current = cleanBarcode;
+      lastScanTimeRef.current = now;
       playRejectBeep();
       if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
       setToastFeedback({
@@ -337,18 +375,29 @@ export const SmogBarcodeScannerModal: React.FC<SmogBarcodeScannerModalProps> = (
         model: "Rejected: Only Barcodes starting with 'A' are accepted!",
         isError: true
       });
-      toastTimeoutRef.current = setTimeout(() => setToastFeedback(null), 3500);
+      toastTimeoutRef.current = setTimeout(() => setToastFeedback(null), 2500);
       return;
     }
 
-    const now = Date.now();
-
-    // Prevent immediate duplicate reading
-    if (cleanBarcode === lastScannedBarcodeRef.current && now - lastScanTimeRef.current < 2200) {
+    // Check duplicate in current batch - silently ignore so user can pan to next
+    if (scannedSerialsSetRef.current.has(cleanBarcode)) {
+      if (cleanBarcode === lastScannedBarcodeRef.current && now - lastScanTimeRef.current < 2500) {
+        return;
+      }
+      lastScannedBarcodeRef.current = cleanBarcode;
+      lastScanTimeRef.current = now;
+      if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+      setToastFeedback({
+        serial: cleanBarcode,
+        model: 'Already Scanned (Ready for next machine)',
+        isError: false
+      });
+      toastTimeoutRef.current = setTimeout(() => setToastFeedback(null), 1800);
       return;
     }
 
-    if (isProcessingScanRef.current || now - lastScanTimeRef.current < 600) {
+    // Fast sequential throttle: 250ms cooldown for new barcodes!
+    if (isProcessingScanRef.current || (cleanBarcode === lastScannedBarcodeRef.current && now - lastScanTimeRef.current < 1000)) {
       return;
     }
 
@@ -356,11 +405,14 @@ export const SmogBarcodeScannerModal: React.FC<SmogBarcodeScannerModalProps> = (
     lastScannedBarcodeRef.current = cleanBarcode;
     lastScanTimeRef.current = now;
 
+    // Trigger visual green laser flash on viewfinder
+    triggerScanFlash();
+
     addScannedMachine(cleanBarcode);
 
     setTimeout(() => {
       isProcessingScanRef.current = false;
-    }, 600);
+    }, 250);
   };
 
   const handleBarcodeScannedRef = useRef(handleBarcodeScanned);
@@ -368,9 +420,42 @@ export const SmogBarcodeScannerModal: React.FC<SmogBarcodeScannerModalProps> = (
     handleBarcodeScannedRef.current = handleBarcodeScanned;
   });
 
+  const stopOmniDirectionalScanner = () => {
+    if (omniIntervalRef.current) {
+      clearInterval(omniIntervalRef.current);
+      omniIntervalRef.current = null;
+    }
+  };
+
+  const startOmniDirectionalScanner = () => {
+    stopOmniDirectionalScanner();
+
+    omniIntervalRef.current = setInterval(async () => {
+      if (isProcessingScanRef.current) return;
+      const videoEl = document.querySelector(`#${scannerContainerId} video`) as HTMLVideoElement | null;
+      if (!videoEl || videoEl.readyState < 2 || videoEl.paused || videoEl.ended) return;
+
+      const detector = nativeBarcodeDetectorRef.current;
+      if (detector) {
+        try {
+          const detected = await detector.detect(videoEl);
+          if (detected && detected.length > 0) {
+            for (const item of detected) {
+              if (item.rawValue) {
+                handleBarcodeScannedRef.current(item.rawValue);
+                break;
+              }
+            }
+          }
+        } catch {}
+      }
+    }, 70);
+  };
+
   // Stop Camera Function
   const stopCamera = async () => {
     isStartingRef.current = false;
+    stopOmniDirectionalScanner();
     const scanner = html5QrCodeRef.current;
     if (scanner) {
       try {
@@ -428,14 +513,15 @@ export const SmogBarcodeScannerModal: React.FC<SmogBarcodeScannerModalProps> = (
         Html5QrcodeSupportedFormats.DATA_MATRIX
       ];
 
-      // Wide barcode scan area optimized for horizontal machine serials
+      // Omnidirectional square scan area
       const qrConfig = {
-        fps: 15,
+        fps: 20,
         qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
-          const w = Math.min(Math.floor(viewfinderWidth * 0.88), 360);
-          const h = Math.min(Math.floor(viewfinderHeight * 0.65), 180);
-          return { width: Math.max(w, 200), height: Math.max(h, 100) };
-        }
+          const dim = Math.min(viewfinderWidth, viewfinderHeight);
+          const size = Math.max(Math.floor(dim * 0.90), 220);
+          return { width: size, height: size };
+        },
+        aspectRatio: 1.0
       };
 
       // 4. Enumerate cameras
@@ -480,7 +566,10 @@ export const SmogBarcodeScannerModal: React.FC<SmogBarcodeScannerModalProps> = (
           // Create a fresh Html5Qrcode instance for each config to avoid corrupted state machines
           const scanner = new Html5Qrcode(scannerContainerId, {
             formatsToSupport: formats,
-            verbose: false
+            verbose: false,
+            experimentalFeatures: {
+              useBarCodeDetectorIfSupported: true
+            }
           });
           html5QrCodeRef.current = scanner;
 
@@ -501,6 +590,7 @@ export const SmogBarcodeScannerModal: React.FC<SmogBarcodeScannerModalProps> = (
           isScanningRef.current = true;
           setIsCameraActive(true);
           setCameraError(null);
+          startOmniDirectionalScanner();
           if (typeof config === 'string') {
             setActiveCameraId(config);
           }
@@ -809,14 +899,34 @@ export const SmogBarcodeScannerModal: React.FC<SmogBarcodeScannerModalProps> = (
                 className="w-full h-[145px] sm:h-[165px] min-h-[145px] sm:min-h-[165px] flex items-center justify-center overflow-hidden" 
               />
 
+              {/* 360° All-Angle & Sequential Badge */}
+              {isCameraActive && (
+                <>
+                  <div className="absolute top-2 left-2 z-20 flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-slate-950/80 border border-cyan-500/60 text-[9px] text-cyan-300 font-extrabold backdrop-blur-xs shadow-md">
+                    <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping shrink-0" />
+                    <span>360° All-Angle (Sidha • Ulta • Left • Right)</span>
+                  </div>
+                  <div className="absolute top-2 right-2 z-20 flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-950/90 border border-emerald-500/80 text-[10px] text-emerald-300 font-black backdrop-blur-xs shadow-md">
+                    <CheckCircle2 className="w-3 h-3 text-emerald-400 shrink-0" />
+                    <span>Scanned: {scannedMachines.length} (1 by 1)</span>
+                  </div>
+                </>
+              )}
+
               {/* Scanning visual overlay with laser */}
               {isCameraActive && (
                 <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center">
-                  <div className="w-[80%] max-w-[280px] h-20 sm:h-22 border-2 border-dashed border-cyan-400/90 rounded-xl relative overflow-hidden shadow-[0_0_25px_rgba(6,182,212,0.3)]">
+                  <div className={`w-[80%] max-w-[280px] h-20 sm:h-22 border-2 rounded-xl relative overflow-hidden transition-all duration-150 ${
+                    isScanSuccessFlashing
+                      ? 'border-emerald-400 bg-emerald-500/20 shadow-[0_0_35px_rgba(52,211,153,0.9)] scale-102 ring-4 ring-emerald-400/50'
+                      : 'border-dashed border-cyan-400/90 shadow-[0_0_25px_rgba(6,182,212,0.3)]'
+                  }`}>
                     {/* Laser scanning line animation */}
-                    <div className="w-full h-1 bg-gradient-to-r from-transparent via-cyan-400 to-transparent absolute top-0 animate-[bounce_2s_infinite]" />
-                    <div className="absolute bottom-1 right-2 text-[9px] font-mono text-cyan-400 font-bold drop-shadow">
-                      Point at Barcode (Starts with 'A')
+                    <div className={`w-full h-1 bg-gradient-to-r from-transparent via-cyan-400 to-transparent absolute top-0 animate-[bounce_2s_infinite] ${
+                      isScanSuccessFlashing ? 'via-emerald-300' : ''
+                    }`} />
+                    <div className="absolute bottom-1 right-2 text-[9px] font-mono text-cyan-300 font-bold drop-shadow">
+                      {isScanSuccessFlashing ? '✓ Captured! Next...' : "Point at Barcode (Any Angle • Starts 'A')"}
                     </div>
                   </div>
                 </div>
