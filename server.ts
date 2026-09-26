@@ -1,5 +1,6 @@
 import express from 'express';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Modality } from '@google/genai';
@@ -350,6 +351,181 @@ No backticks, no markdown, just clean raw JSON array.`;
     } catch (err: any) {
       console.error('Smog OCR extraction error:', err);
       return res.status(500).json({ success: false, error: err.message || 'Error processing photo' });
+    }
+  });
+
+  // Persistent Cross-Device Sync Endpoints (Mobile <-> Desktop <-> Tablet)
+  const DATA_DIR = path.join(process.cwd(), 'lab_data');
+  if (!fs.existsSync(DATA_DIR)) {
+    try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch {}
+  }
+
+  const getSyncFilePath = (name: string) => path.join(DATA_DIR, `${name}.json`);
+
+  const readJson = <T>(name: string, fallback: T): T => {
+    try {
+      const p = getSyncFilePath(name);
+      if (!fs.existsSync(p)) return fallback;
+      const content = fs.readFileSync(p, 'utf-8');
+      return JSON.parse(content) as T;
+    } catch {
+      return fallback;
+    }
+  };
+
+  const writeJson = <T>(name: string, data: T) => {
+    try {
+      const p = getSyncFilePath(name);
+      fs.writeFileSync(p, JSON.stringify(data, null, 2), 'utf-8');
+    } catch (err) {
+      console.error(`Error saving ${name}.json:`, err);
+    }
+  };
+
+  // 1. ELT Records Cross-Device Sync
+  app.get('/api/sync/elt-records', (_req, res) => {
+    const records = readJson<any[]>('elt_records', []);
+    res.json({ success: true, records });
+  });
+
+  app.post('/api/sync/elt-records', (req, res) => {
+    try {
+      const incoming: any[] = req.body?.records || (req.body?.record ? [req.body.record] : []);
+      if (!Array.isArray(incoming) || incoming.length === 0) {
+        return res.status(400).json({ success: false, error: 'Records array required' });
+      }
+
+      const existing = readJson<any[]>('elt_records', []);
+      const existingSerials = new Set(existing.map(r => (r.serialNumber || '').trim().toUpperCase()));
+
+      const added: any[] = [];
+      const duplicates: string[] = [];
+
+      for (const rec of incoming) {
+        const serial = (rec.serialNumber || '').trim().toUpperCase();
+        if (!serial) continue;
+        if (existingSerials.has(serial)) {
+          duplicates.push(serial);
+        } else {
+          existingSerials.add(serial);
+          existing.unshift(rec);
+          added.push(rec);
+        }
+      }
+
+      writeJson('elt_records', existing);
+      res.json({ success: true, addedCount: added.length, duplicates, records: existing });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 2. BSR Records & Return Cross-Device Sync
+  app.get('/api/sync/bsr-records', (_req, res) => {
+    const records = readJson<any[]>('bsr_records', []);
+    res.json({ success: true, records });
+  });
+
+  app.post('/api/sync/bsr-records', (req, res) => {
+    try {
+      const serialNumbers: string[] = req.body?.serialNumbers || (req.body?.serialNumber ? [req.body.serialNumber] : []);
+      const returnedBy = req.body?.returnedBy || { userId: 'ADMIN01', name: 'Admin' };
+      const rawRecords: any[] = req.body?.records || [];
+
+      let existingELT = readJson<any[]>('elt_records', []);
+      let existingBSR = readJson<any[]>('bsr_records', []);
+
+      if (rawRecords.length > 0) {
+        // Direct merge
+        for (const r of rawRecords) {
+          const s = (r.serialNumber || '').trim().toUpperCase();
+          if (!existingBSR.some(b => (b.serialNumber || '').trim().toUpperCase() === s)) {
+            existingBSR.unshift(r);
+          }
+          // Remove from ELT
+          existingELT = existingELT.filter(e => (e.serialNumber || '').trim().toUpperCase() !== s);
+        }
+      } else if (serialNumbers.length > 0) {
+        const now = new Date();
+        const bsrDateStr = `${now.toISOString().slice(0, 10)} ${now.toLocaleTimeString('en-GB')}`;
+
+        for (const sn of serialNumbers) {
+          const cleanSn = (sn || '').trim().toUpperCase();
+          const matchELT = existingELT.find(e => (e.serialNumber || '').trim().toUpperCase() === cleanSn);
+          if (matchELT) {
+            existingELT = existingELT.filter(e => (e.serialNumber || '').trim().toUpperCase() !== cleanSn);
+            const bsrRec = {
+              id: `BSR-${cleanSn.replace(/[^A-Z0-9_-]/gi, '_')}`,
+              modelName: matchELT.modelName,
+              materialCode: matchELT.materialCode,
+              serialNumber: cleanSn,
+              processType: 'BSR Return',
+              status: 'Returned from BSR',
+              originalELTDateTime: `${matchELT.eltDate} ${matchELT.eltTime}`,
+              bsrReturnDateTime: bsrDateStr,
+              scannedByUserId: matchELT.scannedByUserId || 'ADMIN01',
+              scannedByName: matchELT.scannedByName || 'Admin',
+              returnedByUserId: returnedBy.userId || 'ADMIN01',
+              returnedByName: returnedBy.name || 'Admin',
+              createdAt: now.toISOString(),
+              timestamp: now.getTime()
+            };
+            existingBSR.unshift(bsrRec);
+          }
+        }
+      }
+
+      writeJson('elt_records', existingELT);
+      writeJson('bsr_records', existingBSR);
+
+      res.json({ success: true, eltRecords: existingELT, bsrRecords: existingBSR });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 3. R&D Units Cross-Device Sync
+  app.get('/api/sync/rd-units', (_req, res) => {
+    const units = readJson<any[]>('rd_units', []);
+    res.json({ success: true, units });
+  });
+
+  app.post('/api/sync/rd-units', (req, res) => {
+    try {
+      const incoming: any[] = req.body?.units || (req.body?.unit ? [req.body.unit] : []);
+      if (!Array.isArray(incoming) || incoming.length === 0) {
+        return res.status(400).json({ success: false, error: 'Units array required' });
+      }
+
+      let existing = readJson<any[]>('rd_units', []);
+      for (const u of incoming) {
+        if (!u.id) continue;
+        const idx = existing.findIndex(e => e.id === u.id);
+        if (idx >= 0) {
+          existing[idx] = { ...existing[idx], ...u };
+        } else {
+          existing.unshift(u);
+        }
+      }
+
+      writeJson('rd_units', existing);
+      res.json({ success: true, units: existing });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post('/api/sync/delete-unit', (req, res) => {
+    try {
+      const { id } = req.body;
+      if (!id) return res.status(400).json({ success: false, error: 'id required' });
+
+      let existing = readJson<any[]>('rd_units', []);
+      existing = existing.filter(u => u.id !== id);
+      writeJson('rd_units', existing);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
     }
   });
 

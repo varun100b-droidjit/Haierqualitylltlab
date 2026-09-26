@@ -229,6 +229,21 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
     }
   };
 
+  const speakAlreadyScanned = () => {
+    try {
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+        const utter = new SpeechSynthesisUtterance('Already Scanned');
+        utter.rate = 1.05;
+        utter.pitch = 1.0;
+        utter.lang = 'en-US';
+        window.speechSynthesis.speak(utter);
+      }
+    } catch {
+      // Audio fallback
+    }
+  };
+
   // Helper to sanitize scanned barcode
   const sanitizeBarcode = (raw: string): string => {
     let clean = (raw || '').replace(/[\r\n\t]/g, '').trim().toUpperCase();
@@ -243,29 +258,27 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
     return clean.trim();
   };
 
-  // Add scanned machine to list (matching Smog Scanner pattern)
+  // Add scanned machine to list (accepts all standard barcode types: numbers, letters, 1D/2D)
   const addScannedMachine = (rawSerial: string, explicitModel?: string) => {
     if (!rawSerial) return;
     const cleanSerial = sanitizeBarcode(rawSerial);
-    if (!cleanSerial) return;
+    if (!cleanSerial || cleanSerial.length < 3) return;
 
-    // RULE: Barcode MUST start with 'A'
-    if (!cleanSerial.startsWith('A')) {
+    const currentProcess = selectedProcessRef.current;
+
+    // Check duplicate in current batch
+    if (machineRows.some(r => sanitizeBarcode(r.serialNumber) === cleanSerial)) {
+      speakAlreadyScanned();
       playRejectBeep();
-      setBatchError(`Invalid Barcode "${cleanSerial}": Only barcodes starting with 'A' are accepted.`);
       if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
       setScanFeedbackToast({
         serial: cleanSerial,
-        model: "Rejected: Must start with 'A'",
+        model: 'Already Scanned (Already in list)',
         isError: true
       });
-      toastTimeoutRef.current = setTimeout(() => {
-        setScanFeedbackToast(null);
-      }, 3000);
+      toastTimeoutRef.current = setTimeout(() => setScanFeedbackToast(null), 2500);
       return;
     }
-
-    const currentProcess = selectedProcessRef.current;
 
     let modelName = explicitModel?.trim() || '';
     let materialCode = '';
@@ -275,10 +288,25 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
     let originalELTDateTime: string | undefined = undefined;
 
     if (currentProcess === 'SEND_ELT') {
+      // Check if already in ELT Record
+      const alreadyInELT = findInELTRecords(cleanSerial);
+      if (alreadyInELT) {
+        speakAlreadyScanned();
+        playRejectBeep();
+        if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+        setScanFeedbackToast({
+          serial: cleanSerial,
+          model: 'Already Scanned (Already in ELT Record)',
+          isError: true
+        });
+        toastTimeoutRef.current = setTimeout(() => setScanFeedbackToast(null), 2500);
+        return;
+      }
+
       const prefix9 = cleanSerial.length >= 9 ? cleanSerial.slice(0, 9) : cleanSerial;
       prefix = prefix9;
       materialCode = prefix9;
-      const matched = findModelByPrefix(prefix9);
+      const matched = findModelByPrefix(cleanSerial) || findModelByPrefix(prefix9);
 
       if (matched && matched.modelName) {
         modelName = modelName || matched.modelName;
@@ -287,12 +315,8 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
       } else if (modelName) {
         matchStatus = 'matched';
       } else {
-        matchStatus = 'not_found';
-        rowError = `Prefix "${prefix9}" not in Model Sheet`;
-      }
-
-      if (findInELTRecords(cleanSerial)) {
-        rowError = `Already in ELT Record!`;
+        modelName = `Machine Unit (${prefix9})`;
+        matchStatus = 'matched';
       }
     } else {
       // RETURN BSR PROCESS: Check in ELT Records
@@ -307,18 +331,6 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
         matchStatus = 'not_found';
         rowError = 'Serial Number not found in ELT Record';
       }
-    }
-
-    // Check duplicate in current batch
-    if (machineRows.some(r => sanitizeBarcode(r.serialNumber) === cleanSerial)) {
-      if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
-      setScanFeedbackToast({
-        serial: cleanSerial,
-        model: 'Already in list (Point at next machine)',
-        isError: false
-      });
-      toastTimeoutRef.current = setTimeout(() => setScanFeedbackToast(null), 2000);
-      return;
     }
 
     playScanBeep();
@@ -357,51 +369,37 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
   const handleBarcodeScanned = (rawBarcode: string) => {
     if (!rawBarcode) return;
     const cleanBarcode = sanitizeBarcode(rawBarcode);
-    if (!cleanBarcode) return;
+    if (!cleanBarcode || cleanBarcode.length < 3) return;
 
     const now = Date.now();
+    const currentProcess = selectedProcessRef.current;
 
-    // 1. RULE: Barcode MUST start with 'A'
-    if (!cleanBarcode.startsWith('A')) {
-      if (cleanBarcode === lastScannedBarcodeRef.current && now - lastScanTimeRef.current < 2500) {
+    // Check if this machine was ALREADY scanned in the current list OR already in ELT Record
+    const isAlreadyInList = scannedSerialsSetRef.current.has(cleanBarcode);
+    const isAlreadyInELT = currentProcess === 'SEND_ELT' && Boolean(findInELTRecords(cleanBarcode));
+
+    if (isAlreadyInList || isAlreadyInELT) {
+      if (cleanBarcode === lastScannedBarcodeRef.current && now - lastScanTimeRef.current < 2000) {
         return;
       }
       lastScannedBarcodeRef.current = cleanBarcode;
       lastScanTimeRef.current = now;
+
+      // Speak ALOUD: "Already Scanned"
+      speakAlreadyScanned();
       playRejectBeep();
-      setBatchError(`Invalid Barcode "${cleanBarcode}": Only barcodes starting with 'A' are accepted.`);
+
       if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
       setScanFeedbackToast({
         serial: cleanBarcode,
-        model: "Rejected: Must start with 'A'",
+        model: isAlreadyInELT ? 'Already Scanned (Already in ELT Record)' : 'Already Scanned (In current list)',
         isError: true
       });
-      toastTimeoutRef.current = setTimeout(() => {
-        setScanFeedbackToast(null);
-      }, 2500);
+      toastTimeoutRef.current = setTimeout(() => setScanFeedbackToast(null), 2500);
       return;
     }
 
-    // 2. Check if this machine was ALREADY scanned in the current list
-    if (scannedSerialsSetRef.current.has(cleanBarcode)) {
-      // Quietly ignore if camera stays pointed at the same already-scanned machine!
-      // This is crucial for smooth 1-by-1 scanning so the scanner doesn't sound alarms or lock up!
-      if (cleanBarcode === lastScannedBarcodeRef.current && now - lastScanTimeRef.current < 2500) {
-        return;
-      }
-      lastScannedBarcodeRef.current = cleanBarcode;
-      lastScanTimeRef.current = now;
-      if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
-      setScanFeedbackToast({
-        serial: cleanBarcode,
-        model: 'Already Scanned (Ready for next machine)',
-        isError: false
-      });
-      toastTimeoutRef.current = setTimeout(() => setScanFeedbackToast(null), 1800);
-      return;
-    }
-
-    // 3. Fast sequential throttle: only 250ms between scans of different barcodes!
+    // Fast sequential throttle: only 250ms between scans of different barcodes!
     if (isProcessingScanRef.current || (cleanBarcode === lastScannedBarcodeRef.current && now - lastScanTimeRef.current < 1000)) {
       return;
     }
@@ -809,19 +807,14 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
       return;
     }
 
-    // RULE: Barcode MUST start with 'A'
-    const nonA = filledRows.find(r => !r.serialNumber.trim().toUpperCase().startsWith('A'));
-    if (nonA) {
-      setBatchError(`Machine "${nonA.serialNumber}": Only barcodes starting with 'A' are accepted.`);
-      return;
-    }
-
-    // Validate Model Sheet match
-    const invalidModel = filledRows.find(r => r.matchStatus !== 'matched' || !r.modelName);
-    if (invalidModel) {
-      setBatchError(`Machine "${invalidModel.serialNumber}": Valid Model Name required from Model Sheet.`);
-      return;
-    }
+    // Ensure all machines have a valid Model Name (auto fallback if not in sheet)
+    filledRows.forEach(r => {
+      if (!r.modelName) {
+        const prefix = r.materialCode || r.prefix || r.serialNumber.slice(0, 9);
+        r.modelName = `Machine Unit (${prefix})`;
+        r.matchStatus = 'matched';
+      }
+    });
 
     // Check duplicate serials in current batch
     const serials = filledRows.map(r => r.serialNumber.trim().toUpperCase());
@@ -881,13 +874,6 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
     const filledRows = machineRows.filter(r => r.serialNumber.trim().length > 0);
     if (filledRows.length === 0) {
       setBatchError('Please scan or enter at least one machine Series No. to return.');
-      return;
-    }
-
-    // RULE: Barcode MUST start with 'A'
-    const nonA = filledRows.find(r => !r.serialNumber.trim().toUpperCase().startsWith('A'));
-    if (nonA) {
-      setBatchError(`Machine "${nonA.serialNumber}": Only barcodes starting with 'A' are accepted.`);
       return;
     }
 

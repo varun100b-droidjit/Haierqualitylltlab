@@ -110,7 +110,15 @@ if (typeof window !== 'undefined') {
    ========================================== */
 
 export async function syncRDUnitToFirestore(unit: Unit) {
-  if (!db || !unit || isMockUnitId(unit.id)) return;
+  if (!unit || isMockUnitId(unit.id)) return;
+  // Persistent Server API sync for Instant Multi-Device Availability
+  fetch('/api/sync/rd-units', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ unit })
+  }).catch(() => {});
+
+  if (!db) return;
   try {
     const docRef = doc(db, 'rd_units', unit.id);
     await setDoc(docRef, { ...unit }, { merge: true });
@@ -124,6 +132,12 @@ export async function syncRDUnitToFirestore(unit: Unit) {
 }
 
 export async function deleteRDUnitFromFirestore(id: string) {
+  fetch('/api/sync/delete-unit', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id })
+  }).catch(() => {});
+
   if (!db) return;
   try {
     await deleteUnitPhotosFromServer(id);
@@ -164,7 +178,7 @@ export async function fetchRDUnitsFromFirestore(): Promise<Unit[] | null> {
   }
 }
 
-// Automatically fetch from Firestore / Supabase on init
+// Automatically fetch from Firestore / Supabase / Server on init
 initDataSync();
 
 // Attach Real-Time Firestore Listener for Live Multi-Device Sync (Phone <-> Tablet <-> Desktop)
@@ -213,7 +227,24 @@ try {
 
 async function initDataSync() {
   try {
-    // Try fetching from Firestore first
+    // 1. Fetch from Persistent Server API first
+    try {
+      const serverRes = await fetch('/api/sync/rd-units');
+      if (serverRes.ok) {
+        const sData = await serverRes.json();
+        if (sData.success && Array.isArray(sData.units) && sData.units.length > 0) {
+          const deleted = getDeletedRDUnitIds();
+          const valid = sData.units.filter((u: any) => !deleted.has(u.id));
+          if (valid.length > 0) {
+            unitsCache = normalizeUnitTimelines(valid);
+            try { localStorage.setItem(STORAGE_KEY_UNITS, JSON.stringify(unitsCache)); } catch {}
+            notifyListeners();
+          }
+        }
+      }
+    } catch {}
+
+    // 2. Try fetching from Firestore
     const firestoreData = await fetchRDUnitsFromFirestore();
     if (firestoreData && firestoreData.length > 0) {
       unitsCache = normalizeUnitTimelines(firestoreData);
@@ -222,7 +253,7 @@ async function initDataSync() {
       return;
     }
 
-    // Fallback to Supabase
+    // 3. Fallback to Supabase
     const remoteData = await fetchRDUnitsFromSupabase();
     if (remoteData && remoteData.length > 0) {
       unitsCache = normalizeUnitTimelines(remoteData);

@@ -292,29 +292,31 @@ export const SmogBarcodeScannerModal: React.FC<SmogBarcodeScannerModalProps> = (
     } catch {}
   };
 
-  // Add a scanned machine item
+  const speakAlreadyScanned = () => {
+    try {
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+        const utter = new SpeechSynthesisUtterance('Already Scanned');
+        utter.rate = 1.05;
+        utter.pitch = 1.0;
+        utter.lang = 'en-US';
+        window.speechSynthesis.speak(utter);
+      }
+    } catch {}
+  };
+
+  // Add a scanned machine item (accepts all standard barcodes)
   const addScannedMachine = (serial: string, explicitModel?: string) => {
     const cleanSerial = serial.trim().toUpperCase();
-    if (!cleanSerial) return;
-
-    // RULE: Barcode MUST start with 'A'
-    if (!cleanSerial.startsWith('A')) {
-      playRejectBeep();
-      setToastFeedback({
-        serial: cleanSerial,
-        model: "Rejected: Only Barcodes starting with 'A' are accepted!",
-        isError: true
-      });
-      if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
-      toastTimeoutRef.current = setTimeout(() => setToastFeedback(null), 3500);
-      return;
-    }
+    if (!cleanSerial || cleanSerial.length < 3) return;
 
     // Check duplicate in active batch
     if (scannedMachines.some(m => m.serialNumber === cleanSerial)) {
+      speakAlreadyScanned();
+      playRejectBeep();
       if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
-      setToastFeedback({ serial: cleanSerial, model: 'Already in batch (Point at next machine)', isError: false });
-      toastTimeoutRef.current = setTimeout(() => setToastFeedback(null), 1800);
+      setToastFeedback({ serial: cleanSerial, model: 'Already Scanned (Already in batch)', isError: true });
+      toastTimeoutRef.current = setTimeout(() => setToastFeedback(null), 2500);
       return;
     }
 
@@ -324,13 +326,13 @@ export const SmogBarcodeScannerModal: React.FC<SmogBarcodeScannerModalProps> = (
     let prefix = '';
 
     if (!modelName) {
-      const match = findModelByPrefix(cleanSerial);
+      const match = findModelByPrefix(cleanSerial) || (cleanSerial.length >= 9 ? findModelByPrefix(cleanSerial.slice(0, 9)) : null);
       if (match) {
         modelName = match.modelName;
         materialCode = match.materialCode;
         prefix = match.materialCode;
       } else {
-        modelName = 'General Smog Unit';
+        modelName = `Smog Unit (${cleanSerial.slice(0, 9)})`;
       }
     }
 
@@ -357,42 +359,29 @@ export const SmogBarcodeScannerModal: React.FC<SmogBarcodeScannerModalProps> = (
   const handleBarcodeScanned = (rawBarcode: string) => {
     if (!rawBarcode) return;
     const cleanBarcode = rawBarcode.trim().toUpperCase();
-    if (!cleanBarcode) return;
+    if (!cleanBarcode || cleanBarcode.length < 3) return;
 
     const now = Date.now();
 
-    // RULE: Barcode MUST start with 'A'
-    if (!cleanBarcode.startsWith('A')) {
-      if (cleanBarcode === lastScannedBarcodeRef.current && now - lastScanTimeRef.current < 2500) {
+    // Check duplicate in current batch
+    if (scannedSerialsSetRef.current.has(cleanBarcode)) {
+      if (cleanBarcode === lastScannedBarcodeRef.current && now - lastScanTimeRef.current < 2000) {
         return;
       }
       lastScannedBarcodeRef.current = cleanBarcode;
       lastScanTimeRef.current = now;
+
+      // Speak ALOUD: "Already Scanned"
+      speakAlreadyScanned();
       playRejectBeep();
+
       if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
       setToastFeedback({
         serial: cleanBarcode,
-        model: "Rejected: Only Barcodes starting with 'A' are accepted!",
+        model: 'Already Scanned (Already in batch)',
         isError: true
       });
       toastTimeoutRef.current = setTimeout(() => setToastFeedback(null), 2500);
-      return;
-    }
-
-    // Check duplicate in current batch - silently ignore so user can pan to next
-    if (scannedSerialsSetRef.current.has(cleanBarcode)) {
-      if (cleanBarcode === lastScannedBarcodeRef.current && now - lastScanTimeRef.current < 2500) {
-        return;
-      }
-      lastScannedBarcodeRef.current = cleanBarcode;
-      lastScanTimeRef.current = now;
-      if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
-      setToastFeedback({
-        serial: cleanBarcode,
-        model: 'Already Scanned (Ready for next machine)',
-        isError: false
-      });
-      toastTimeoutRef.current = setTimeout(() => setToastFeedback(null), 1800);
       return;
     }
 

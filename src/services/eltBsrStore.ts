@@ -197,13 +197,74 @@ subscribeToLabRealtimeEvents((event) => {
 });
 
 /* =========================================================================
-   FIRESTORE REAL-TIME LISTENERS
+   PERSISTENT CROSS-DEVICE SERVER API & FIRESTORE REAL-TIME LISTENERS
    ========================================================================= */
 
 let isFirestoreAttached = false;
+let isServerPollingStarted = false;
+
+// Sync from persistent backend server (ensures instant Mobile <-> Desktop cross-sync)
+async function syncFromServerApi() {
+  try {
+    // 1. Fetch ELT records from server
+    const eltRes = await fetch('/api/sync/elt-records');
+    if (eltRes.ok) {
+      const data = await eltRes.json();
+      if (data.success && Array.isArray(data.records) && data.records.length > 0) {
+        // Merge without losing any local unsynced records
+        const serverMap = new Map<string, ELTRecord>();
+        data.records.forEach((r: ELTRecord) => {
+          if (r.serialNumber) serverMap.set(r.serialNumber.trim().toUpperCase(), r);
+        });
+        eltCache.forEach(r => {
+          const s = r.serialNumber.trim().toUpperCase();
+          if (!serverMap.has(s)) serverMap.set(s, r);
+        });
+        const merged = Array.from(serverMap.values());
+        if (merged.length !== eltCache.length || JSON.stringify(merged) !== JSON.stringify(eltCache)) {
+          eltCache = merged;
+          saveLocalELT(merged);
+          notifyELTListeners(merged);
+        }
+      }
+    }
+
+    // 2. Fetch BSR records from server
+    const bsrRes = await fetch('/api/sync/bsr-records');
+    if (bsrRes.ok) {
+      const data = await bsrRes.json();
+      if (data.success && Array.isArray(data.records) && data.records.length > 0) {
+        const serverMap = new Map<string, BSRRecord>();
+        data.records.forEach((r: BSRRecord) => {
+          if (r.serialNumber) serverMap.set(r.serialNumber.trim().toUpperCase(), r);
+        });
+        bsrCache.forEach(r => {
+          const s = r.serialNumber.trim().toUpperCase();
+          if (!serverMap.has(s)) serverMap.set(s, r);
+        });
+        const merged = Array.from(serverMap.values());
+        if (merged.length !== bsrCache.length || JSON.stringify(merged) !== JSON.stringify(bsrCache)) {
+          bsrCache = merged;
+          saveLocalBSR(merged);
+          notifyBSRListeners(merged);
+        }
+      }
+    }
+  } catch (err) {
+    // Server fetch quiet fallback
+  }
+}
 
 export function initCloudAndLocalELTBSR() {
   if (typeof window === 'undefined') return;
+
+  // Run instant fetch from Server API
+  syncFromServerApi();
+
+  if (!isServerPollingStarted) {
+    isServerPollingStarted = true;
+    setInterval(syncFromServerApi, 4000);
+  }
 
   if (isFirebaseConfigured && db && !isFirestoreAttached) {
     try {
@@ -369,7 +430,14 @@ export async function sendMachinesToELT(
   saveLocalELT(updatedELT);
   notifyELTListeners(updatedELT);
 
-  // 2. High-speed Firestore batch sync (atomic single commit in background)
+  // 2. Persistent Server API sync for Instant Cross-Device Availability (Mobile <-> Desktop)
+  fetch('/api/sync/elt-records', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ records: newRecords })
+  }).catch(err => console.warn('Server sync note:', err));
+
+  // 3. High-speed Firestore batch sync (atomic single commit in background)
   if (isFirebaseConfigured && db) {
     (async () => {
       try {
@@ -377,10 +445,7 @@ export async function sendMachinesToELT(
         for (const rec of newRecords) {
           batch.set(doc(db, 'elt_records', rec.id), rec, { merge: true });
         }
-        await Promise.race([
-          batch.commit(),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('Batch commit timeout')), 2500))
-        ]);
+        await batch.commit();
         console.log(`[ELT] Fast batch synced ${newRecords.length} records to Firestore`);
       } catch (e) {
         console.warn('Batch write ELT record to Firestore note:', e);
@@ -453,6 +518,13 @@ export async function returnMachineToBSR(
   saveLocalBSR(updatedBSR);
   notifyBSRListeners(updatedBSR);
 
+  // Persistent Server API sync (instant multi-device sync)
+  fetch('/api/sync/bsr-records', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ serialNumbers: [cleanSerial], returnedBy })
+  }).catch(err => console.warn('Server sync note:', err));
+
   // 3. Atomically sync to Firestore (Delete from elt_records, Write to bsr_records)
   if (isFirebaseConfigured && db) {
     (async () => {
@@ -460,10 +532,7 @@ export async function returnMachineToBSR(
         const batch = writeBatch(db);
         batch.delete(doc(db, 'elt_records', matchingELT.id));
         batch.set(doc(db, 'bsr_records', bsrRecord.id), bsrRecord, { merge: true });
-        await Promise.race([
-          batch.commit(),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('Single return timeout')), 2500))
-        ]);
+        await batch.commit();
         console.log(`[BSR] Fast return synced to Firestore for ${cleanSerial}`);
       } catch (e) {
         console.warn('Failed to execute BSR transfer in Firestore:', e);
@@ -549,6 +618,13 @@ export async function returnMultipleMachinesToBSR(
   saveLocalBSR(updatedBSR);
   notifyBSRListeners(updatedBSR);
 
+  // Persistent Server API sync
+  fetch('/api/sync/bsr-records', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ serialNumbers: cleanedSerials, returnedBy })
+  }).catch(err => console.warn('Server sync note:', err));
+
   // 3. Atomically sync to Firestore in high-speed single batch commit
   if (isFirebaseConfigured && db) {
     (async () => {
@@ -560,10 +636,7 @@ export async function returnMultipleMachinesToBSR(
         for (const eltId of deletedELTIds) {
           batch.delete(doc(db, 'elt_records', eltId));
         }
-        await Promise.race([
-          batch.commit(),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('Batch commit timeout')), 2500))
-        ]);
+        await batch.commit();
         console.log(`[BSR] Fast batch returned ${newBSRRecords.length} machines to BSR in Firestore`);
       } catch (e: any) {
         console.warn('Batch write BSR record to Firestore note:', e);
