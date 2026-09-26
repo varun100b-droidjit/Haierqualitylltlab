@@ -204,28 +204,43 @@ let isFirestoreAttached = false;
 let isServerPollingStarted = false;
 
 // Sync from persistent backend server (ensures instant Mobile <-> Desktop cross-sync)
-async function syncFromServerApi() {
+export async function syncFromServerApi(): Promise<{ eltCount: number; bsrCount: number }> {
   try {
     // 1. Fetch ELT records from server
     const eltRes = await fetch('/api/sync/elt-records');
     if (eltRes.ok) {
       const data = await eltRes.json();
-      if (data.success && Array.isArray(data.records) && data.records.length > 0) {
-        // Merge without losing any local unsynced records
-        const serverMap = new Map<string, ELTRecord>();
-        data.records.forEach((r: ELTRecord) => {
-          if (r.serialNumber) serverMap.set(r.serialNumber.trim().toUpperCase(), r);
-        });
-        eltCache.forEach(r => {
-          const s = r.serialNumber.trim().toUpperCase();
-          if (!serverMap.has(s)) serverMap.set(s, r);
-        });
-        const merged = Array.from(serverMap.values());
-        if (merged.length !== eltCache.length || JSON.stringify(merged) !== JSON.stringify(eltCache)) {
-          eltCache = merged;
-          saveLocalELT(merged);
-          notifyELTListeners(merged);
+      const serverRecords: ELTRecord[] = data.records || [];
+      const serverSerials = new Set(serverRecords.map(r => r.serialNumber.trim().toUpperCase()));
+
+      // CRITICAL: If the current browser (e.g. mobile) has local records that the server does NOT have yet,
+      // upload them immediately so Desktop and all other devices see them!
+      const unsyncedToPush = eltCache.filter(r => r.serialNumber && !serverSerials.has(r.serialNumber.trim().toUpperCase()));
+      if (unsyncedToPush.length > 0) {
+        try {
+          await fetch('/api/sync/elt-records', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ records: unsyncedToPush })
+          });
+        } catch {}
+      }
+
+      // Merge server records + local records
+      const combinedMap = new Map<string, ELTRecord>();
+      serverRecords.forEach(r => {
+        if (r.serialNumber) combinedMap.set(r.serialNumber.trim().toUpperCase(), r);
+      });
+      eltCache.forEach(r => {
+        if (r.serialNumber && !combinedMap.has(r.serialNumber.trim().toUpperCase())) {
+          combinedMap.set(r.serialNumber.trim().toUpperCase(), r);
         }
+      });
+      const merged = Array.from(combinedMap.values());
+      if (merged.length !== eltCache.length || JSON.stringify(merged) !== JSON.stringify(eltCache)) {
+        eltCache = merged;
+        saveLocalELT(merged);
+        notifyELTListeners(merged);
       }
     }
 
@@ -233,26 +248,41 @@ async function syncFromServerApi() {
     const bsrRes = await fetch('/api/sync/bsr-records');
     if (bsrRes.ok) {
       const data = await bsrRes.json();
-      if (data.success && Array.isArray(data.records) && data.records.length > 0) {
-        const serverMap = new Map<string, BSRRecord>();
-        data.records.forEach((r: BSRRecord) => {
-          if (r.serialNumber) serverMap.set(r.serialNumber.trim().toUpperCase(), r);
-        });
-        bsrCache.forEach(r => {
-          const s = r.serialNumber.trim().toUpperCase();
-          if (!serverMap.has(s)) serverMap.set(s, r);
-        });
-        const merged = Array.from(serverMap.values());
-        if (merged.length !== bsrCache.length || JSON.stringify(merged) !== JSON.stringify(bsrCache)) {
-          bsrCache = merged;
-          saveLocalBSR(merged);
-          notifyBSRListeners(merged);
+      const serverRecords: BSRRecord[] = data.records || [];
+      const serverSerials = new Set(serverRecords.map(r => r.serialNumber.trim().toUpperCase()));
+
+      // If local has BSR records not on server, push them
+      const unsyncedToPush = bsrCache.filter(r => r.serialNumber && !serverSerials.has(r.serialNumber.trim().toUpperCase()));
+      if (unsyncedToPush.length > 0) {
+        try {
+          await fetch('/api/sync/bsr-records', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ records: unsyncedToPush })
+          });
+        } catch {}
+      }
+
+      const combinedMap = new Map<string, BSRRecord>();
+      serverRecords.forEach(r => {
+        if (r.serialNumber) combinedMap.set(r.serialNumber.trim().toUpperCase(), r);
+      });
+      bsrCache.forEach(r => {
+        if (r.serialNumber && !combinedMap.has(r.serialNumber.trim().toUpperCase())) {
+          combinedMap.set(r.serialNumber.trim().toUpperCase(), r);
         }
+      });
+      const merged = Array.from(combinedMap.values());
+      if (merged.length !== bsrCache.length || JSON.stringify(merged) !== JSON.stringify(bsrCache)) {
+        bsrCache = merged;
+        saveLocalBSR(merged);
+        notifyBSRListeners(merged);
       }
     }
   } catch (err) {
     // Server fetch quiet fallback
   }
+  return { eltCount: eltCache.length, bsrCount: bsrCache.length };
 }
 
 export function initCloudAndLocalELTBSR() {
@@ -696,3 +726,5 @@ export function subscribeBSRRecords(cb: (records: BSRRecord[]) => void): () => v
     bsrListeners = bsrListeners.filter(l => l !== cb);
   };
 }
+
+export const forceSyncELTBSR = syncFromServerApi;

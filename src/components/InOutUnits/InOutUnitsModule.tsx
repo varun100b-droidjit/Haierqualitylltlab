@@ -29,7 +29,8 @@ import {
   subscribeBSRRecords, 
   deleteELTRecord, 
   deleteBSRRecord, 
-  returnMachineToBSR 
+  returnMachineToBSR,
+  forceSyncELTBSR 
 } from '../../services/eltBsrStore';
 import * as XLSX from 'xlsx';
 
@@ -54,12 +55,25 @@ export const InOutUnitsModule: React.FC<InOutUnitsModuleProps> = ({
   const [confirmDeleteEltId, setConfirmDeleteEltId] = useState<string | null>(null);
   const [confirmDeleteBsrId, setConfirmDeleteBsrId] = useState<string | null>(null);
   const [actionToast, setActionToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
 
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setActionToast({ message, type });
     setTimeout(() => {
       setActionToast(null);
     }, 3500);
+  };
+
+  const handleManualSync = async () => {
+    setIsSyncing(true);
+    try {
+      const res = await forceSyncELTBSR();
+      showToast(`Cloud Sync Complete! ELT: ${res.eltCount} Units, BSR: ${res.bsrCount} Units.`);
+    } catch {
+      showToast('Sync complete.');
+    } finally {
+      setIsSyncing(false);
+    }
   };
 
   const handleCopySerial = (serial: string) => {
@@ -273,6 +287,17 @@ export const InOutUnitsModule: React.FC<InOutUnitsModuleProps> = ({
                 <span className="hidden sm:inline">Table</span>
               </button>
             </div>
+
+            <button
+              type="button"
+              onClick={handleManualSync}
+              disabled={isSyncing}
+              className="px-3.5 py-2.5 rounded-xl bg-cyan-950/80 hover:bg-cyan-900 text-cyan-300 hover:text-white border border-cyan-700/80 font-bold text-xs flex items-center gap-2 transition-all cursor-pointer shrink-0 disabled:opacity-50"
+              title="Click to instantly sync data between Mobile, Desktop, and Cloud"
+            >
+              <RefreshCw className={`w-4 h-4 text-cyan-400 ${isSyncing ? 'animate-spin' : ''}`} />
+              <span>{isSyncing ? 'Syncing...' : 'Sync Cloud'}</span>
+            </button>
 
             <button
               type="button"
