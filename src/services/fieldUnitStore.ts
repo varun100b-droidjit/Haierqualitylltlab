@@ -125,12 +125,12 @@ subscribeToLabRealtimeEvents((event, payload) => {
   }
 });
 
-// Periodic background sync: Poll cloud every 5 seconds for instant multi-device sync, and push pending units
+// Periodic background sync: Poll cloud every 2.5 seconds for instant multi-device sync across all browsers
 if (typeof window !== 'undefined') {
   setInterval(() => {
     initDataSync();
     pushPendingLocalUnitsToFirestore();
-  }, 5000);
+  }, 2500);
 
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
@@ -227,40 +227,43 @@ export async function fetchFieldUnitsFromFirestore(): Promise<FieldUnit[] | null
 /**
  * Merges incoming remote records with the local cache in a NON-DESTRUCTIVE manner.
  * Prioritizes remote records as the cloud source of truth, while preserving any
- * locally created units that are currently pending cloud upload.
+/**
+ * Merges incoming remote records with the local cache in a NON-DESTRUCTIVE manner.
+ * Prioritizes remote records as the cloud/server source of truth for status and stages,
+ * while preserving any genuine locally created units that have not yet reached the server.
  */
 function mergeWithLocalCache(remoteUnits: FieldUnit[]): FieldUnit[] {
   const deleted = getDeletedFieldUnitIds();
   const map = new Map<string, FieldUnit>();
 
-  // 1. All valid remote units from Firestore / cloud
+  // 1. All valid remote units from Central Server / Supabase / Firestore
   remoteUnits.forEach(rem => {
     if (!rem || !rem.id || deleted.has(rem.id)) return;
     const local = fieldUnitsCache.find(l => l.id === rem.id);
-    if (local && local.photos && typeof local.photos === 'object') {
-      const mergedPhotos: Record<string, string> = { ...(rem.photos || {}) };
-      Object.entries(local.photos).forEach(([k, v]) => {
-        if (typeof v === 'string' && v.startsWith('data:image/') && (!mergedPhotos[k] || !mergedPhotos[k].startsWith('data:image/'))) {
-          mergedPhotos[k] = v;
-        }
-      });
-      rem.photos = mergedPhotos;
+    if (local) {
+      // Clear pending sync since unit exists on server
+      if ((local as any)._pendingSync) {
+        delete (local as any)._pendingSync;
+      }
+      // Preserve local photo data URLs if remote photos are placeholders or missing
+      if (local.photos && typeof local.photos === 'object') {
+        const mergedPhotos: Record<string, string> = { ...(rem.photos || {}) };
+        Object.entries(local.photos).forEach(([k, v]) => {
+          if (typeof v === 'string' && v.startsWith('data:image/') && (!mergedPhotos[k] || !mergedPhotos[k].startsWith('data:image/'))) {
+            mergedPhotos[k] = v;
+          }
+        });
+        rem.photos = mergedPhotos;
+      }
     }
     map.set(rem.id, rem);
   });
 
-  // 2. Preserve local units that have not yet reached the cloud or are marked pending sync
+  // 2. Only preserve units that exist LOCALLY and have NOT yet reached the server/cloud
   fieldUnitsCache.forEach(local => {
     if (local && local.id && !deleted.has(local.id)) {
       if (!map.has(local.id)) {
         map.set(local.id, local);
-      } else {
-        const remote = map.get(local.id)!;
-        const localTime = new Date(local.updatedAt || local.createdAt || 0).getTime();
-        const remTime = new Date(remote.updatedAt || remote.createdAt || 0).getTime();
-        if ((local as any)._pendingSync || localTime > remTime) {
-          map.set(local.id, local);
-        }
       }
     }
   });
@@ -268,6 +271,28 @@ function mergeWithLocalCache(remoteUnits: FieldUnit[]): FieldUnit[] {
   const merged = Array.from(map.values());
   merged.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
   return merged;
+}
+
+/**
+ * Directly applies remote field units from Server-Sent Events (SSE) or Unified Sync
+ */
+export function applyRemoteFieldUnits(remoteUnits: FieldUnit[]) {
+  if (!Array.isArray(remoteUnits)) return;
+  const clean = remoteUnits.filter(u => u && u.id !== 'field-101' && u.id !== 'field-102' && u.id !== 'field-103');
+  const merged = mergeWithLocalCache(clean);
+  fieldUnitsCache = merged;
+  safeLocalStorageSet(STORAGE_KEY_FIELD_UNITS, merged);
+  idbSaveAll('field_units', merged);
+  notifySubscribers();
+}
+
+export function applyRemoteFieldUnitDeleted(id: string) {
+  if (!id) return;
+  markFieldUnitDeleted(id);
+  fieldUnitsCache = fieldUnitsCache.filter(u => u.id !== id);
+  safeLocalStorageSet(STORAGE_KEY_FIELD_UNITS, fieldUnitsCache);
+  idbSaveAll('field_units', fieldUnitsCache);
+  notifySubscribers();
 }
 
 // Push any pending local units to Firestore if they aren't on the cloud yet
@@ -361,7 +386,40 @@ export async function forceSyncFieldUnits(): Promise<FieldUnit[]> {
 
 async function initDataSync() {
   try {
-    // Try fetching from Firestore first
+    // 1. Fetch from Central Server API FIRST (guarantees instant cross-browser & cross-device match)
+    try {
+      const serverRes = await fetch('/api/sync/field-units');
+      if (serverRes.ok) {
+        const sData = await serverRes.json();
+        if (sData.success && Array.isArray(sData.units)) {
+          const serverUnits: FieldUnit[] = sData.units.filter((u: any) => u && u.id !== 'field-101' && u.id !== 'field-102' && u.id !== 'field-103');
+          const serverIds = new Set(serverUnits.map(u => u.id));
+
+          // If local has genuine units that server doesn't have yet, push them to server!
+          const unsynced = fieldUnitsCache.filter(u => u && u.id && !serverIds.has(u.id) && u.id !== 'field-101' && u.id !== 'field-102' && u.id !== 'field-103');
+          if (unsynced.length > 0) {
+            fetch('/api/sync/field-units', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ units: unsynced })
+            }).catch(() => {});
+          }
+
+          if (serverUnits.length > 0) {
+            const merged = mergeWithLocalCache(serverUnits);
+            if (JSON.stringify(merged) !== JSON.stringify(fieldUnitsCache)) {
+              fieldUnitsCache = merged;
+              safeLocalStorageSet(STORAGE_KEY_FIELD_UNITS, merged);
+              idbSaveAll('field_units', merged);
+              notifySubscribers();
+            }
+            return;
+          }
+        }
+      }
+    } catch {}
+
+    // 2. Try fetching from Firestore
     const firestoreData = await fetchFieldUnitsFromFirestore();
     if (firestoreData && firestoreData.length > 0) {
       const clean = firestoreData.filter(u => u && u.id !== 'field-101' && u.id !== 'field-102' && u.id !== 'field-103');
@@ -374,7 +432,7 @@ async function initDataSync() {
       return;
     }
 
-    // Fallback to Supabase
+    // 3. Fallback to Supabase
     const remoteData = await fetchFieldUnitsFromSupabase();
     if (remoteData && remoteData.length > 0) {
       const clean = remoteData.filter(u => u && u.id !== 'field-101' && u.id !== 'field-102' && u.id !== 'field-103');
@@ -429,6 +487,14 @@ function saveLocalFieldUnits(units: FieldUnit[]) {
   idbSaveAll('field_units', clean);
   // Persist clean copy to localStorage
   safeLocalStorageSet(STORAGE_KEY_FIELD_UNITS, clean);
+
+  // Instant Central Server Sync (updates all other browsers and devices immediately!)
+  fetch('/api/sync/field-units', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ units: clean })
+  }).catch(() => {});
+
   if (localFieldBus) {
     try { localFieldBus.postMessage({ timestamp: Date.now() }); } catch {}
   }
@@ -625,7 +691,13 @@ export function deleteFieldUnit(id: string) {
 
   broadcastLabRealtimeEvent('field_units_change', { deletedId: id, timestamp: Date.now() });
 
-  // Delete from Supabase & Firestore asynchronously
+  // Delete from Server API, Supabase & Firestore asynchronously
+  fetch('/api/sync/delete-field-unit', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id })
+  }).catch(() => {});
+
   deleteFieldUnitFromSupabase(id).catch(err => console.warn('[FieldUnitStore] Supabase delete note:', err));
   deleteFieldUnitFromFirestore(id).catch(err => console.warn('[FieldUnitStore] Firestore delete note:', err));
 }

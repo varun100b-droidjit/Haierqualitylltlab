@@ -302,6 +302,14 @@ export function subscribeUnitStore(callback: () => void) {
 function saveLocalUnits(data: Unit[]) {
   unitsCache = data;
   try { localStorage.setItem(STORAGE_KEY_UNITS, JSON.stringify(data)); } catch {}
+
+  // Instant Central Server Sync (updates all other browsers and devices immediately!)
+  fetch('/api/sync/rd-units', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ units: data })
+  }).catch(() => {});
+
   if (localUnitBus) {
     try { localUnitBus.postMessage({ timestamp: Date.now() }); } catch {}
   }
@@ -309,15 +317,45 @@ function saveLocalUnits(data: Unit[]) {
   notifyListeners();
 }
 
+/**
+ * Directly applies remote R&D units from Server-Sent Events (SSE) or Unified Sync
+ */
+export function applyRemoteRDUnits(remoteUnits: Unit[]) {
+  if (!Array.isArray(remoteUnits)) return;
+  const deleted = getDeletedRDUnitIds();
+  const valid = remoteUnits.filter((u: any) => u && !deleted.has(u.id));
+  if (valid.length > 0) {
+    const normalized = normalizeUnitTimelines(valid);
+    unitsCache = normalized;
+    try { localStorage.setItem(STORAGE_KEY_UNITS, JSON.stringify(normalized)); } catch {}
+    notifyListeners();
+  }
+}
+
+export function applyRemoteRDUnitDeleted(id: string) {
+  if (!id) return;
+  markRDUnitDeleted(id);
+  unitsCache = unitsCache.filter(u => u.id !== id);
+  try { localStorage.setItem(STORAGE_KEY_UNITS, JSON.stringify(unitsCache)); } catch {}
+  notifyListeners();
+}
+
 function saveLocalLogs(data: ActivityLog[]) {
   logsCache = data;
-  localStorage.setItem(STORAGE_KEY_LOGS, JSON.stringify(data));
+  try { localStorage.setItem(STORAGE_KEY_LOGS, JSON.stringify(data)); } catch {}
+  if (data.length > 0) {
+    fetch('/api/sync/activity-log', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ log: data[0] })
+    }).catch(() => {});
+  }
   notifyListeners();
 }
 
 function saveLocalNotifs(data: LabNotification[]) {
   notifsCache = data;
-  localStorage.setItem(STORAGE_KEY_NOTIFS, JSON.stringify(data));
+  try { localStorage.setItem(STORAGE_KEY_NOTIFS, JSON.stringify(data)); } catch {}
   notifyListeners();
 }
 

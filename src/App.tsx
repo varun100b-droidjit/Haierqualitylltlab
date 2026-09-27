@@ -53,6 +53,7 @@ import {
   calculateRemainingDays
 } from './services/unitStore';
 import { pauseAutoRefreshForForm, resumeAutoRefreshAfterSave } from './services/autoRefreshService';
+import { initUnifiedSyncService } from './services/unifiedSyncService';
 
 export function MainApp() {
   const { user, isAuthenticated, isLoading, isAdmin, isRandom } = useAuth();
@@ -222,6 +223,9 @@ export function MainApp() {
 
   // Subscribe to reactive store changes and set up live timer ticker
   useEffect(() => {
+    // Start real-time cross-browser and cross-device sync engine (SSE + polling fallback)
+    initUnifiedSyncService();
+
     const unsubscribe = subscribeUnitStore(() => {
       setUnits(getUnits());
       setActivityLogs(getActivityLogs());

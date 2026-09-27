@@ -4,6 +4,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Modality } from '@google/genai';
+import { createClient } from '@supabase/supabase-js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -382,6 +383,131 @@ No backticks, no markdown, just clean raw JSON array.`;
     }
   };
 
+  // --- REAL-TIME SSE BROADCAST HUB (Instant multi-device push < 50ms) ---
+  const sseClients = new Set<express.Response>();
+
+  app.get('/api/sync/events', (req, res) => {
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    res.write('retry: 1500\n\n');
+    res.write(`data: ${JSON.stringify({ type: 'connected', timestamp: Date.now() })}\n\n`);
+
+    sseClients.add(res);
+
+    req.on('close', () => {
+      sseClients.delete(res);
+    });
+  });
+
+  const broadcastSyncEvent = (type: string, data: any) => {
+    const payload = `data: ${JSON.stringify({ type, data, timestamp: Date.now() })}\n\n`;
+    for (const client of sseClients) {
+      try {
+        client.write(payload);
+      } catch {
+        sseClients.delete(client);
+      }
+    }
+  };
+
+  // Supabase Client for Background Seed & Dual-Sync
+  const supabaseUrl = process.env.VITE_SUPABASE_URL || 'https://fcmkbyeffrlncrpdrdbb.supabase.co';
+  const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZjbWtieWVmZnJsbmNycGRyZGJiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU2NDM1NTksImV4cCI6MjEwMTIxOTU1OX0._VY6Bv21Teq553X9ENWlw05MeEC8kz1ubZkGqELpIbA';
+  const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
+  // Auto-seed local json cache from Supabase on startup
+  async function seedFromSupabase() {
+    try {
+      // 1. Field Units Seed
+      const { data: fUnits } = await supabase.from('field_units').select('*').order('created_at', { ascending: false });
+      if (Array.isArray(fUnits) && fUnits.length > 0) {
+        const mapped = fUnits.map((item: any) => ({
+          id: item.id,
+          modelName: item.model_name || item.modelName || '',
+          productType: item.product_type || item.productType || 'BOTH',
+          iduSerialNumber: item.idu_serial_number || item.iduSerialNumber || '',
+          oduSerialNumber: item.odu_serial_number || item.oduSerialNumber || '',
+          serialNumber: item.serial_number || item.serialNumber || '',
+          requestBy: item.request_by || item.requestBy || '',
+          station: item.station || 'Station 01',
+          startDateTime: item.start_date_time || item.startDateTime || '',
+          endDateTime: item.end_date_time || item.endDateTime || '',
+          requiredHour: Number(item.required_hour ?? item.requiredHour ?? 0),
+          status: item.status || 'live',
+          remarks: item.remarks || '',
+          observations: item.observations || [],
+          createdAt: item.created_at || item.createdAt || '',
+          updatedAt: item.updated_at || item.updatedAt || '',
+        }));
+        writeJson('field_units', mapped);
+        console.log(`[Server] Seeded ${mapped.length} field units from Supabase`);
+      }
+
+      // 2. Proto Units Seed
+      const { data: pUnits } = await supabase.from('proto_units').select('*').order('created_at', { ascending: false });
+      if (Array.isArray(pUnits) && pUnits.length > 0) {
+        const mappedP = pUnits.map((item: any) => ({
+          id: item.id,
+          modelName: item.model_name || item.modelName || '',
+          station: item.station || 'Station 01',
+          iduSerialNumber: item.idu_serial_number || item.iduSerialNumber || '',
+          oduSerialNumber: item.odu_serial_number || item.oduSerialNumber || '',
+          requestBy: item.request_by || item.requestBy || '',
+          testPurpose: item.test_purpose || item.testPurpose || '',
+          requiredHour: Number(item.required_hour ?? item.requiredHour ?? 0),
+          doneHour: Number(item.done_hour ?? item.doneHour ?? 0),
+          reportDetails: item.report_details || item.reportDetails || {},
+          namePlate: item.name_plate || item.namePlate || {},
+          partsInfo: item.parts_info || item.partsInfo || {},
+          photos: item.photos || {},
+          remarks: item.remarks || '',
+          observations: item.observations || [],
+          status: item.status || 'live',
+          createdAt: item.created_at || item.createdAt || '',
+          updatedAt: item.updated_at || item.updatedAt || '',
+        }));
+        writeJson('proto_units', mappedP);
+        console.log(`[Server] Seeded ${mappedP.length} proto units from Supabase`);
+      }
+
+      // 3. R&D Units Seed
+      const { data: rdUnits } = await supabase.from('rd_units').select('*').order('created_at', { ascending: false });
+      if (Array.isArray(rdUnits) && rdUnits.length > 0) {
+        const mappedRD = rdUnits.map((item: any) => ({
+          id: item.id,
+          modelName: item.model_name || item.modelName || '',
+          serialNumber: item.serial_number || item.serialNumber || '',
+          requiredBy: item.required_by || item.requiredBy || '',
+          dayDuration: Number(item.day_duration ?? item.dayDuration ?? 7),
+          transferDate: item.transfer_date || item.transferDate || '',
+          bsrPerson: item.bsr_person || item.bsrPerson || '',
+          eltPerson: item.elt_person || item.eltPerson || '',
+          rdPerson: item.rd_person || item.rdPerson || '',
+          oqcPerson: item.oqc_person || item.oqcPerson || '',
+          currentHolder: item.current_holder || item.currentHolder || '',
+          currentStageIndex: Number(item.current_stage_index ?? item.currentStageIndex ?? 0),
+          status: item.status || 'transferred',
+          timeline: item.timeline || [],
+          priority: item.priority || 'Normal',
+          notes: item.notes || '',
+          observations: item.observations || [],
+          createdAt: item.created_at || item.createdAt || '',
+          updatedAt: item.updated_at || item.updatedAt || '',
+        }));
+        writeJson('rd_units', mappedRD);
+        console.log(`[Server] Seeded ${mappedRD.length} RD units from Supabase`);
+      }
+    } catch (err) {
+      console.warn('[Server] Supabase initial seed note:', err);
+    }
+  }
+
+  seedFromSupabase();
+
   // 1. ELT Records Cross-Device Sync
   app.get('/api/sync/elt-records', (_req, res) => {
     const records = readJson<any[]>('elt_records', []);
@@ -414,6 +540,7 @@ No backticks, no markdown, just clean raw JSON array.`;
       }
 
       writeJson('elt_records', existing);
+      broadcastSyncEvent('elt_records', existing);
       res.json({ success: true, addedCount: added.length, duplicates, records: existing });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
@@ -436,13 +563,11 @@ No backticks, no markdown, just clean raw JSON array.`;
       let existingBSR = readJson<any[]>('bsr_records', []);
 
       if (rawRecords.length > 0) {
-        // Direct merge
         for (const r of rawRecords) {
           const s = (r.serialNumber || '').trim().toUpperCase();
           if (!existingBSR.some(b => (b.serialNumber || '').trim().toUpperCase() === s)) {
             existingBSR.unshift(r);
           }
-          // Remove from ELT
           existingELT = existingELT.filter(e => (e.serialNumber || '').trim().toUpperCase() !== s);
         }
       } else if (serialNumbers.length > 0) {
@@ -477,6 +602,7 @@ No backticks, no markdown, just clean raw JSON array.`;
 
       writeJson('elt_records', existingELT);
       writeJson('bsr_records', existingBSR);
+      broadcastSyncEvent('bsr_records', { eltRecords: existingELT, bsrRecords: existingBSR });
 
       res.json({ success: true, eltRecords: existingELT, bsrRecords: existingBSR });
     } catch (err: any) {
@@ -509,6 +635,7 @@ No backticks, no markdown, just clean raw JSON array.`;
       }
 
       writeJson('rd_units', existing);
+      broadcastSyncEvent('rd_units', existing);
       res.json({ success: true, units: existing });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
@@ -523,10 +650,202 @@ No backticks, no markdown, just clean raw JSON array.`;
       let existing = readJson<any[]>('rd_units', []);
       existing = existing.filter(u => u.id !== id);
       writeJson('rd_units', existing);
+      broadcastSyncEvent('rd_units_delete', { id });
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
     }
+  });
+
+  // 4. Field Units Cross-Device Sync
+  app.get('/api/sync/field-units', (_req, res) => {
+    const units = readJson<any[]>('field_units', []);
+    res.json({ success: true, units });
+  });
+
+  app.post('/api/sync/field-units', (req, res) => {
+    try {
+      const incoming: any[] = req.body?.units || (req.body?.unit ? [req.body.unit] : []);
+      if (!Array.isArray(incoming) || incoming.length === 0) {
+        return res.status(400).json({ success: false, error: 'Units array required' });
+      }
+
+      let existing = readJson<any[]>('field_units', []);
+      for (const u of incoming) {
+        if (!u.id) continue;
+        const idx = existing.findIndex(e => e.id === u.id);
+        if (idx >= 0) {
+          existing[idx] = { ...existing[idx], ...u };
+        } else {
+          existing.unshift(u);
+        }
+      }
+
+      writeJson('field_units', existing);
+      broadcastSyncEvent('field_units', existing);
+      res.json({ success: true, units: existing });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post('/api/sync/delete-field-unit', (req, res) => {
+    try {
+      const { id } = req.body;
+      if (!id) return res.status(400).json({ success: false, error: 'id required' });
+
+      let existing = readJson<any[]>('field_units', []);
+      existing = existing.filter(u => u.id !== id);
+      writeJson('field_units', existing);
+      broadcastSyncEvent('field_units_delete', { id });
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 5. Proto Units Cross-Device Sync
+  app.get('/api/sync/proto-units', (_req, res) => {
+    const units = readJson<any[]>('proto_units', []);
+    res.json({ success: true, units });
+  });
+
+  app.post('/api/sync/proto-units', (req, res) => {
+    try {
+      const incoming: any[] = req.body?.units || (req.body?.unit ? [req.body.unit] : []);
+      if (!Array.isArray(incoming) || incoming.length === 0) {
+        return res.status(400).json({ success: false, error: 'Units array required' });
+      }
+
+      let existing = readJson<any[]>('proto_units', []);
+      for (const u of incoming) {
+        if (!u.id) continue;
+        const idx = existing.findIndex(e => e.id === u.id);
+        if (idx >= 0) {
+          existing[idx] = { ...existing[idx], ...u };
+        } else {
+          existing.unshift(u);
+        }
+      }
+
+      writeJson('proto_units', existing);
+      broadcastSyncEvent('proto_units', existing);
+      res.json({ success: true, units: existing });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post('/api/sync/delete-proto-unit', (req, res) => {
+    try {
+      const { id } = req.body;
+      if (!id) return res.status(400).json({ success: false, error: 'id required' });
+
+      let existing = readJson<any[]>('proto_units', []);
+      existing = existing.filter(u => u.id !== id);
+      writeJson('proto_units', existing);
+      broadcastSyncEvent('proto_units_delete', { id });
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 6. PP Units Cross-Device Sync
+  app.get('/api/sync/pp-units', (_req, res) => {
+    const units = readJson<any[]>('pp_units', []);
+    res.json({ success: true, units });
+  });
+
+  app.post('/api/sync/pp-units', (req, res) => {
+    try {
+      const incoming: any[] = req.body?.units || (req.body?.unit ? [req.body.unit] : []);
+      if (!Array.isArray(incoming) || incoming.length === 0) {
+        return res.status(400).json({ success: false, error: 'Units array required' });
+      }
+
+      let existing = readJson<any[]>('pp_units', []);
+      for (const u of incoming) {
+        if (!u.id) continue;
+        const idx = existing.findIndex(e => e.id === u.id);
+        if (idx >= 0) {
+          existing[idx] = { ...existing[idx], ...u };
+        } else {
+          existing.unshift(u);
+        }
+      }
+
+      writeJson('pp_units', existing);
+      broadcastSyncEvent('pp_units', existing);
+      res.json({ success: true, units: existing });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post('/api/sync/delete-pp-unit', (req, res) => {
+    try {
+      const { id } = req.body;
+      if (!id) return res.status(400).json({ success: false, error: 'id required' });
+
+      let existing = readJson<any[]>('pp_units', []);
+      existing = existing.filter(u => u.id !== id);
+      writeJson('pp_units', existing);
+      broadcastSyncEvent('pp_units_delete', { id });
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 7. Active Shift Cross-Device Sync
+  app.get('/api/sync/shift', (_req, res) => {
+    const shift = readJson<any>('active_shift', { activeShift: 'GENERAL' });
+    res.json({ success: true, activeShift: shift.activeShift || 'GENERAL' });
+  });
+
+  app.post('/api/sync/shift', (req, res) => {
+    try {
+      const { activeShift } = req.body;
+      if (!activeShift) return res.status(400).json({ success: false, error: 'activeShift required' });
+      writeJson('active_shift', { activeShift });
+      broadcastSyncEvent('shift', { activeShift });
+      res.json({ success: true, activeShift });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 8. Global Activity Log Sync
+  app.post('/api/sync/activity-log', (req, res) => {
+    try {
+      const { log } = req.body;
+      if (log) {
+        let logs = readJson<any[]>('activity_logs', []);
+        logs.unshift(log);
+        if (logs.length > 200) logs = logs.slice(0, 200);
+        writeJson('activity_logs', logs);
+        broadcastSyncEvent('activity_log', log);
+      }
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 9. Unified Global State Snapshot (Single request for fast polling)
+  app.get('/api/sync/unified-state', (_req, res) => {
+    res.json({
+      success: true,
+      fieldUnits: readJson<any[]>('field_units', []),
+      protoUnits: readJson<any[]>('proto_units', []),
+      ppUnits: readJson<any[]>('pp_units', []),
+      rdUnits: readJson<any[]>('rd_units', []),
+      eltRecords: readJson<any[]>('elt_records', []),
+      bsrRecords: readJson<any[]>('bsr_records', []),
+      activeShift: readJson<any>('active_shift', { activeShift: 'GENERAL' }).activeShift || 'GENERAL',
+      timestamp: Date.now()
+    });
   });
 
   // Health check

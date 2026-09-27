@@ -13,12 +13,14 @@ import {
   Loader2, 
   Plus, 
   Trash2, 
-  Sparkles, 
   AlertCircle,
   Check,
   Lock,
   Unlock,
-  RefreshCw
+  RefreshCw,
+  PlusCircle,
+  CornerDownLeft,
+  Scan
 } from 'lucide-react';
 import { 
   saveSmogQtyRecord, 
@@ -32,13 +34,22 @@ interface SmogQtyFormModalProps {
   defaultDate?: string | null;
   defaultShift?: 'A' | 'B' | 'all';
   onSaved?: (record: SmogQtyRecord) => void;
-  onOpenWhatsAppShare?: (data: { date: string; shift: 'A' | 'B'; smogQty: number }) => void;
+  onOpenWhatsAppShare?: (data: { 
+    date: string; 
+    shift: 'A' | 'B'; 
+    smogQty: number;
+    prQty?: number;
+    pendingQty?: number;
+  }) => void;
+  onOpenScanner?: () => void;
 }
 
-interface LocalHsoModel {
+export interface LocalHsoModel {
   id: string;
   modelName: string;
-  qty: number;
+  prQty: number;      // Pr. Qty (photo se lega)
+  smogQty: number;    // Smog Qty (PopUp se add hoga)
+  pendingQty: number; // Pending Qty: Pr. Qty - Smog Qty
 }
 
 export const SmogQtyFormModal: React.FC<SmogQtyFormModalProps> = ({
@@ -47,7 +58,8 @@ export const SmogQtyFormModal: React.FC<SmogQtyFormModalProps> = ({
   defaultDate,
   defaultShift,
   onSaved,
-  onOpenWhatsAppShare
+  onOpenWhatsAppShare,
+  onOpenScanner
 }) => {
   const today = new Date().toISOString().split('T')[0];
   const [date, setDate] = useState<string>(defaultDate || today);
@@ -62,8 +74,16 @@ export const SmogQtyFormModal: React.FC<SmogQtyFormModalProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [closedRecord, setClosedRecord] = useState<SmogQtyRecord | null>(null);
 
+  // PopUp State for Model Qty Addition (Per User Request)
+  const [isQtyPopUpOpen, setIsQtyPopUpOpen] = useState(false);
+  const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
+  const [enteredQty, setEnteredQty] = useState<string>('');
+  const [popUpError, setPopUpError] = useState<string | null>(null);
+  const [actionNotice, setActionNotice] = useState<string | null>(null);
+
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const popUpInputRef = useRef<HTMLInputElement>(null);
 
   // Camera is enabled strictly when Production Date AND Shift are selected
   const isCameraEnabled = Boolean(date && date.trim() !== '' && (shift === 'A' || shift === 'B'));
@@ -79,17 +99,28 @@ export const SmogQtyFormModal: React.FC<SmogQtyFormModalProps> = ({
       setError(null);
       setClosedRecord(null);
       setScanSuccessMessage(null);
+      setIsQtyPopUpOpen(false);
+      setSelectedModelId(null);
+      setEnteredQty('');
+      setActionNotice(null);
 
       // Check if there is already an existing record for this date & shift
       const allRecords = getSmogQtyRecords();
       const existing = allRecords.find(r => r.date === initialDate && r.shift === initialShift);
       if (existing && existing.models && existing.models.length > 0) {
         setHsoModels(
-          existing.models.map((m, idx) => ({
-            id: `hso-${idx}-${Date.now()}`,
-            modelName: m.modelName,
-            qty: m.qty
-          }))
+          existing.models.map((m, idx) => {
+            const pr = Number(m.prQty ?? m.qty) || 0;
+            const smog = Number(m.smogQty ?? (m.prQty ? m.qty : 0)) || 0;
+            const pending = m.pendingQty !== undefined ? Number(m.pendingQty) : Math.max(0, pr - smog);
+            return {
+              id: `hso-${idx}-${Date.now()}`,
+              modelName: m.modelName,
+              prQty: pr,
+              smogQty: smog,
+              pendingQty: pending
+            };
+          })
         );
         if (existing.notes) setNotes(existing.notes);
       } else {
@@ -104,27 +135,49 @@ export const SmogQtyFormModal: React.FC<SmogQtyFormModalProps> = ({
     setShift(newShift);
     setError(null);
     setScanSuccessMessage(null);
+    setIsQtyPopUpOpen(false);
 
     if (newDate && (newShift === 'A' || newShift === 'B')) {
       const allRecords = getSmogQtyRecords();
       const existing = allRecords.find(r => r.date === newDate && r.shift === newShift);
       if (existing && existing.models && existing.models.length > 0) {
         setHsoModels(
-          existing.models.map((m, idx) => ({
-            id: `hso-${idx}-${Date.now()}`,
-            modelName: m.modelName,
-            qty: m.qty
-          }))
+          existing.models.map((m, idx) => {
+            const pr = Number(m.prQty ?? m.qty) || 0;
+            const smog = Number(m.smogQty ?? (m.prQty ? m.qty : 0)) || 0;
+            const pending = m.pendingQty !== undefined ? Number(m.pendingQty) : Math.max(0, pr - smog);
+            return {
+              id: `hso-${idx}-${Date.now()}`,
+              modelName: m.modelName,
+              prQty: pr,
+              smogQty: smog,
+              pendingQty: pending
+            };
+          })
         );
         if (existing.notes) setNotes(existing.notes);
       }
     }
   };
 
+  // Focus popup input when popup opens
+  useEffect(() => {
+    if (isQtyPopUpOpen) {
+      setTimeout(() => {
+        popUpInputRef.current?.focus();
+      }, 80);
+    }
+  }, [isQtyPopUpOpen]);
+
   if (!isOpen) return null;
 
-  // Auto-calculated Total Smog Qty strictly from all HSO models
-  const totalSmogQty = hsoModels.reduce((sum, item) => sum + (Number(item.qty) || 0), 0);
+  // Auto-calculated Totals
+  const totalPrQty = hsoModels.reduce((sum, item) => sum + (Number(item.prQty) || 0), 0);
+  const totalSmogQty = hsoModels.reduce((sum, item) => sum + (Number(item.smogQty) || 0), 0);
+  const totalPendingQty = Math.max(0, totalPrQty - totalSmogQty);
+
+  // Active selected model for popup
+  const activeModel = hsoModels.find(m => m.id === selectedModelId) || null;
 
   // Handle Photo Capture / File Selection & AI OCR Extraction
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -158,33 +211,45 @@ export const SmogQtyFormModal: React.FC<SmogQtyFormModalProps> = ({
 
         const data = await response.json();
 
-        // DELETION RULE AS REQUESTED:
-        // "Aur jab Photo se Model Collect ho jata hai tab wo photo Delete ho jayega."
-        // Once the photo is read and processed, we do not keep or store the image.
+        // Clear file input immediately
         if (cameraInputRef.current) cameraInputRef.current.value = '';
         if (fileInputRef.current) fileInputRef.current.value = '';
 
         if (data.success && Array.isArray(data.items) && data.items.length > 0) {
-          const formatted: LocalHsoModel[] = data.items.map((it: { modelName: string; qty: number }, idx: number) => ({
-            id: `hso-${Date.now()}-${idx}`,
-            modelName: it.modelName,
-            qty: Number(it.qty) || 1
-          }));
+          const existingSmogMap = new Map<string, number>();
+          hsoModels.forEach(m => {
+            existingSmogMap.set(m.modelName.trim().toUpperCase(), m.smogQty);
+          });
+
+          const formatted: LocalHsoModel[] = data.items.map((it: { modelName: string; qty: number }, idx: number) => {
+            const rawPr = Number(it.qty) || 0;
+            const modelKey = it.modelName.trim().toUpperCase();
+            const prevSmog = existingSmogMap.get(modelKey) || 0;
+            const pending = Math.max(0, rawPr - prevSmog);
+
+            return {
+              id: `hso-${Date.now()}-${idx}`,
+              modelName: it.modelName.trim().toUpperCase(),
+              prQty: rawPr,       // Pr. Qty from photo
+              smogQty: prevSmog,  // Smog Qty
+              pendingQty: pending // Pr. Qty - Smog Qty
+            };
+          });
 
           setHsoModels(formatted);
           setScanSuccessMessage(
-            `Extracted ${formatted.length} HSO Models (${data.totalQty} Total Qty)! Photo deleted automatically.`
+            `Extracted ${formatted.length} Models from photo (Total Pr. Qty: ${data.totalQty}). Tap any model name to add Smog Qty.`
           );
         } else {
           setError(
             data.note || 
             data.error || 
-            'No models starting with "HSO" found in this photo. Please ensure the Excel filter shows HSO models, or add them manually below.'
+            'No models starting with "HSO" found in this photo. Please ensure the list is clear, or add models manually.'
           );
         }
       } catch (err: any) {
         console.error('Error during OCR extraction:', err);
-        setError('Network or server error while scanning photo. You can add HSO models manually below.');
+        setError('Network or server error while scanning photo. You can add models manually below.');
       } finally {
         setIsScanning(false);
         if (e.target) {
@@ -207,7 +272,9 @@ export const SmogQtyFormModal: React.FC<SmogQtyFormModalProps> = ({
     const newRow: LocalHsoModel = {
       id: `hso-manual-${Date.now()}-${nextIdx}`,
       modelName: `HSO${nextIdx > 9 ? nextIdx : '0' + nextIdx}-3NB-I:AC`,
-      qty: 100
+      prQty: 100,
+      smogQty: 0,
+      pendingQty: 100
     };
     setHsoModels(prev => [...prev, newRow]);
     setError(null);
@@ -222,19 +289,77 @@ export const SmogQtyFormModal: React.FC<SmogQtyFormModalProps> = ({
     });
   };
 
-  // Edit Model Qty
-  const handleModelQtyChange = (index: number, val: string) => {
+  // Edit Pr. Qty directly in table
+  const handleModelPrQtyChange = (index: number, val: string) => {
     const num = Math.max(0, parseInt(val, 10) || 0);
     setHsoModels(prev => {
       const updated = [...prev];
-      updated[index] = { ...updated[index], qty: num };
+      const cur = updated[index];
+      const newPending = Math.max(0, num - cur.smogQty);
+      updated[index] = { ...cur, prQty: num, pendingQty: newPending };
       return updated;
     });
   };
 
   // Remove a row
-  const handleRemoveRow = (index: number) => {
-    setHsoModels(prev => prev.filter((_, i) => i !== index));
+  const handleRemoveRow = (id: string) => {
+    setHsoModels(prev => prev.filter(m => m.id !== id));
+    if (selectedModelId === id) {
+      setIsQtyPopUpOpen(false);
+      setSelectedModelId(null);
+    }
+  };
+
+  // Open PopUp when tapping the circled Model Name
+  // "aur jaha circle mark kiya hun waha tab krne per PopUp open hoga Qty add krne ke liye"
+  const handleOpenQtyPopUp = (model: LocalHsoModel) => {
+    setSelectedModelId(model.id);
+    setEnteredQty('');
+    setPopUpError(null);
+    setIsQtyPopUpOpen(true);
+  };
+
+  // Submit Qty from PopUp
+  const handleSubmitPopUpQty = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!activeModel) return;
+
+    const val = parseInt(enteredQty.trim(), 10);
+    if (isNaN(val) || val <= 0) {
+      setPopUpError('Please enter a valid quantity greater than 0.');
+      return;
+    }
+
+    setHsoModels(prev => prev.map(m => {
+      if (m.id === activeModel.id) {
+        const nextSmog = m.smogQty + val;
+        const nextPending = Math.max(0, m.prQty - nextSmog);
+        return {
+          ...m,
+          smogQty: nextSmog,
+          pendingQty: nextPending
+        };
+      }
+      return m;
+    }));
+
+    const nextSmog = activeModel.smogQty + val;
+    const nextPending = Math.max(0, activeModel.prQty - nextSmog);
+
+    setActionNotice(`Added ${val} to ${activeModel.modelName} (Smog: ${nextSmog} | Pending: ${nextPending})`);
+    setIsQtyPopUpOpen(false);
+    setSelectedModelId(null);
+    setEnteredQty('');
+
+    setTimeout(() => {
+      setActionNotice(null);
+    }, 4000);
+  };
+
+  // Quick Addition helper for popup
+  const handleQuickAdd = (amount: number) => {
+    const cur = parseInt(enteredQty, 10) || 0;
+    setEnteredQty(String(cur + amount));
   };
 
   // Submit Operation Close
@@ -259,12 +384,12 @@ export const SmogQtyFormModal: React.FC<SmogQtyFormModalProps> = ({
     // Validate that models start with HSO
     const invalidModel = hsoModels.find(m => !m.modelName.trim().toUpperCase().startsWith('HSO'));
     if (invalidModel) {
-      setError(`Model "${invalidModel.modelName}" does not start with "HSO". All models in this section must start with HSO.`);
+      setError(`Model "${invalidModel.modelName}" does not start with "HSO". All models must start with HSO.`);
       return;
     }
 
-    if (totalSmogQty <= 0) {
-      setError('Total Smog Qty must be greater than 0.');
+    if (totalPrQty <= 0 && totalSmogQty <= 0) {
+      setError('Pr. Qty or Smog Qty must be greater than 0.');
       return;
     }
 
@@ -274,13 +399,18 @@ export const SmogQtyFormModal: React.FC<SmogQtyFormModalProps> = ({
     try {
       const formattedModels = hsoModels.map(m => ({
         modelName: m.modelName.trim().toUpperCase(),
-        qty: m.qty
+        qty: m.smogQty, // fallback
+        prQty: m.prQty,
+        smogQty: m.smogQty,
+        pendingQty: m.pendingQty
       }));
 
       const record = saveSmogQtyRecord({
         date,
         shift: shift as 'A' | 'B',
         smogQty: totalSmogQty,
+        prQty: totalPrQty,
+        pendingQty: totalPendingQty,
         models: formattedModels,
         notes: notes.trim() ? notes.trim() : undefined
       });
@@ -298,7 +428,7 @@ export const SmogQtyFormModal: React.FC<SmogQtyFormModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-950 flex flex-col overflow-y-auto animate-in fade-in duration-200">
-      {/* 1. TOP COMPACT HEADER */}
+      {/* 1. TOP COMPACT HEADER (Clean website dark slate style) */}
       <header className="sticky top-0 z-40 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 px-3 sm:px-6 py-2.5 flex items-center justify-between shadow-md">
         {/* Left: Back Button & Screen Title */}
         <div className="flex items-center gap-2.5">
@@ -318,7 +448,7 @@ export const SmogQtyFormModal: React.FC<SmogQtyFormModalProps> = ({
             <div className={`w-7 h-7 rounded-lg flex items-center justify-center border ${
               closedRecord 
                 ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400' 
-                : 'bg-purple-500/20 border-purple-500/40 text-purple-400'
+                : 'bg-slate-800 border-slate-700 text-cyan-400'
             }`}>
               {closedRecord ? <CheckCircle2 className="w-3.5 h-3.5" /> : <FileText className="w-3.5 h-3.5" />}
             </div>
@@ -330,24 +460,8 @@ export const SmogQtyFormModal: React.FC<SmogQtyFormModalProps> = ({
           </div>
         </div>
 
-        {/* Right: Selected Status Badges & Close Button */}
+        {/* Right: Close Button (Status badges hidden per user mark) */}
         <div className="flex items-center gap-2">
-          {/* Status Badges */}
-          <div className="flex items-center gap-1.5 font-mono text-[10px]">
-            <span className="px-2 py-0.5 rounded-lg bg-slate-800/90 border border-slate-700 text-cyan-300 flex items-center gap-1">
-              <Calendar className="w-2.5 h-2.5 text-cyan-400" />
-              <span>{date || 'No Date'}</span>
-            </span>
-            <span className={`px-2 py-0.5 rounded-lg border flex items-center gap-1 ${
-              shift 
-                ? 'bg-amber-400/10 border-amber-400/30 text-amber-300 font-bold' 
-                : 'bg-slate-800 border-slate-700 text-slate-500'
-            }`}>
-              <Clock className="w-2.5 h-2.5 text-amber-400" />
-              <span>{shift ? `Shift ${shift}` : 'No Shift'}</span>
-            </span>
-          </div>
-
           <button
             type="button"
             onClick={onClose}
@@ -359,69 +473,77 @@ export const SmogQtyFormModal: React.FC<SmogQtyFormModalProps> = ({
         </div>
       </header>
 
-      {/* 2. MAIN SCREEN CONTENT (COMPACT & SPACE SAVING) */}
-      <main className="flex-1 max-w-2xl mx-auto w-full px-3 sm:px-4 py-3 sm:py-4 space-y-3">
+      {/* 2. MAIN SCREEN CONTENT */}
+      <main className="flex-1 max-w-2xl mx-auto w-full px-3 sm:px-4 py-3 sm:py-4 space-y-3 pb-8">
         {/* View when Operation Close is Completed */}
         {closedRecord ? (
           <div className="space-y-3 animate-in fade-in zoom-in-95 duration-200">
             {/* Compact Success Banner */}
-            <div className="p-4 rounded-2xl bg-gradient-to-b from-emerald-950/60 to-slate-900 border border-emerald-500/40 text-center space-y-2 shadow-xl shadow-emerald-950/30">
+            <div className="p-4 rounded-2xl bg-slate-900 border border-emerald-500/40 text-center space-y-2 shadow-xl">
               <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 mx-auto">
                 <CheckCircle2 className="w-6 h-6" />
               </div>
               <h2 className="text-base sm:text-lg font-black text-white">
                 Operation Closed Successfully!
               </h2>
-              <p className="text-xs text-emerald-300 font-mono">
+              <p className="text-xs text-emerald-400 font-mono">
                 Smog Qty ({closedRecord.smogQty}) synchronized with Dashboard.
               </p>
             </div>
 
-            {/* Closed Info Badges */}
+            {/* Closed Info Badges: Pr. Qty, Smog Qty, Pending Qty */}
             <div className="grid grid-cols-3 gap-2 p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-center font-mono">
-              <div className="p-1.5">
-                <span className="text-[9px] text-slate-400 block font-bold uppercase">Date</span>
-                <span className="text-xs sm:text-sm font-black text-white mt-0.5 block">{closedRecord.date}</span>
+              <div className="p-2 bg-slate-950 rounded-lg border border-slate-800">
+                <span className="text-[10px] text-slate-400 block font-bold uppercase">Pr. Qty</span>
+                <span className="text-base sm:text-lg font-black text-white mt-0.5 block">{closedRecord.prQty ?? closedRecord.smogQty}</span>
               </div>
-              <div className="p-1.5 border-x border-slate-800">
-                <span className="text-[9px] text-slate-400 block font-bold uppercase">Shift</span>
-                <span className="text-xs sm:text-sm font-black text-amber-400 mt-0.5 block">Shift {closedRecord.shift}</span>
+              <div className="p-2 bg-slate-950 rounded-lg border border-slate-800">
+                <span className="text-[10px] text-slate-400 block font-bold uppercase">Smog Qty</span>
+                <span className="text-base sm:text-lg font-black text-cyan-400 mt-0.5 block">{closedRecord.smogQty}</span>
               </div>
-              <div className="p-1.5">
-                <span className="text-[9px] text-slate-400 block font-bold uppercase">Total Qty</span>
-                <span className="text-xs sm:text-sm font-black text-purple-400 mt-0.5 block">{closedRecord.smogQty}</span>
+              <div className="p-2 bg-slate-950 rounded-lg border border-slate-800">
+                <span className="text-[10px] text-slate-400 block font-bold uppercase">Pending Qty</span>
+                <span className="text-base sm:text-lg font-black text-amber-400 mt-0.5 block">{closedRecord.pendingQty ?? 0}</span>
               </div>
             </div>
 
-            {/* HSO Models Breakdown in Closed View */}
+            {/* Models Breakdown */}
             {closedRecord.models && closedRecord.models.length > 0 && (
               <div className="p-3.5 rounded-2xl bg-slate-900 border border-slate-800 space-y-2 shadow-sm">
                 <div className="flex items-center justify-between border-b border-slate-800 pb-2">
                   <span className="text-xs font-bold text-slate-200 font-mono flex items-center gap-1.5">
-                    <Layers className="w-3.5 h-3.5 text-purple-400" />
-                    <span>HSO Models ({closedRecord.models.length})</span>
+                    <Layers className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>Models Breakdown ({closedRecord.models.length})</span>
                   </span>
-                  <span className="text-xs font-mono font-black text-purple-300 bg-purple-500/20 px-2 py-0.5 rounded border border-purple-500/30">
-                    Total: {closedRecord.smogQty}
+                  <span className="text-xs font-mono font-black text-cyan-300 bg-slate-800 px-2 py-0.5 rounded border border-slate-700">
+                    Smog Qty: {closedRecord.smogQty}
                   </span>
                 </div>
                 <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1 font-mono text-xs">
                   {closedRecord.models.map((m, i) => (
-                    <div key={i} className="flex items-center justify-between py-1.5 px-2.5 rounded-lg bg-slate-950 border border-slate-800/90 text-xs">
+                    <div key={i} className="flex items-center justify-between py-1.5 px-2.5 rounded-lg bg-slate-950 border border-slate-800 text-xs">
                       <div className="flex items-center gap-2">
                         <span className="text-slate-500 font-bold text-[10px]">#{i + 1}</span>
-                        <span className="text-cyan-300 font-bold">{m.modelName}</span>
+                        <span className="text-slate-200 font-bold">{m.modelName}</span>
                       </div>
-                      <span className="text-amber-400 font-black px-2 py-0.5 rounded bg-amber-400/10 border border-amber-400/30 text-xs">
-                        {m.qty} Qty
-                      </span>
+                      <div className="flex items-center gap-2 text-[11px]">
+                        <span className="text-slate-300 bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
+                          Pr: {m.prQty ?? m.qty}
+                        </span>
+                        <span className="text-cyan-400 font-bold bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
+                          Smog: {m.smogQty ?? m.qty}
+                        </span>
+                        <span className="text-amber-400 font-bold bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
+                          Pending: {m.pendingQty ?? 0}
+                        </span>
+                      </div>
                     </div>
                   ))}
                 </div>
               </div>
             )}
 
-            {/* Action Buttons: WhatsApp & Return */}
+            {/* Action Buttons */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
               <button
                 type="button"
@@ -431,11 +553,13 @@ export const SmogQtyFormModal: React.FC<SmogQtyFormModalProps> = ({
                     onOpenWhatsAppShare({
                       date: closedRecord.date,
                       shift: closedRecord.shift,
-                      smogQty: closedRecord.smogQty
+                      smogQty: closedRecord.smogQty,
+                      prQty: closedRecord.prQty,
+                      pendingQty: closedRecord.pendingQty
                     });
                   }
                 }}
-                className="py-2.5 px-3 rounded-xl font-black text-xs uppercase tracking-wider text-slate-950 bg-gradient-to-r from-emerald-400 via-teal-400 to-green-500 hover:from-emerald-300 hover:to-green-400 active:scale-[0.98] transition-all cursor-pointer shadow-md flex items-center justify-center gap-1.5 sm:col-span-2"
+                className="py-2.5 px-3 rounded-xl font-bold text-xs uppercase tracking-wider text-slate-950 bg-cyan-500 hover:bg-cyan-400 active:scale-[0.98] transition-all cursor-pointer shadow-md flex items-center justify-center gap-1.5 sm:col-span-2"
               >
                 <Share2 className="w-3.5 h-3.5 stroke-[2.5]" />
                 <span>Share WhatsApp Report</span>
@@ -444,7 +568,7 @@ export const SmogQtyFormModal: React.FC<SmogQtyFormModalProps> = ({
               <button
                 type="button"
                 onClick={() => setClosedRecord(null)}
-                className="py-2.5 px-3 rounded-xl font-bold text-xs text-purple-300 hover:text-purple-200 bg-purple-950/40 hover:bg-purple-950/70 transition-all cursor-pointer border border-purple-800/40 flex items-center justify-center gap-1"
+                className="py-2.5 px-3 rounded-xl font-bold text-xs text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 transition-all cursor-pointer border border-slate-700 flex items-center justify-center gap-1"
                 title="Edit or Re-open"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
@@ -453,10 +577,10 @@ export const SmogQtyFormModal: React.FC<SmogQtyFormModalProps> = ({
             </div>
           </div>
         ) : (
-          /* Normal Form Screen: SMART & HIGH-DENSITY COMPACT LAYOUT */
+          /* Normal Form Screen */
           <form onSubmit={handleOperationClose} className="space-y-3">
             {error && (
-              <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs font-medium flex items-center gap-2 shadow-sm">
+              <div className="p-3 rounded-xl bg-slate-900 border border-rose-500/50 text-rose-300 text-xs font-medium flex items-center gap-2 shadow-sm animate-in fade-in">
                 <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
                 <span className="flex-1">{error}</span>
                 <button 
@@ -469,9 +593,9 @@ export const SmogQtyFormModal: React.FC<SmogQtyFormModalProps> = ({
               </div>
             )}
 
-            {/* UNIFIED COMPACT CONTROL PANEL (Date + Shift + Camera Scan in ONE sleek card) */}
+            {/* UNIFIED CONTROL PANEL (Date + Shift + Camera Scan in Website Theme) */}
             <div className="p-3 sm:p-3.5 rounded-2xl bg-slate-900 border border-slate-800 shadow-md space-y-2.5">
-              {/* Row 1: Date and Shift side-by-side in high density */}
+              {/* Row 1: Date and Shift side-by-side */}
               <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center">
                 {/* Production Date Input */}
                 <div className="sm:col-span-6 bg-slate-950 px-2.5 py-1.5 rounded-xl border border-slate-800 flex items-center gap-2">
@@ -502,9 +626,9 @@ export const SmogQtyFormModal: React.FC<SmogQtyFormModalProps> = ({
                   <button
                     type="button"
                     onClick={() => handleDateOrShiftChange(date, 'A')}
-                    className={`flex-1 py-1.5 px-2 rounded-lg font-mono text-xs font-extrabold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                    className={`flex-1 py-1.5 px-2 rounded-lg font-mono text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
                       shift === 'A'
-                        ? 'bg-cyan-500 text-slate-950 shadow-sm font-black'
+                        ? 'bg-cyan-500 text-slate-950 font-extrabold shadow-sm'
                         : 'text-slate-400 hover:text-white hover:bg-slate-900'
                     }`}
                   >
@@ -518,13 +642,13 @@ export const SmogQtyFormModal: React.FC<SmogQtyFormModalProps> = ({
                   <button
                     type="button"
                     onClick={() => handleDateOrShiftChange(date, 'B')}
-                    className={`flex-1 py-1.5 px-2 rounded-lg font-mono text-xs font-extrabold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                    className={`flex-1 py-1.5 px-2 rounded-lg font-mono text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
                       shift === 'B'
-                        ? 'bg-amber-400 text-slate-950 shadow-sm font-black'
+                        ? 'bg-cyan-500 text-slate-950 font-extrabold shadow-sm'
                         : 'text-slate-400 hover:text-white hover:bg-slate-900'
                     }`}
                   >
-                    <span className={`w-2 h-2 rounded-full ${shift === 'B' ? 'bg-slate-950' : 'bg-amber-400'}`} />
+                    <span className={`w-2 h-2 rounded-full ${shift === 'B' ? 'bg-slate-950' : 'bg-cyan-400'}`} />
                     <span>Shift B</span>
                     <span className={`text-[10px] font-mono ${shift === 'B' ? 'text-slate-900 font-bold' : 'text-slate-500'}`}>
                       (Night)
@@ -534,25 +658,25 @@ export const SmogQtyFormModal: React.FC<SmogQtyFormModalProps> = ({
               </div>
 
               {/* Row 2: Camera Trigger & Actions Toolbar */}
-              <div className="pt-2 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2">
+              <div className="pt-2 border-t border-slate-800 flex flex-wrap items-center justify-between gap-2">
                 {/* Left: Lock / Unlock status indicator */}
                 <div className="flex items-center gap-1.5">
                   {isCameraEnabled ? (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-[10px] font-mono font-bold">
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-800 border border-slate-700 text-emerald-400 text-[10px] font-mono font-medium">
                       <Unlock className="w-2.5 h-2.5 text-emerald-400" />
-                      <span>Camera Unlocked</span>
+                      <span>Camera Ready: Click photo to load Pr. Qty</span>
                     </span>
                   ) : (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-500/15 border border-amber-500/30 text-amber-300 text-[10px] font-mono font-semibold">
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-800 border border-slate-700 text-amber-400 text-[10px] font-mono font-medium">
                       <Lock className="w-2.5 h-2.5 text-amber-400" />
                       <span>Select Date & Shift to Unlock Camera</span>
                     </span>
                   )}
                 </div>
 
-                {/* Right: Quick Action Buttons */}
+                {/* Right: Action Buttons in Clean Website Dark Slate Style */}
                 <div className="flex items-center gap-1.5 w-full sm:w-auto justify-end">
-                  {/* Camera Button */}
+                  {/* Camera Button (Clean Cyan / Slate - No rainbow gradient) */}
                   <button
                     type="button"
                     onClick={() => {
@@ -560,15 +684,15 @@ export const SmogQtyFormModal: React.FC<SmogQtyFormModalProps> = ({
                       cameraInputRef.current?.click();
                     }}
                     disabled={!isCameraEnabled || isScanning}
-                    className={`flex-1 sm:flex-none py-1.5 px-3 rounded-xl font-extrabold text-xs flex items-center justify-center gap-1.5 transition-all shadow-sm ${
+                    className={`flex-1 sm:flex-none py-1.5 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all shadow-sm ${
                       isCameraEnabled && !isScanning
-                        ? 'bg-gradient-to-r from-cyan-400 via-teal-400 to-emerald-400 hover:from-cyan-300 hover:to-emerald-300 text-slate-950 cursor-pointer active:scale-95 shadow-cyan-950/40'
-                        : 'bg-slate-800 text-slate-500 border border-slate-700/60 cursor-not-allowed opacity-60'
+                        ? 'bg-cyan-500 hover:bg-cyan-400 text-slate-950 cursor-pointer active:scale-95'
+                        : 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed opacity-60'
                     }`}
-                    title={isCameraEnabled ? "Click Photo with Camera" : "Select Production Date & Shift first"}
+                    title={isCameraEnabled ? "Click Photo to Auto-Scan Pr. Qty" : "Select Production Date & Shift first"}
                   >
                     <Camera className="w-3.5 h-3.5 stroke-[2.5]" />
-                    <span>Click Photo</span>
+                    <span>Click Photo (Pr. Qty)</span>
                   </button>
 
                   {/* Upload File Button */}
@@ -589,20 +713,24 @@ export const SmogQtyFormModal: React.FC<SmogQtyFormModalProps> = ({
                     <UploadCloud className="w-3.5 h-3.5" />
                   </button>
 
-                  {/* Add Model Quick Button */}
+                  {/* Leak Scanner Button (Replaced Add Model as requested) */}
                   <button
                     type="button"
-                    onClick={handleAddManualRow}
-                    className="py-1.5 px-2.5 rounded-xl text-xs font-mono font-bold text-purple-300 hover:text-purple-200 bg-purple-950/40 hover:bg-purple-900/50 border border-purple-800/40 flex items-center gap-1 cursor-pointer transition-all active:scale-95"
-                    title="Add manual HSO model row"
+                    onClick={() => {
+                      if (onOpenScanner) {
+                        onOpenScanner();
+                      }
+                    }}
+                    className="py-1.5 px-3 rounded-xl text-xs font-mono font-bold text-cyan-400 hover:text-cyan-300 bg-slate-800 hover:bg-slate-700 border border-slate-700 flex items-center gap-1.5 cursor-pointer transition-all active:scale-95 shadow-sm"
+                    title="Open Leak Scanner"
                   >
-                    <Plus className="w-3 h-3 stroke-[2.5]" />
-                    <span>Add Model</span>
+                    <Scan className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>Leak Scanner</span>
                   </button>
                 </div>
               </div>
 
-              {/* Hidden file inputs for Camera and File selection */}
+              {/* Hidden file inputs */}
               <input
                 ref={cameraInputRef}
                 type="file"
@@ -623,20 +751,20 @@ export const SmogQtyFormModal: React.FC<SmogQtyFormModalProps> = ({
 
               {/* Scanning Active State */}
               {isScanning && (
-                <div className="p-2.5 rounded-xl bg-cyan-950/60 border border-cyan-500/50 flex items-center gap-2.5 animate-pulse">
+                <div className="p-2.5 rounded-xl bg-slate-950 border border-cyan-500/40 flex items-center gap-2.5">
                   <Loader2 className="w-4 h-4 text-cyan-400 animate-spin shrink-0" />
-                  <span className="text-xs text-cyan-200 font-mono font-bold">
-                    Analyzing photo with Gemini AI... Models extracted, photo deleted immediately.
+                  <span className="text-xs text-cyan-300 font-mono font-medium">
+                    Analyzing photo with Gemini AI... Extracting Pr. Qty, photo will auto-delete.
                   </span>
                 </div>
               )}
 
-              {/* Scan Success Message (Confirms extraction and automatic deletion of photo) */}
+              {/* Scan Success Message */}
               {scanSuccessMessage && !isScanning && (
-                <div className="p-2.5 rounded-xl bg-emerald-950/60 border border-emerald-500/40 flex items-center justify-between gap-2 text-emerald-300 text-xs font-mono">
+                <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between gap-2 text-slate-300 text-xs font-mono">
                   <div className="flex items-center gap-2">
                     <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                    <span className="font-bold">{scanSuccessMessage}</span>
+                    <span>{scanSuccessMessage}</span>
                   </div>
                   <button 
                     type="button" 
@@ -649,86 +777,150 @@ export const SmogQtyFormModal: React.FC<SmogQtyFormModalProps> = ({
               )}
             </div>
 
-            {/* EXTRACTED HSO MODELS & QUANTITIES TABLE (HIGH DENSITY & DIRECTLY VISIBLE) */}
+            {/* THREE TOTAL SUMMARY CARDS (Website dark slate theme - No rainbow circus) */}
+            <div className="grid grid-cols-3 gap-2">
+              {/* Pr. Qty */}
+              <div className="p-3 rounded-2xl bg-slate-900 border border-slate-800 text-center font-mono shadow-sm">
+                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">
+                  Pr. Qty
+                </span>
+                <span className="text-xl sm:text-2xl font-black text-white mt-0.5 block">
+                  {totalPrQty}
+                </span>
+                <span className="text-[9px] text-slate-500 block">From Photo</span>
+              </div>
+
+              {/* Smog Qty */}
+              <div className="p-3 rounded-2xl bg-slate-900 border border-slate-800 text-center font-mono shadow-sm">
+                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">
+                  Smog Qty
+                </span>
+                <span className="text-xl sm:text-2xl font-black text-cyan-400 mt-0.5 block">
+                  {totalSmogQty}
+                </span>
+                <span className="text-[9px] text-slate-500 block">Tested / Passed</span>
+              </div>
+
+              {/* Pending Qty */}
+              <div className="p-3 rounded-2xl bg-slate-900 border border-slate-800 text-center font-mono shadow-sm">
+                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">
+                  Pending Qty
+                </span>
+                <span className="text-xl sm:text-2xl font-black text-amber-400 mt-0.5 block">
+                  {totalPendingQty}
+                </span>
+                <span className="text-[9px] text-slate-500 block">Pr - Smog</span>
+              </div>
+            </div>
+
+            {/* ACTION NOTICE TOAST */}
+            {actionNotice && (
+              <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-700 flex items-center justify-between gap-2 text-slate-200 text-xs font-mono animate-in fade-in">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span>{actionNotice}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActionNotice(null)}
+                  className="text-slate-400 hover:text-white"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+
+            {/* EXTRACTED HSO MODELS & QUANTITIES TABLE */}
             <div className="p-3 sm:p-3.5 rounded-2xl bg-slate-900 border border-slate-800 shadow-md space-y-2.5">
               <div className="flex items-center justify-between border-b border-slate-800 pb-2">
                 <div className="flex items-center gap-2">
-                  <Layers className="w-4 h-4 text-purple-400" />
                   <h2 className="text-xs sm:text-sm font-extrabold text-white">
-                    HSO Models & Quantities
+                    HSO Models List
                   </h2>
                   {hsoModels.length > 0 && (
-                    <span className="px-2 py-0.5 rounded-md bg-purple-500/20 text-purple-300 text-[10px] font-mono font-extrabold border border-purple-500/30">
+                    <span className="px-2 py-0.5 rounded-md bg-slate-800 text-slate-300 text-[10px] font-mono font-bold border border-slate-700">
                       {hsoModels.length} {hsoModels.length === 1 ? 'Model' : 'Models'}
                     </span>
                   )}
-                </div>
-
-                <div className="flex items-center gap-2">
-                  {totalSmogQty > 0 && (
-                    <span className="text-xs font-mono font-black text-amber-400 bg-amber-400/10 px-2 py-0.5 rounded-md border border-amber-400/30">
-                      Total: {totalSmogQty}
-                    </span>
-                  )}
-                  <button
-                    type="button"
-                    onClick={handleAddManualRow}
-                    className="text-xs font-mono font-bold text-cyan-400 hover:text-cyan-300 flex items-center gap-1 bg-cyan-950/40 hover:bg-cyan-950 border border-cyan-800/50 px-2 py-1 rounded-lg transition-all cursor-pointer"
-                    title="Add Model row"
-                  >
-                    <Plus className="w-3 h-3 stroke-[2.5]" />
-                    <span>Add</span>
-                  </button>
                 </div>
               </div>
 
               {/* Models List Table */}
               {hsoModels.length > 0 ? (
-                <div className="space-y-1.5 border border-slate-800/80 rounded-xl p-2 bg-slate-950/70">
-                  <div className="grid grid-cols-12 gap-1.5 px-2 py-1 text-[9px] font-mono font-bold text-slate-500 uppercase tracking-wider">
+                <div className="space-y-1.5 border border-slate-800 rounded-xl p-2 bg-slate-950">
+                  {/* Table Header */}
+                  <div className="grid grid-cols-12 gap-1.5 px-2 py-1 text-[9px] font-mono font-bold text-slate-400 uppercase tracking-wider">
                     <span className="col-span-1 text-center">#</span>
-                    <span className="col-span-7">HSO Model Name</span>
-                    <span className="col-span-3 text-right">Quantity</span>
+                    <span className="col-span-4">Model Name</span>
+                    <span className="col-span-2 text-right">Pr. Qty</span>
+                    <span className="col-span-2 text-right">Smog Qty</span>
+                    <span className="col-span-2 text-right text-amber-400">Pending Qty</span>
                     <span className="col-span-1 text-center">Del</span>
                   </div>
 
+                  {/* Rows */}
                   {hsoModels.map((item, index) => (
                     <div
                       key={item.id}
-                      className="grid grid-cols-12 gap-1.5 items-center p-1.5 rounded-lg bg-slate-900 border border-slate-800 hover:border-slate-700 transition-colors"
+                      className="grid grid-cols-12 gap-1.5 items-center p-2 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 transition-colors"
                     >
-                      <span className="col-span-1 text-[11px] font-mono font-bold text-slate-500 text-center">
-                        {index + 1}
-                      </span>
+                      {/* Index */}
+                      <div className="col-span-1 text-center">
+                        <span className="text-[10px] font-mono font-bold text-slate-500">
+                          {index + 1}
+                        </span>
+                      </div>
                       
-                      <div className="col-span-7">
-                        <input
-                          type="text"
-                          value={item.modelName}
-                          onChange={(e) => handleModelNameChange(index, e.target.value)}
-                          placeholder="HSO17-3NB-I:AC"
-                          className="w-full bg-slate-950 px-2 py-1 text-xs font-mono font-bold text-cyan-300 rounded border border-slate-800 focus:border-cyan-400 focus:outline-none uppercase"
-                          required
-                        />
+                      {/* Model Name: Small text, no plus symbol, tap opens PopUp */}
+                      <div className="col-span-4 min-w-0">
+                        <button
+                          type="button"
+                          onClick={() => handleOpenQtyPopUp(item)}
+                          className="w-full text-left bg-slate-950 hover:bg-slate-800 text-cyan-400 hover:text-cyan-300 px-2 py-1.5 rounded-lg border border-slate-800 hover:border-cyan-500/50 font-mono font-bold text-[10px] sm:text-[11px] leading-tight block transition-all cursor-pointer shadow-sm active:scale-[0.98]"
+                          title="Click to open PopUp and add Smog Qty"
+                        >
+                          <span className="truncate block">{item.modelName}</span>
+                        </button>
                       </div>
 
-                      <div className="col-span-3">
+                      {/* Pr. Qty (Editable input from photo) */}
+                      <div className="col-span-2 text-right">
                         <input
                           type="number"
-                          min="1"
-                          value={item.qty}
-                          onChange={(e) => handleModelQtyChange(index, e.target.value)}
-                          className="w-full px-2 py-1 bg-slate-950 border border-slate-800 focus:border-amber-400 rounded text-xs font-mono font-black text-amber-300 text-right focus:outline-none"
+                          min="0"
+                          value={item.prQty}
+                          onChange={(e) => handleModelPrQtyChange(index, e.target.value)}
+                          title="Pr. Qty (from photo)"
+                          className="w-full px-1.5 py-1 bg-slate-950 border border-slate-800 focus:border-cyan-400 rounded-lg text-xs font-mono font-bold text-white text-right focus:outline-none"
                           required
                         />
                       </div>
 
+                      {/* Smog Qty (Displays current added Smog Qty) */}
+                      <div className="col-span-2 text-right">
+                        <div 
+                          onClick={() => handleOpenQtyPopUp(item)}
+                          className="w-full px-1.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono font-black text-cyan-400 text-right cursor-pointer hover:border-slate-700 transition-colors"
+                          title="Click to add Smog Qty via PopUp"
+                        >
+                          {item.smogQty}
+                        </div>
+                      </div>
+
+                      {/* Pending Qty (Clear, full 2 columns with bold text) */}
+                      <div className="col-span-2 text-right">
+                        <div className="w-full px-1.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono font-black text-amber-400 text-right">
+                          {item.pendingQty}
+                        </div>
+                      </div>
+
+                      {/* Delete Action */}
                       <div className="col-span-1 text-center">
                         <button
                           type="button"
-                          onClick={() => handleRemoveRow(index)}
-                          className="p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-rose-950/50 transition-colors cursor-pointer"
-                          title="Remove this HSO model"
+                          onClick={() => handleRemoveRow(item.id)}
+                          className="p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-slate-800 transition-colors cursor-pointer"
+                          title="Remove this model"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -736,33 +928,32 @@ export const SmogQtyFormModal: React.FC<SmogQtyFormModalProps> = ({
                     </div>
                   ))}
 
-                  {/* Calculated Total Smog Qty Strip */}
-                  <div className="flex items-center justify-between p-2 px-3 rounded-lg bg-purple-950/50 border border-purple-800/60 font-mono">
-                    <div className="flex items-center gap-1.5">
-                      <Sparkles className="w-3.5 h-3.5 text-purple-400" />
-                      <span className="text-xs font-bold text-slate-200">
-                        Total Smog Qty:
-                      </span>
+                  {/* Summary Bar */}
+                  <div className="flex items-center justify-between p-2 px-3 rounded-lg bg-slate-900 border border-slate-800 font-mono text-xs">
+                    <span className="text-slate-400 font-bold">Totals:</span>
+                    <div className="flex items-center gap-3">
+                      <span className="text-white font-bold">Pr: {totalPrQty}</span>
+                      <span className="text-slate-700">|</span>
+                      <span className="text-cyan-400 font-black">Smog: {totalSmogQty}</span>
+                      <span className="text-slate-700">|</span>
+                      <span className="text-amber-400 font-bold">Pending: {totalPendingQty}</span>
                     </div>
-                    <span className="text-sm font-black text-purple-300 bg-purple-500/20 px-2.5 py-0.5 rounded-lg border border-purple-500/40">
-                      {totalSmogQty}
-                    </span>
                   </div>
                 </div>
               ) : (
                 /* Empty state when no models loaded */
-                <div className="p-4 rounded-xl bg-slate-950/80 border border-dashed border-slate-800 text-center space-y-1.5">
+                <div className="p-4 rounded-xl bg-slate-950 border border-dashed border-slate-800 text-center space-y-1.5">
                   <p className="text-xs font-mono font-bold text-slate-300">
                     No HSO Models Added Yet
                   </p>
                   <p className="text-[11px] text-slate-400 font-mono leading-relaxed">
-                    Click <span className="text-cyan-400 font-bold">"Click Photo"</span> to auto-scan Excel list, or click <span className="text-purple-300 font-bold">"Add Model"</span> to enter manually.
+                    Click <span className="text-cyan-400 font-bold">"Click Photo"</span> to auto-scan Pr. Qty from Excel sheet, or click <span className="text-slate-300 font-bold">"Add Model"</span> to add manually.
                   </p>
                 </div>
               )}
             </div>
 
-            {/* REMARKS / NOTES (COMPACT) */}
+            {/* REMARKS / NOTES */}
             <div className="p-2.5 px-3 rounded-xl bg-slate-900 border border-slate-800 flex items-center gap-2">
               <span className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-wider shrink-0">Notes:</span>
               <input
@@ -779,7 +970,7 @@ export const SmogQtyFormModal: React.FC<SmogQtyFormModalProps> = ({
               <button
                 type="submit"
                 disabled={isSubmitting || isScanning || hsoModels.length === 0}
-                className="w-full py-3 px-4 rounded-xl font-black text-xs sm:text-sm uppercase tracking-wider text-slate-950 bg-gradient-to-r from-purple-400 via-pink-400 to-cyan-400 hover:from-purple-300 hover:to-cyan-300 active:scale-[0.98] transition-all cursor-pointer shadow-lg shadow-purple-950/50 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full py-3 px-4 rounded-xl font-bold text-xs sm:text-sm uppercase tracking-wider text-slate-950 bg-cyan-500 hover:bg-cyan-400 active:scale-[0.98] transition-all cursor-pointer shadow-md flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isSubmitting ? (
                   <>
@@ -789,7 +980,7 @@ export const SmogQtyFormModal: React.FC<SmogQtyFormModalProps> = ({
                 ) : (
                   <>
                     <UploadCloud className="w-4 h-4 stroke-[2.5]" />
-                    <span>Operation Close (Upload {totalSmogQty} Qty)</span>
+                    <span>Operation Close (Upload {totalSmogQty} Smog Qty | {totalPendingQty} Pending)</span>
                   </>
                 )}
               </button>
@@ -800,10 +991,138 @@ export const SmogQtyFormModal: React.FC<SmogQtyFormModalProps> = ({
           </form>
         )}
       </main>
+
+      {/* 3. POPUP MODAL FOR ADDING SMOG QTY (Opened on tapping circled Model Name) */}
+      {/* "aur jaha circle mark kiya hun waha tab krne per PopUp open hoga Qty add krne ke liye" */}
+      {isQtyPopUpOpen && activeModel && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-slate-900 border border-slate-700/80 rounded-2xl max-w-sm w-full p-4 sm:p-5 shadow-2xl space-y-3.5 animate-in zoom-in-95 duration-150">
+            {/* Header: Model Name & Close Button */}
+            <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="w-7 h-7 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-cyan-400 shrink-0">
+                  <PlusCircle className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-xs font-mono font-bold text-slate-400 uppercase tracking-wider">
+                    Add Smog Quantity
+                  </h3>
+                  <p className="text-sm font-mono font-extrabold text-white truncate">
+                    {activeModel.modelName}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setIsQtyPopUpOpen(false);
+                  setSelectedModelId(null);
+                  setEnteredQty('');
+                }}
+                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                title="Close PopUp"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Model Current Metrics Banner */}
+            <div className="grid grid-cols-3 gap-2 p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-center font-mono">
+              <div className="p-1">
+                <span className="text-[9px] text-slate-400 block font-bold uppercase">Pr. Qty</span>
+                <span className="text-xs sm:text-sm font-bold text-white mt-0.5 block">{activeModel.prQty}</span>
+              </div>
+              <div className="p-1 border-x border-slate-800">
+                <span className="text-[9px] text-slate-400 block font-bold uppercase">Smog Qty</span>
+                <span className="text-xs sm:text-sm font-bold text-cyan-400 mt-0.5 block">{activeModel.smogQty}</span>
+              </div>
+              <div className="p-1">
+                <span className="text-[9px] text-slate-400 block font-bold uppercase">Pending</span>
+                <span className="text-xs sm:text-sm font-bold text-amber-400 mt-0.5 block">{activeModel.pendingQty}</span>
+              </div>
+            </div>
+
+            {popUpError && (
+              <div className="p-2 rounded-lg bg-slate-950 border border-rose-500/50 text-rose-300 text-xs font-mono flex items-center gap-1.5">
+                <AlertCircle className="w-3.5 h-3.5 shrink-0 text-rose-400" />
+                <span>{popUpError}</span>
+              </div>
+            )}
+
+            {/* Input Form */}
+            <form onSubmit={handleSubmitPopUpQty} className="space-y-3">
+              <div>
+                <label className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                  Enter Quantity to Add:
+                </label>
+                <input
+                  ref={popUpInputRef}
+                  type="number"
+                  min="1"
+                  placeholder="e.g. 50"
+                  value={enteredQty}
+                  onChange={(e) => {
+                    setEnteredQty(e.target.value);
+                    setPopUpError(null);
+                  }}
+                  className="w-full bg-slate-950 px-3 py-2 text-base font-mono font-bold text-white rounded-xl border border-slate-700 focus:border-cyan-400 focus:outline-none focus:ring-1 focus:ring-cyan-400/50"
+                  required
+                />
+              </div>
+
+              {/* Quick Add Chips */}
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-[11px] font-mono">
+                {[10, 20, 50, 100].map((amt) => (
+                  <button
+                    key={amt}
+                    type="button"
+                    onClick={() => handleQuickAdd(amt)}
+                    className="flex-1 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 font-bold transition-colors cursor-pointer text-center"
+                  >
+                    +{amt}
+                  </button>
+                ))}
+                {activeModel.pendingQty > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setEnteredQty(String(activeModel.pendingQty))}
+                    className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 font-bold transition-colors cursor-pointer shrink-0"
+                  >
+                    All ({activeModel.pendingQty})
+                  </button>
+                )}
+              </div>
+
+              {/* Action Buttons: Cancel & Submit */}
+              <div className="grid grid-cols-2 gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsQtyPopUpOpen(false);
+                    setSelectedModelId(null);
+                    setEnteredQty('');
+                  }}
+                  className="py-2.5 px-3 rounded-xl font-mono font-bold text-xs text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 transition-colors cursor-pointer text-center"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="submit"
+                  disabled={!enteredQty.trim()}
+                  className="py-2.5 px-3 rounded-xl font-mono font-bold text-xs uppercase tracking-wider text-slate-950 bg-cyan-500 hover:bg-cyan-400 transition-all cursor-pointer shadow-md disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                >
+                  <span>Submit</span>
+                  <CornerDownLeft className="w-3.5 h-3.5 stroke-[2.5]" />
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
 
-// Also export as SmogQtyFormScreen for semantic clarity
 export const SmogQtyFormScreen = SmogQtyFormModal;
-

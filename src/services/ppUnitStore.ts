@@ -227,43 +227,44 @@ export async function fetchPpUnitsFromFirestore(): Promise<PpUnit[] | null> {
  * Merges incoming remote records with the local cache in a NON-DESTRUCTIVE manner.
  * Prioritizes remote records as the cloud source of truth, while preserving any
  * locally created units that are currently pending cloud upload.
+/**
+ * Merges incoming remote records with the local cache in a NON-DESTRUCTIVE manner.
+ * Prioritizes remote records as the cloud/server source of truth for status and stages,
+ * while preserving any genuine locally created units that have not yet reached the server.
  */
 function mergeWithLocalCache(remoteUnits: PpUnit[]): PpUnit[] {
   const deleted = getDeletedPpUnitIds();
   const map = new Map<string, PpUnit>();
 
-  // 1. All valid remote units from Firestore / cloud
+  // 1. All valid remote units from Central Server / Supabase / Firestore
   remoteUnits.forEach(rem => {
     if (!rem || !rem.id || deleted.has(rem.id)) return;
     const local = ppUnitsCache.find(l => l.id === rem.id);
-    // If local has valid photos and remote has missing/empty photos, preserve local photos
-    if (local && local.photos && typeof local.photos === 'object') {
-      const mergedPhotos: Record<string, string> = { ...(rem.photos || {}) };
-      Object.entries(local.photos).forEach(([k, v]) => {
-        if (typeof v === 'string' && !isPhotoMissing(v)) {
-          if (isPhotoMissing(mergedPhotos[k])) {
-            mergedPhotos[k] = v;
+    if (local) {
+      if ((local as any)._pendingSync) {
+        delete (local as any)._pendingSync;
+      }
+      // If local has valid photos and remote has missing/empty photos, preserve local photos
+      if (local.photos && typeof local.photos === 'object') {
+        const mergedPhotos: Record<string, string> = { ...(rem.photos || {}) };
+        Object.entries(local.photos).forEach(([k, v]) => {
+          if (typeof v === 'string' && !isPhotoMissing(v)) {
+            if (isPhotoMissing(mergedPhotos[k])) {
+              mergedPhotos[k] = v;
+            }
           }
-        }
-      });
-      rem.photos = mergedPhotos;
+        });
+        rem.photos = mergedPhotos;
+      }
     }
     map.set(rem.id, rem);
   });
 
-  // 2. Preserve local units that have not yet reached the cloud or are marked pending sync
-  protoUnitsLoop:
+  // 2. Only preserve units that exist LOCALLY and have NOT yet reached the server/cloud
   ppUnitsCache.forEach(local => {
     if (local && local.id && !deleted.has(local.id)) {
       if (!map.has(local.id)) {
         map.set(local.id, local);
-      } else {
-        const remote = map.get(local.id)!;
-        const localTime = new Date(local.updatedAt || local.createdAt || 0).getTime();
-        const remTime = new Date(remote.updatedAt || remote.createdAt || 0).getTime();
-        if ((local as any)._pendingSync || localTime > remTime) {
-          map.set(local.id, local);
-        }
       }
     }
   });
@@ -271,6 +272,28 @@ function mergeWithLocalCache(remoteUnits: PpUnit[]): PpUnit[] {
   const merged = Array.from(map.values());
   merged.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
   return merged;
+}
+
+/**
+ * Directly applies remote PP units from Server-Sent Events (SSE) or Unified Sync
+ */
+export function applyRemotePpUnits(remoteUnits: PpUnit[]) {
+  if (!Array.isArray(remoteUnits)) return;
+  const clean = remoteUnits.filter(u => u && !u.id.startsWith('pp-idu-') && !u.id.startsWith('pp-odu-'));
+  const merged = mergeWithLocalCache(clean);
+  ppUnitsCache = merged;
+  safeLocalStorageSet(STORAGE_KEY_PP_UNITS, merged);
+  idbSaveAll('pp_units', merged);
+  notifyListeners();
+}
+
+export function applyRemotePpUnitDeleted(id: string) {
+  if (!id) return;
+  markPpUnitDeleted(id);
+  ppUnitsCache = ppUnitsCache.filter(u => u.id !== id);
+  safeLocalStorageSet(STORAGE_KEY_PP_UNITS, ppUnitsCache);
+  idbSaveAll('pp_units', ppUnitsCache);
+  notifyListeners();
 }
 
 // Push any pending local units to Firestore if they aren't on the cloud yet
@@ -411,6 +434,14 @@ function saveLocalPpUnits(data: PpUnit[]) {
   idbSaveAll('pp_units', clean);
   // Persist clean copy to localStorage
   safeLocalStorageSet(STORAGE_KEY_PP_UNITS, clean);
+
+  // Instant Central Server Sync (updates all other browsers and devices immediately!)
+  fetch('/api/sync/pp-units', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ units: clean })
+  }).catch(() => {});
+
   if (localPpBus) {
     try { localPpBus.postMessage({ timestamp: Date.now() }); } catch {}
   }

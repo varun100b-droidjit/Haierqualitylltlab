@@ -123,12 +123,12 @@ subscribeToLabRealtimeEvents((event, payload) => {
   }
 });
 
-// Periodic background sync: Poll cloud every 5 seconds for instant multi-device sync, and push pending units
+// Periodic background sync: Poll cloud every 2.5 seconds for instant multi-device sync across all browsers
 if (typeof window !== 'undefined') {
   setInterval(() => {
     initDataSync();
     pushPendingLocalUnitsToFirestore();
-  }, 5000);
+  }, 2500);
 
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
@@ -227,43 +227,44 @@ export async function fetchProtoUnitsFromFirestore(): Promise<ProtoUnit[] | null
 /**
  * Merges incoming remote records with the local cache in a NON-DESTRUCTIVE manner.
  * Prioritizes remote records as the cloud source of truth, while preserving any
- * locally created units that are currently pending cloud upload.
+/**
+ * Merges incoming remote records with the local cache in a NON-DESTRUCTIVE manner.
+ * Prioritizes remote records as the cloud/server source of truth for status and stages,
+ * while preserving any genuine locally created units that have not yet reached the server.
  */
 function mergeWithLocalCache(remoteUnits: ProtoUnit[]): ProtoUnit[] {
   const deleted = getDeletedProtoUnitIds();
   const map = new Map<string, ProtoUnit>();
 
-  // 1. All valid remote units from Firestore / cloud
+  // 1. All valid remote units from Central Server / Supabase / Firestore
   remoteUnits.forEach(rem => {
     if (!rem || !rem.id || deleted.has(rem.id)) return;
     const local = protoUnitsCache.find(l => l.id === rem.id);
-    // If local has valid photos and remote has missing/empty photos, preserve local photos
-    if (local && local.photos && typeof local.photos === 'object') {
-      const mergedPhotos: Record<string, string> = { ...(rem.photos || {}) };
-      Object.entries(local.photos).forEach(([k, v]) => {
-        if (typeof v === 'string' && !isPhotoMissing(v)) {
-          if (isPhotoMissing(mergedPhotos[k])) {
-            mergedPhotos[k] = v;
+    if (local) {
+      if ((local as any)._pendingSync) {
+        delete (local as any)._pendingSync;
+      }
+      // If local has valid photos and remote has missing/empty photos, preserve local photos
+      if (local.photos && typeof local.photos === 'object') {
+        const mergedPhotos: Record<string, string> = { ...(rem.photos || {}) };
+        Object.entries(local.photos).forEach(([k, v]) => {
+          if (typeof v === 'string' && !isPhotoMissing(v)) {
+            if (isPhotoMissing(mergedPhotos[k])) {
+              mergedPhotos[k] = v;
+            }
           }
-        }
-      });
-      rem.photos = mergedPhotos;
+        });
+        rem.photos = mergedPhotos;
+      }
     }
     map.set(rem.id, rem);
   });
 
-  // 2. Preserve local units that have not yet reached the cloud or are marked pending sync
+  // 2. Only preserve units that exist LOCALLY and have NOT yet reached the server/cloud
   protoUnitsCache.forEach(local => {
     if (local && local.id && !deleted.has(local.id)) {
       if (!map.has(local.id)) {
         map.set(local.id, local);
-      } else {
-        const remote = map.get(local.id)!;
-        const localTime = new Date(local.updatedAt || local.createdAt || 0).getTime();
-        const remTime = new Date(remote.updatedAt || remote.createdAt || 0).getTime();
-        if ((local as any)._pendingSync || localTime > remTime) {
-          map.set(local.id, local);
-        }
       }
     }
   });
@@ -271,6 +272,28 @@ function mergeWithLocalCache(remoteUnits: ProtoUnit[]): ProtoUnit[] {
   const merged = Array.from(map.values());
   merged.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
   return merged;
+}
+
+/**
+ * Directly applies remote proto units from Server-Sent Events (SSE) or Unified Sync
+ */
+export function applyRemoteProtoUnits(remoteUnits: ProtoUnit[]) {
+  if (!Array.isArray(remoteUnits)) return;
+  const clean = remoteUnits.filter(u => u && !u.id.startsWith('proto-101') && !u.id.startsWith('proto-102'));
+  const merged = mergeWithLocalCache(clean);
+  protoUnitsCache = merged;
+  safeLocalStorageSet(STORAGE_KEY_PROTO_UNITS, merged);
+  idbSaveAll('proto_units', merged);
+  notifyListeners();
+}
+
+export function applyRemoteProtoUnitDeleted(id: string) {
+  if (!id) return;
+  markProtoUnitDeleted(id);
+  protoUnitsCache = protoUnitsCache.filter(u => u.id !== id);
+  safeLocalStorageSet(STORAGE_KEY_PROTO_UNITS, protoUnitsCache);
+  idbSaveAll('proto_units', protoUnitsCache);
+  notifyListeners();
 }
 
 // Push any pending local units to Firestore if they aren't on the cloud yet
@@ -364,7 +387,40 @@ export async function forceSyncProtoUnits(): Promise<ProtoUnit[]> {
 
 async function initDataSync() {
   try {
-    // Try fetching from Firestore first
+    // 1. Fetch from Central Server API FIRST (guarantees instant cross-browser & cross-device match)
+    try {
+      const serverRes = await fetch('/api/sync/proto-units');
+      if (serverRes.ok) {
+        const sData = await serverRes.json();
+        if (sData.success && Array.isArray(sData.units)) {
+          const serverUnits: ProtoUnit[] = sData.units.filter((u: any) => u && !u.id.startsWith('proto-101') && !u.id.startsWith('proto-102'));
+          const serverIds = new Set(serverUnits.map(u => u.id));
+
+          // If local has genuine units that server doesn't have yet, push them to server!
+          const unsynced = protoUnitsCache.filter(u => u && u.id && !serverIds.has(u.id) && !u.id.startsWith('proto-101') && !u.id.startsWith('proto-102'));
+          if (unsynced.length > 0) {
+            fetch('/api/sync/proto-units', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ units: unsynced })
+            }).catch(() => {});
+          }
+
+          if (serverUnits.length > 0) {
+            const merged = mergeWithLocalCache(serverUnits);
+            if (JSON.stringify(merged) !== JSON.stringify(protoUnitsCache)) {
+              protoUnitsCache = merged;
+              safeLocalStorageSet(STORAGE_KEY_PROTO_UNITS, merged);
+              idbSaveAll('proto_units', merged);
+              notifyListeners();
+            }
+            return;
+          }
+        }
+      }
+    } catch {}
+
+    // 2. Try fetching from Firestore
     const firestoreData = await fetchProtoUnitsFromFirestore();
     if (firestoreData && firestoreData.length > 0) {
       const clean = firestoreData.filter(u => u && u.id !== 'proto-101' && u.id !== 'proto-102');
@@ -377,7 +433,7 @@ async function initDataSync() {
       return;
     }
 
-    // Fallback to Supabase
+    // 3. Fallback to Supabase
     const remoteData = await fetchProtoUnitsFromSupabase();
     if (remoteData && remoteData.length > 0) {
       const cleanRemote = remoteData.filter(u => u && u.id !== 'proto-101' && u.id !== 'proto-102');
@@ -405,12 +461,20 @@ export function subscribeProtoUnitStore(callback: () => void) {
 }
 
 function saveLocalProtoUnits(data: ProtoUnit[]) {
-  const clean = (data || []).filter(u => u && u.id !== 'proto-101' && u.id !== 'proto-102');
+  const clean = (data || []).filter(u => u && !u.id.startsWith('proto-101') && !u.id.startsWith('proto-102'));
   protoUnitsCache = clean;
   // Always persist full data with all photos to IndexedDB
   idbSaveAll('proto_units', clean);
   // Persist clean copy to localStorage
   safeLocalStorageSet(STORAGE_KEY_PROTO_UNITS, clean);
+
+  // Instant Central Server Sync (updates all other browsers and devices immediately!)
+  fetch('/api/sync/proto-units', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ units: clean })
+  }).catch(() => {});
+
   if (localProtoBus) {
     try { localProtoBus.postMessage({ timestamp: Date.now() }); } catch {}
   }

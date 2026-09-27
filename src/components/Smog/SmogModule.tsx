@@ -300,6 +300,8 @@ export const SmogModule: React.FC<SmogModuleProps> = ({
     date: string;
     shift: 'A' | 'B' | 'all';
     smogQty: number;
+    prQty?: number;
+    pendingQty?: number;
   } | null>(null);
   const [smogQtyRecords, setSmogQtyRecords] = useState<SmogQtyRecord[]>([]);
   const [extraMetrics, setExtraMetrics] = useState<SmogExtraMetrics>(() => getSmogExtraMetrics());
@@ -1969,7 +1971,9 @@ export const SmogModule: React.FC<SmogModuleProps> = ({
           setWhatsAppReportParams({
             date: data.date,
             shift: data.shift,
-            smogQty: data.smogQty
+            smogQty: data.smogQty,
+            prQty: data.prQty,
+            pendingQty: data.pendingQty
           });
           setIsWhatsAppReportOpen(true);
         }}
@@ -1989,6 +1993,8 @@ export const SmogModule: React.FC<SmogModuleProps> = ({
           })()}
           shift={whatsAppReportParams?.shift || (shiftFilter === 'all' ? 'A' : shiftFilter)}
           smogQty={whatsAppReportParams?.smogQty ?? (currentSmogQty || 0)}
+          prQty={whatsAppReportParams?.prQty ?? extraMetrics.proQty}
+          pendingQty={whatsAppReportParams?.pendingQty ?? extraMetrics.smogPendingQty}
           records={leakRecords}
         />
       )}

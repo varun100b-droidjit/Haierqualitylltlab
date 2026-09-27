@@ -243,6 +243,13 @@ export function setActiveLabShift(shift: LabShift, operatorName: string = 'Shift
     try { localShiftBus.postMessage({ shift, operatorName }); } catch {}
   }
 
+  // Central Server API sync (instant multi-device push)
+  fetch('/api/sync/shift', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ activeShift: shift })
+  }).catch(() => {});
+
   // 2. Broadcast globally via Supabase Realtime channel (Phone <-> Tablet <-> Desktop)
   broadcastLabRealtimeEvent('shift_change', { shift, operatorName, shiftName: LAB_SHIFTS[shift]?.name });
 
@@ -260,6 +267,19 @@ export function setActiveLabShift(shift: LabShift, operatorName: string = 'Shift
       shiftDetails.name,
       operatorName
     );
+  }
+}
+
+/**
+ * Directly applies remote shift from Server-Sent Events (SSE) or Unified Sync
+ */
+export function applyRemoteShift(shift: LabShift) {
+  if (shift && shift in LAB_SHIFTS && shift !== currentShift) {
+    currentShift = shift;
+    if (typeof window !== 'undefined') {
+      try { localStorage.setItem(STORAGE_KEY, shift); } catch {}
+    }
+    notifyShiftListeners(shift);
   }
 }
 

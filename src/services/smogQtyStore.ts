@@ -1,16 +1,22 @@
 // Smog Qty Entry Store & Synchronization Service with Firebase Firestore Persistence
 import { db, collection, doc, setDoc, deleteDoc, getDocs, onSnapshot } from './firebase';
+import { saveSmogExtraMetrics } from './smogExtraStore';
 
 export interface SmogModelQtyItem {
   modelName: string;
-  qty: number;
+  qty: number;        // Backward-compatible fallback / total Smog Qty
+  prQty?: number;     // Production Qty (extracted from photo)
+  smogQty?: number;   // Smog Qty (added via bottom input box)
+  pendingQty?: number;// Pr. Qty - Smog Qty
 }
 
 export interface SmogQtyRecord {
   id: string;
   date: string;       // YYYY-MM-DD
   shift: 'A' | 'B';
-  smogQty: number;
+  smogQty: number;    // Total Smog Qty
+  prQty?: number;     // Total Production Qty
+  pendingQty?: number;// Total Pending Qty
   models?: SmogModelQtyItem[];
   notes?: string;
   createdAt: string;
@@ -174,6 +180,8 @@ export function saveSmogQtyRecord(data: {
   date: string;
   shift: 'A' | 'B' | string;
   smogQty: number;
+  prQty?: number;
+  pendingQty?: number;
   models?: SmogModelQtyItem[];
   notes?: string;
 }): SmogQtyRecord {
@@ -181,6 +189,18 @@ export function saveSmogQtyRecord(data: {
   const today = new Date().toISOString().split('T')[0];
   const targetDate = data.date ? data.date.trim() : today;
   const normalizedShift: 'A' | 'B' = (data.shift === 'B' || data.shift === 'C') ? 'B' : 'A';
+
+  // Calculate totals from models if available
+  const computedPrQty = data.prQty !== undefined 
+    ? Number(data.prQty) 
+    : (data.models && data.models.length > 0 
+        ? data.models.reduce((sum, m) => sum + (Number(m.prQty ?? m.qty) || 0), 0)
+        : Number(data.smogQty));
+
+  const computedSmogQty = Number(data.smogQty);
+  const computedPendingQty = data.pendingQty !== undefined
+    ? Number(data.pendingQty)
+    : Math.max(0, computedPrQty - computedSmogQty);
 
   // Check if an entry already exists for this exact date and shift
   const existingIdx = current.findIndex(
@@ -191,12 +211,14 @@ export function saveSmogQtyRecord(data: {
   let savedRecord: SmogQtyRecord;
 
   if (existingIdx >= 0) {
-    // Update existing entry (add qty or replace with new total as entered)
+    // Update existing entry
     const existing = current[existingIdx];
     savedRecord = {
       ...existing,
       shift: normalizedShift,
-      smogQty: Number(data.smogQty),
+      smogQty: computedSmogQty,
+      prQty: computedPrQty,
+      pendingQty: computedPendingQty,
       models: data.models !== undefined ? data.models : existing.models,
       notes: data.notes || existing.notes,
       updatedAt: new Date().toISOString()
@@ -208,7 +230,9 @@ export function saveSmogQtyRecord(data: {
       id: `sq-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
       date: targetDate,
       shift: normalizedShift,
-      smogQty: Number(data.smogQty),
+      smogQty: computedSmogQty,
+      prQty: computedPrQty,
+      pendingQty: computedPendingQty,
       models: data.models || [],
       notes: data.notes || '',
       createdAt: new Date().toISOString()
@@ -226,6 +250,16 @@ export function saveSmogQtyRecord(data: {
   notifyListeners(updatedList);
   if (localBus) {
     localBus.postMessage({ type: 'SMOG_QTY_UPDATED', payload: updatedList });
+  }
+
+  // Synchronize Smog Extra Metrics (Pro Qty and Smog Pending Qty) so all dashboard views stay in sync
+  try {
+    saveSmogExtraMetrics({
+      proQty: computedPrQty,
+      smogPendingQty: computedPendingQty
+    });
+  } catch (err) {
+    console.warn('Smog extra metrics update note:', err);
   }
 
   // Persist to Firebase Firestore

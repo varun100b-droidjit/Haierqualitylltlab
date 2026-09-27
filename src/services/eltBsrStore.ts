@@ -159,6 +159,38 @@ function saveLocalBSR(records: BSRRecord[]) {
   broadcastLabRealtimeEvent('bsr_records_change', { timestamp: Date.now() });
 }
 
+/**
+ * Directly applies remote ELT records from Server-Sent Events (SSE) or Unified Sync
+ */
+export function applyRemoteELTRecords(records: ELTRecord[]) {
+  if (!Array.isArray(records)) return;
+  eltCache = records;
+  try { localStorage.setItem(STORAGE_KEY_ELT_RECORDS, JSON.stringify(records)); } catch {}
+  notifyELTListeners(records);
+}
+
+/**
+ * Directly applies remote BSR records from Server-Sent Events (SSE) or Unified Sync
+ */
+export function applyRemoteBSRRecords(data: { eltRecords?: ELTRecord[]; bsrRecords?: BSRRecord[] } | BSRRecord[]) {
+  if (Array.isArray(data)) {
+    bsrCache = data;
+    try { localStorage.setItem(STORAGE_KEY_BSR_RECORDS, JSON.stringify(data)); } catch {}
+    notifyBSRListeners(data);
+  } else if (data && typeof data === 'object') {
+    if (Array.isArray(data.bsrRecords)) {
+      bsrCache = data.bsrRecords;
+      try { localStorage.setItem(STORAGE_KEY_BSR_RECORDS, JSON.stringify(data.bsrRecords)); } catch {}
+      notifyBSRListeners(data.bsrRecords);
+    }
+    if (Array.isArray(data.eltRecords)) {
+      eltCache = data.eltRecords;
+      try { localStorage.setItem(STORAGE_KEY_ELT_RECORDS, JSON.stringify(data.eltRecords)); } catch {}
+      notifyELTListeners(data.eltRecords);
+    }
+  }
+}
+
 // Local Inter-Tab Broadcast Channel
 const localELTBus = typeof window !== 'undefined' && 'BroadcastChannel' in window 
   ? new BroadcastChannel('llt_elt_bsr_bus') 

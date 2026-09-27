@@ -23,6 +23,8 @@ export interface SmogWhatsAppReportModalProps {
   smogDate?: string;
   shift: 'A' | 'B' | 'all';
   smogQty: number;
+  prQty?: number;
+  pendingQty?: number;
   records: LeakUnitRecord[];
 }
 
@@ -32,6 +34,8 @@ export const SmogWhatsAppReportModal: React.FC<SmogWhatsAppReportModalProps> = (
   productionDate,
   shift,
   smogQty,
+  prQty,
+  pendingQty,
   records
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -90,7 +94,13 @@ export const SmogWhatsAppReportModal: React.FC<SmogWhatsAppReportModalProps> = (
     text += `🕒 *Closed Time:* ${nowStr}\n`;
     text += `━━━━━━━━━━━━━━━━━━━━━\n`;
     text += `📊 *QUANTITY SUMMARY:*\n`;
+    if (prQty !== undefined && prQty > 0) {
+      text += `🏭 *Pr. Qty:* ${prQty}\n`;
+    }
     text += `💨 *Smog Qty:* ${smogQty}\n`;
+    if (pendingQty !== undefined) {
+      text += `🟣 *Pending Qty:* ${pendingQty}\n`;
+    }
     text += `🚨 *Total Leak Qty:* ${totalLeakQty}\n`;
     text += `✅ *Actual Passed:* ${totalPassed}\n`;
     text += `━━━━━━━━━━━━━━━━━━━━━\n`;
@@ -136,9 +146,10 @@ export const SmogWhatsAppReportModal: React.FC<SmogWhatsAppReportModalProps> = (
     try {
       const canvas = document.createElement('canvas');
       const width = 1080;
-      const minHeight = 1250;
+      const hasPrQty = prQty !== undefined && prQty > 0;
+      const minHeight = hasPrQty ? 1380 : 1250;
       // calculate dynamic height based on number of locations
-      const height = Math.max(minHeight, 1100 + locationList.length * 60);
+      const height = Math.max(minHeight, (hasPrQty ? 1220 : 1100) + locationList.length * 60);
       canvas.width = width;
       canvas.height = height;
       const ctx = canvas.getContext('2d');
@@ -217,16 +228,33 @@ export const SmogWhatsAppReportModal: React.FC<SmogWhatsAppReportModalProps> = (
       // Card 2: Shift
       drawParamCard(ctx, 50 + colW + 20, cardY, colW, 90, 'SHIFT', `SHIFT ${shift === 'all' ? 'ALL' : shift}`, '#fbbf24');
 
-      // 4. Primary Metric Highlights (Smog Qty, Leak Qty, Passed)
-      const metricY = 355;
-      const mColW = (width - 100 - 40) / 3;
+      // 4. Primary Metric Highlights
+      let sectionY = 520;
+      if (hasPrQty) {
+        // Row 1: Pr Qty, Smog Qty, Pending Qty
+        const metricY1 = 355;
+        const mColW3 = (width - 100 - 40) / 3;
+        drawMetricCard(ctx, 50, metricY1, mColW3, 120, 'PR. QTY', String(prQty), 'Production Total', '#f43f5e', '#881337');
+        drawMetricCard(ctx, 50 + mColW3 + 20, metricY1, mColW3, 120, 'SMOG QTY', String(smogQty), 'Shift Smog Output', '#fbbf24', '#78350f');
+        drawMetricCard(ctx, 50 + (mColW3 + 20) * 2, metricY1, mColW3, 120, 'PENDING QTY', String(pendingQty ?? Math.max(0, prQty - smogQty)), 'Pr - Smog', '#c084fc', '#581c87');
 
-      drawMetricCard(ctx, 50, metricY, mColW, 130, 'SMOG QTY', String(smogQty), 'Total Shift Output', '#c084fc', '#581c87');
-      drawMetricCard(ctx, 50 + mColW + 20, metricY, mColW, 130, 'TOTAL LEAK QTY', String(totalLeakQty), 'Suspect Units', '#f87171', '#7f1d1d');
-      drawMetricCard(ctx, 50 + (mColW + 20) * 2, metricY, mColW, 130, 'ACTUAL PASSED', String(totalPassed), 'Verified Units', '#4ade80', '#14532d');
+        // Row 2: Total Leak Qty & Actual Passed
+        const metricY2 = 490;
+        const mColW2 = (width - 100 - 20) / 2;
+        drawMetricCard(ctx, 50, metricY2, mColW2, 110, 'TOTAL LEAK QTY', String(totalLeakQty), 'Suspect Units', '#f87171', '#7f1d1d');
+        drawMetricCard(ctx, 50 + mColW2 + 20, metricY2, mColW2, 110, 'ACTUAL PASSED', String(totalPassed), 'Verified Units', '#4ade80', '#14532d');
+        sectionY = 625;
+      } else {
+        const metricY = 355;
+        const mColW = (width - 100 - 40) / 3;
+
+        drawMetricCard(ctx, 50, metricY, mColW, 130, 'SMOG QTY', String(smogQty), 'Total Shift Output', '#fbbf24', '#78350f');
+        drawMetricCard(ctx, 50 + mColW + 20, metricY, mColW, 130, 'TOTAL LEAK QTY', String(totalLeakQty), 'Suspect Units', '#f87171', '#7f1d1d');
+        drawMetricCard(ctx, 50 + (mColW + 20) * 2, metricY, mColW, 130, 'ACTUAL PASSED', String(totalPassed), 'Verified Units', '#4ade80', '#14532d');
+        sectionY = 520;
+      }
 
       // 5. Leak Unit Location Wise Breakdown Section
-      const sectionY = 520;
       ctx.fillStyle = '#06b6d4';
       ctx.font = 'bold 22px sans-serif';
       ctx.textAlign = 'left';
@@ -508,18 +536,26 @@ export const SmogWhatsAppReportModal: React.FC<SmogWhatsAppReportModalProps> = (
           )}
 
           {/* Quick Metrics Summary Bar */}
-          <div className="grid grid-cols-3 gap-2 p-3 rounded-2xl bg-slate-950 border border-slate-800 font-mono text-center">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 p-3 rounded-2xl bg-slate-950 border border-slate-800 font-mono text-center">
+            {prQty !== undefined && prQty > 0 && (
+              <div>
+                <span className="text-[10px] text-rose-400 uppercase font-bold block">Pr. Qty</span>
+                <span className="text-lg font-black text-rose-300">{prQty}</span>
+              </div>
+            )}
             <div>
-              <span className="text-[10px] text-purple-400 uppercase font-bold block">Smog Qty</span>
-              <span className="text-xl font-black text-purple-300">{smogQty}</span>
+              <span className="text-[10px] text-amber-400 uppercase font-bold block">Smog Qty</span>
+              <span className="text-lg font-black text-amber-300">{smogQty}</span>
             </div>
-            <div className="border-x border-slate-800">
+            {pendingQty !== undefined && (
+              <div>
+                <span className="text-[10px] text-purple-400 uppercase font-bold block">Pending</span>
+                <span className="text-lg font-black text-purple-300">{pendingQty}</span>
+              </div>
+            )}
+            <div>
               <span className="text-[10px] text-rose-400 uppercase font-bold block">Leak Qty</span>
-              <span className="text-xl font-black text-rose-300">{totalLeakQty}</span>
-            </div>
-            <div>
-              <span className="text-[10px] text-emerald-400 uppercase font-bold block">Locations</span>
-              <span className="text-xl font-black text-emerald-300">{locationList.length}</span>
+              <span className="text-lg font-black text-rose-300">{totalLeakQty}</span>
             </div>
           </div>
 
