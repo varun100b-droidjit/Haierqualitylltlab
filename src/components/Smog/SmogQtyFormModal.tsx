@@ -27,6 +27,7 @@ import {
   getSmogQtyRecords, 
   SmogQtyRecord 
 } from '../../services/smogQtyStore';
+import { compressImage, extractHsoModelsClientSide } from '../../utils/imageOcr';
 
 interface SmogQtyFormModalProps {
   isOpen: boolean;
@@ -69,6 +70,7 @@ export const SmogQtyFormModal: React.FC<SmogQtyFormModalProps> = ({
   const [notes, setNotes] = useState<string>('');
   const [hsoModels, setHsoModels] = useState<LocalHsoModel[]>([]);
   const [isScanning, setIsScanning] = useState(false);
+  const [scanStatusText, setScanStatusText] = useState<string>('Analyzing photo with AI...');
   const [scanSuccessMessage, setScanSuccessMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -191,79 +193,109 @@ export const SmogQtyFormModal: React.FC<SmogQtyFormModalProps> = ({
 
     setError(null);
     setScanSuccessMessage(null);
+    setIsScanning(true);
+    setScanStatusText('Optimizing photo for reading...');
 
-    const reader = new FileReader();
-    reader.onload = async () => {
-      const base64Data = reader.result as string;
-      setIsScanning(true);
+    try {
+      // Step 1: Compress high-res camera photo (e.g., from 15MB down to ~250KB)
+      // This prevents 413 Payload Too Large and network timeouts on mobile
+      const compressed = await compressImage(file, 1600, 1600, 0.85);
 
+      // Clear file input immediately
+      if (cameraInputRef.current) cameraInputRef.current.value = '';
+      if (fileInputRef.current) fileInputRef.current.value = '';
+
+      let items: Array<{ modelName: string; qty: number }> = [];
+      let extractionSource = 'AI Vision';
+
+      // Step 2: Attempt Server/API Extraction (Gemini AI Vision)
       try {
+        setScanStatusText('Scanning photo with AI vision model...');
         const response = await fetch('/api/smog/extract-hso-models', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({
-            imageBase64: base64Data,
-            mimeType: file.type || 'image/jpeg'
+            imageBase64: compressed.dataUrl,
+            mimeType: compressed.mimeType
           })
         });
 
-        const data = await response.json();
-
-        // Clear file input immediately
-        if (cameraInputRef.current) cameraInputRef.current.value = '';
-        if (fileInputRef.current) fileInputRef.current.value = '';
-
-        if (data.success && Array.isArray(data.items) && data.items.length > 0) {
-          const existingSmogMap = new Map<string, number>();
-          hsoModels.forEach(m => {
-            existingSmogMap.set(m.modelName.trim().toUpperCase(), m.smogQty);
-          });
-
-          const formatted: LocalHsoModel[] = data.items.map((it: { modelName: string; qty: number }, idx: number) => {
-            const rawPr = Number(it.qty) || 0;
-            const modelKey = it.modelName.trim().toUpperCase();
-            const prevSmog = existingSmogMap.get(modelKey) || 0;
-            const pending = Math.max(0, rawPr - prevSmog);
-
-            return {
-              id: `hso-${Date.now()}-${idx}`,
-              modelName: it.modelName.trim().toUpperCase(),
-              prQty: rawPr,       // Pr. Qty from photo
-              smogQty: prevSmog,  // Smog Qty
-              pendingQty: pending // Pr. Qty - Smog Qty
-            };
-          });
-
-          setHsoModels(formatted);
-          setScanSuccessMessage(
-            `Extracted ${formatted.length} Models from photo (Total Pr. Qty: ${data.totalQty}). Tap any model name to add Smog Qty.`
-          );
+        if (response.ok) {
+          const data = await response.json();
+          if (data.success && Array.isArray(data.items) && data.items.length > 0) {
+            items = data.items;
+            extractionSource = 'AI Cloud Vision';
+          } else if (data.useClientFallback) {
+            console.log('Server indicated client fallback:', data.note || data.error);
+          }
         } else {
-          setError(
-            data.note || 
-            data.error || 
-            'No models starting with "HSO" found in this photo. Please ensure the list is clear, or add models manually.'
-          );
+          console.warn(`Server returned ${response.status}, falling back to on-device scan.`);
         }
-      } catch (err: any) {
-        console.error('Error during OCR extraction:', err);
-        setError('Network or server error while scanning photo. You can add models manually below.');
-      } finally {
-        setIsScanning(false);
-        if (e.target) {
-          e.target.value = '';
+      } catch (serverErr) {
+        console.warn('Server OCR route unreachable or offline. Falling back to device OCR:', serverErr);
+      }
+
+      // Step 3: On-Device Smart OCR Fallback (Tesseract.js directly in browser)
+      // If server is offline, static hosted (e.g. Vercel), or server API returned empty
+      if (items.length === 0) {
+        setScanStatusText('Analyzing photo directly on device...');
+        try {
+          const clientItems = await extractHsoModelsClientSide(compressed.dataUrl, (prog) => {
+            setScanStatusText(prog);
+          });
+
+          if (clientItems && clientItems.length > 0) {
+            items = clientItems;
+            extractionSource = 'On-Device Smart OCR';
+          }
+        } catch (clientOcrErr) {
+          console.error('On-device OCR note:', clientOcrErr);
         }
       }
-    };
 
-    reader.onerror = () => {
-      setError('Could not read image file. Please try again.');
+      // Step 4: Populate extracted models
+      if (items.length > 0) {
+        const existingSmogMap = new Map<string, number>();
+        hsoModels.forEach(m => {
+          existingSmogMap.set(m.modelName.trim().toUpperCase(), m.smogQty);
+        });
+
+        const formatted: LocalHsoModel[] = items.map((it, idx) => {
+          const rawPr = Number(it.qty) || 0;
+          const modelKey = it.modelName.trim().toUpperCase();
+          const prevSmog = existingSmogMap.get(modelKey) || 0;
+          const pending = Math.max(0, rawPr - prevSmog);
+
+          return {
+            id: `hso-${Date.now()}-${idx}`,
+            modelName: modelKey,
+            prQty: rawPr,       // Pr. Qty from photo
+            smogQty: prevSmog,  // Smog Qty
+            pendingQty: pending // Pr. Qty - Smog Qty
+          };
+        });
+
+        const totalPr = formatted.reduce((sum, m) => sum + m.prQty, 0);
+        setHsoModels(formatted);
+        setScanSuccessMessage(
+          `Extracted ${formatted.length} Models from photo [${extractionSource}] (Total Pr. Qty: ${totalPr}). Tap any model name to add Smog Qty.`
+        );
+      } else {
+        setError(
+          'No models starting with "HSO" found in this photo. Please ensure the list is clearly visible, or tap "+ Add Model" below to add manually.'
+        );
+      }
+    } catch (err: any) {
+      console.error('Error during photo scan:', err);
+      setError('Unable to read photo. Please ensure the photo is clear, or add models manually below.');
+    } finally {
       setIsScanning(false);
-    };
-
-    reader.readAsDataURL(file);
+      if (e.target) {
+        e.target.value = '';
+      }
+    }
   };
 
   // Add a manual HSO row
@@ -754,7 +786,7 @@ export const SmogQtyFormModal: React.FC<SmogQtyFormModalProps> = ({
                 <div className="p-2.5 rounded-xl bg-slate-950 border border-cyan-500/40 flex items-center gap-2.5">
                   <Loader2 className="w-4 h-4 text-cyan-400 animate-spin shrink-0" />
                   <span className="text-xs text-cyan-300 font-mono font-medium">
-                    Analyzing photo with Gemini AI... Extracting Pr. Qty, photo will auto-delete.
+                    {scanStatusText || 'Analyzing photo with AI... Extracting Pr. Qty, photo will auto-delete.'}
                   </span>
                 </div>
               )}

@@ -1,13 +1,10 @@
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
-import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Modality } from '@google/genai';
 import { createClient } from '@supabase/supabase-js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 async function startServer() {
   const app = express();
@@ -301,7 +298,7 @@ No backticks, no markdown, just clean raw JSON array.`;
         text: prompt
       };
 
-      const modelsToTry = ['gemini-3.6-flash', 'gemini-3.8-flash', 'gemini-flash-latest'];
+      const modelsToTry = ['gemini-3.8-flash', 'gemini-flash-latest', 'gemini-3.1-flash-lite'];
       let extractedData: Array<{ modelName: string; qty: number }> = [];
       let lastError: string | null = null;
 
