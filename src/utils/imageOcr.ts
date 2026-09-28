@@ -6,9 +6,9 @@ import Tesseract from 'tesseract.js';
  */
 export async function compressImage(
   file: File | Blob,
-  maxWidth = 1600,
-  maxHeight = 1600,
-  quality = 0.85
+  maxWidth = 1800,
+  maxHeight = 1800,
+  quality = 0.90
 ): Promise<{ dataUrl: string; base64: string; mimeType: string }> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -21,7 +21,6 @@ export async function compressImage(
 
       const img = new Image();
       img.onerror = () => {
-        // If image loading fails, return raw dataUrl
         const cleanBase64 = src.replace(/^data:[^;]+;base64,/, '');
         resolve({ dataUrl: src, base64: cleanBase64, mimeType: file.type || 'image/jpeg' });
       };
@@ -44,7 +43,6 @@ export async function compressImage(
             return resolve({ dataUrl: src, base64: cleanBase64, mimeType: 'image/jpeg' });
           }
 
-          // Draw with high quality
           ctx.imageSmoothingEnabled = true;
           ctx.imageSmoothingQuality = 'high';
           ctx.drawImage(img, 0, 0, width, height);
@@ -69,9 +67,79 @@ export async function compressImage(
 }
 
 /**
+ * Pre-processes an image for OCR by converting to high-contrast grayscale.
+ * Extremely helpful for photos of computer monitors/screens with moiré or reflections.
+ */
+export async function preprocessImageForOcr(dataUrl: string): Promise<string> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onerror = () => resolve(dataUrl);
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return resolve(dataUrl);
+
+        ctx.drawImage(img, 0, 0);
+        const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const d = imgData.data;
+
+        // High-contrast grayscale and dynamic range stretch
+        for (let i = 0; i < d.length; i += 4) {
+          // Grayscale luminosity
+          const gray = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+          // Contrast boost (strengthen text against screen moiré)
+          const boosted = gray < 135 ? Math.max(0, gray * 0.7) : Math.min(255, gray * 1.25);
+          d[i] = boosted;
+          d[i + 1] = boosted;
+          d[i + 2] = boosted;
+        }
+
+        ctx.putImageData(imgData, 0, 0);
+        resolve(canvas.toDataURL('image/jpeg', 0.92));
+      } catch {
+        resolve(dataUrl);
+      }
+    };
+    img.src = dataUrl;
+  });
+}
+
+/**
+ * Robust cleaner and normalizer for an individual model string candidate
+ */
+function normalizeModelName(raw: string): string {
+  let m = raw.trim();
+
+  // Normalize prefix: HSO, HS0, H50, H5O -> 'HSO'
+  m = m.replace(/^H(?:S|5)[O0o][\s\-_]*/i, 'HSO');
+
+  // Cut off at bracket / parenthesis
+  m = m.replace(/[\(\[\{].*$/, '');
+
+  // Normalize spaces around hyphens and colons (e.g., '3NB - I : AC' -> '3NB-I:AC')
+  m = m.replace(/\s*-\s*/g, '-').replace(/\s*:\s*/g, ':');
+
+  // Strip trailing punctuation / non-alphanumeric except hyphen/colon
+  m = m.replace(/^[^A-Z0-9]+|[^A-Z0-9]+$/gi, '');
+
+  // Normalize common OCR misreads in suffix:
+  // e.g. -1:AC, -l:AC, -|:AC, -i:ac -> -I:AC
+  m = m.replace(/-(?:1|l|\||i):AC$/i, '-I:AC');
+
+  return m.toUpperCase();
+}
+
+/**
  * Extracts models starting with "HSO" and their production quantities from raw OCR text.
- * Handles various industrial sheet formats:
- * e.g. "HSO17-3NB-I:AC (900)", "HSO18-4NB-I 460", "HSO19-5NB-I:AC: 250", etc.
+ * Tolerant to:
+ * - Computer screen LCD moiré and glare
+ * - 'O' misread as '0' (HS0) or '5' (H50)
+ * - Leading checkboxes [ ], ||, ( )
+ * - Quantities in parentheses '(900)', brackets '[460]', or adjacent tokens
+ * - Strictly ignores 'HSI', 'HTO', '(All)'
  */
 export function parseHsoModelsFromText(rawText: string): Array<{ modelName: string; qty: number }> {
   if (!rawText) return [];
@@ -84,45 +152,68 @@ export function parseHsoModelsFromText(rawText: string): Array<{ modelName: stri
     const line = rawLine.trim();
     if (!line) continue;
 
-    // Look for HSO model pattern
-    // Match HSO followed by alphanumeric, hyphens, colons, slashes
-    const match = line.match(/\b(HSO[A-Za-z0-9_\-:\/.]{3,})/i);
-    if (!match) continue;
+    // Check if line contains an HSO candidate pattern:
+    // HSO or HS0 or H50 followed by numbers (17, 18, 19, 52, etc.) and model suffix
+    const hsoRegex = /(?:^|[\s\[\]\(\)\|\{\}_•\-~^,])(H(?:S|5)[O0o][\s\-_]*[0-9]{1,3}[A-Za-z0-9_\-:\/\.\s]{2,})/gi;
+    let match: RegExpExecArray | null;
 
-    let modelName = match[1].toUpperCase().trim();
-    // Clean trailing punctuation or OCR artifacts
-    modelName = modelName.replace(/[,;.:\-_]+$/, '');
-    if (modelName.length < 5) continue;
+    while ((match = hsoRegex.exec(line)) !== null) {
+      let rawCandidate = match[1].trim();
 
-    // Parse quantity
-    let qty = 0;
-    // 1. Check for quantity in parentheses e.g. "(900)"
-    const parenMatch = line.match(/\((\d+)\)/);
-    if (parenMatch) {
-      qty = parseInt(parenMatch[1], 10);
-    } else {
-      // 2. Look for numbers appearing after or near the model name
-      const textAfterModel = line.slice(line.indexOf(match[0]) + match[0].length);
-      const numMatches = textAfterModel.match(/\b\d{1,5}\b/g) || line.match(/\b\d{1,5}\b/g);
-      if (numMatches && numMatches.length > 0) {
-        for (const numStr of numMatches) {
-          const parsedNum = parseInt(numStr, 10);
-          // Reasonable production batch size check
-          if (parsedNum > 0 && parsedNum <= 50000) {
-            qty = parsedNum;
-            break;
+      // STRICT NEGATIVE FILTER: Ignore HSI (Indoor) and HTO or (All)
+      if (/^H(?:S|5)I/i.test(rawCandidate)) continue;
+      if (/^HTO/i.test(rawCandidate)) continue;
+      if (/^\(?All\)?/i.test(rawCandidate)) continue;
+
+      const modelName = normalizeModelName(rawCandidate);
+      if (!modelName.startsWith('HSO') || modelName.length < 5) continue;
+
+      // Extract quantity:
+      let qty = 0;
+
+      // 1. Try finding quantity inside parentheses/brackets in the line
+      const parenMatch = line.match(/[\(\[\{/](\d{1,5})[\)\]\}]/);
+      if (parenMatch) {
+        qty = parseInt(parenMatch[1], 10);
+      } else {
+        // 2. Search for numbers after the model in the line
+        const textAfter = line.slice(match.index + match[0].length);
+        const numMatches = textAfter.match(/\b\d{1,5}\b/g) || line.match(/\b\d{1,5}\b/g);
+        if (numMatches) {
+          for (const n of numMatches) {
+            const val = parseInt(n, 10);
+            if (val > 0 && val <= 50000) {
+              qty = val;
+              break;
+            }
           }
         }
       }
-    }
 
-    if (qty <= 0) {
-      qty = 100; // Sensible default if quantity not discernible
-    }
+      if (qty <= 0) qty = 100;
 
-    if (!seenModels.has(modelName)) {
-      seenModels.add(modelName);
-      results.push({ modelName, qty });
+      if (!seenModels.has(modelName)) {
+        seenModels.add(modelName);
+        results.push({ modelName, qty });
+      }
+    }
+  }
+
+  // Fallback global regex scan if line-by-line missed joined text
+  if (results.length === 0) {
+    const globalHsoRegex = /(?:H(?:S|5)[O0o][\s\-_]*[0-9]{1,3}[A-Za-z0-9_\-:\/\.]{2,})[^\d\n\r]*[\(\[\{]?(\d{1,5})[\)\]\}]?/gi;
+    let gMatch: RegExpExecArray | null;
+    while ((gMatch = globalHsoRegex.exec(rawText)) !== null) {
+      const fullMatch = gMatch[0];
+      const modelPart = fullMatch.replace(/[\(\[\{]?\d+[\)\]\}]?\s*$/, '');
+      const modelName = normalizeModelName(modelPart);
+      if (!modelName.startsWith('HSO') || modelName.length < 5) continue;
+      const qty = parseInt(gMatch[1], 10) || 100;
+
+      if (!seenModels.has(modelName)) {
+        seenModels.add(modelName);
+        results.push({ modelName, qty });
+      }
     }
   }
 
@@ -131,26 +222,38 @@ export function parseHsoModelsFromText(rawText: string): Array<{ modelName: stri
 
 /**
  * Runs client-side OCR on the provided image using Tesseract.js directly in the browser.
- * Works even when completely offline or when deployed to static hosts like Vercel.
+ * Works completely offline or when deployed to static hosts like Vercel.
  */
 export async function extractHsoModelsClientSide(
   imageDataUrl: string,
   onProgress?: (progressText: string) => void
 ): Promise<Array<{ modelName: string; qty: number }>> {
   try {
-    if (onProgress) onProgress('Initializing local OCR engine...');
+    if (onProgress) onProgress('Enhancing photo clarity for screen reading...');
+    // Create high-contrast grayscale version for screen reading
+    const preprocessedUrl = await preprocessImageForOcr(imageDataUrl);
 
-    const res = await Tesseract.recognize(imageDataUrl, 'eng', {
+    if (onProgress) onProgress('Initializing local OCR engine...');
+    const res = await Tesseract.recognize(preprocessedUrl, 'eng', {
       logger: (m) => {
         if (onProgress && m.status === 'recognizing text') {
           const pct = Math.round((m.progress || 0) * 100);
-          onProgress(`Scanning image on device (${pct}%)...`);
+          onProgress(`Scanning models on device (${pct}%)...`);
         }
       }
     });
 
     const ocrText = res?.data?.text || '';
-    return parseHsoModelsFromText(ocrText);
+    let extracted = parseHsoModelsFromText(ocrText);
+
+    // If contrast version had zero results, try original image as fallback
+    if (extracted.length === 0 && preprocessedUrl !== imageDataUrl) {
+      const resRaw = await Tesseract.recognize(imageDataUrl, 'eng');
+      const rawText = resRaw?.data?.text || '';
+      extracted = parseHsoModelsFromText(rawText);
+    }
+
+    return extracted;
   } catch (err) {
     console.error('Client-side Tesseract OCR failed:', err);
     return [];

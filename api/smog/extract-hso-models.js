@@ -29,22 +29,33 @@ export default async function handler(req, res) {
     }
 
     const cleanBase64 = imageBase64.replace(/^data:[^;]+;base64,/, '').trim();
-    const prompt = `You are an expert OCR vision specialist analyzing an industrial/manufacturing spreadsheet or filter screen.
+    const prompt = `You are an expert OCR vision specialist analyzing a photo taken of a computer monitor/screen showing an Excel or ERP filter popup with AC model numbers and production quantities.
 Examine this image carefully.
-Look at the list of models and their associated quantities (e.g. inside parentheses like "(900)" or in adjoining text/columns).
 
-STRICT FILTERING REQUIREMENT:
-- Extract ONLY the models whose model name starts with "HSO" (case-insensitive, e.g. "HSO17-3NB-I:AC", "HSO18-3NB-I:AC", "HSO19-5NB-I:AC", "HSO52-3NB-I:AC", "HSO52-5NB-I:AC", etc.).
-- Completely IGNORE all other models such as those starting with "HSI" (e.g. HSI17N, HSI18CP, HSI19GHD, HSI52VP) or "HTO" or "(All)". ONLY EXTRACT MODELS STARTING WITH "HSO".
-- For each matching HSO model, parse:
-  1. "modelName": Exact model string starting with HSO (e.g. "HSO17-3NB-I:AC").
-  2. "qty": The numerical quantity (integer) associated with that model, such as the number in parentheses (e.g., if it says "(900)", qty is 900; "(460)" -> 460).
+OBJECTIVE:
+Extract ALL models that start with "HSO" along with their production quantities.
+
+CRITICAL RULES:
+1. Typical HSO models in this image look like:
+   - "HSO17-3NB-I:AC (900)" -> modelName: "HSO17-3NB-I:AC", qty: 900
+   - "HSO18-3NB-I:AC (460)" -> modelName: "HSO18-3NB-I:AC", qty: 460
+   - "HSO19-5NB-I:AC (315)" -> modelName: "HSO19-5NB-I:AC", qty: 315
+   - "HSO52-3NB-I:AC (900)" -> modelName: "HSO52-3NB-I:AC", qty: 900
+   - "HSO52-5NB-I:AC (373)" -> modelName: "HSO52-5NB-I:AC", qty: 373
+2. On photos of computer monitors/screens, the letter 'O' in 'HSO' might look like digit '0' (e.g. "HS017..."). Always normalize it to "HSO".
+3. STRICT FILTERING: Extract ONLY models starting with "HSO". Completely IGNORE models starting with "HSI" (e.g. HSI17N..., HSI18CP..., HSI19GHD..., HSI52VP...), ignore "HTO" (e.g. HTO24...), and ignore "(All)".
+4. For each model:
+   - "modelName": Exact model string starting with HSO (e.g. "HSO17-3NB-I:AC")
+   - "qty": The numerical quantity (integer) inside the parentheses or adjacent text.
 
 OUTPUT FORMAT:
 Return ONLY a valid JSON array of objects:
 [
   { "modelName": "HSO17-3NB-I:AC", "qty": 900 },
-  { "modelName": "HSO18-3NB-I:AC", "qty": 460 }
+  { "modelName": "HSO18-3NB-I:AC", "qty": 460 },
+  { "modelName": "HSO19-5NB-I:AC", "qty": 315 },
+  { "modelName": "HSO52-3NB-I:AC", "qty": 900 },
+  { "modelName": "HSO52-5NB-I:AC", "qty": 373 }
 ]
 No backticks, no markdown, just clean raw JSON array.`;
 
@@ -69,7 +80,7 @@ No backticks, no markdown, just clean raw JSON array.`;
       }
     };
 
-    const modelsToTry = ['gemini-3.8-flash', 'gemini-flash-latest', 'gemini-3.1-flash-lite'];
+    const modelsToTry = ['gemini-3.1-flash-lite', 'gemini-flash-latest', 'gemini-3.8-flash'];
     let extractedData = [];
     let lastError = null;
 
@@ -102,12 +113,26 @@ No backticks, no markdown, just clean raw JSON array.`;
           const parsed = JSON.parse(cleaned);
           if (Array.isArray(parsed)) {
             extractedData = parsed
-              .filter(item => item && typeof item.modelName === 'string' && item.modelName.trim().toUpperCase().startsWith('HSO'))
-              .map(item => ({
-                modelName: item.modelName.trim(),
-                qty: Math.max(1, parseInt(String(item.qty), 10) || 0)
-              }));
-            break;
+              .filter(item => {
+                if (!item || typeof item.modelName !== 'string') return false;
+                const m = item.modelName.trim().toUpperCase();
+                return m.startsWith('HSO') || m.startsWith('HS0') || m.startsWith('H50');
+              })
+              .map(item => {
+                let mName = item.modelName.trim();
+                mName = mName.replace(/^H(?:S|5)[O0o][\s\-_]*/i, 'HSO');
+                mName = mName.replace(/\s*-\s*/g, '-').replace(/\s*:\s*/g, ':');
+                mName = mName.replace(/^[^A-Z0-9]+|[^A-Z0-9]+$/gi, '');
+                mName = mName.replace(/-(?:1|l|\||i):AC$/i, '-I:AC').toUpperCase();
+
+                return {
+                  modelName: mName,
+                  qty: Math.max(1, parseInt(String(item.qty), 10) || 100)
+                };
+              });
+            if (extractedData.length > 0) {
+              break;
+            }
           }
         }
       } catch (err) {
@@ -121,6 +146,7 @@ No backticks, no markdown, just clean raw JSON array.`;
       items: extractedData,
       totalCount: extractedData.length,
       totalQty,
+      useClientFallback: extractedData.length === 0,
       note: extractedData.length === 0 ? (lastError || 'No models starting with HSO found in the photo.') : undefined
     });
   } catch (err) {
