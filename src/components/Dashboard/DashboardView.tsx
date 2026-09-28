@@ -964,36 +964,47 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div className="space-y-3">
             <div className={`grid grid-cols-2 ${(smogExtra.proQty !== 0 || smogExtra.smogPendingQty !== 0) ? 'lg:grid-cols-3' : 'lg:grid-cols-4'} gap-3 sm:gap-3.5`}>
               {/* Card 1: TOTAL SUSPECT */}
-              <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-900/90 border border-slate-800/90 shadow-sm relative overflow-hidden group hover:border-amber-500/40 transition-all">
-                <div className="absolute top-0 right-0 w-20 h-20 bg-amber-500/10 rounded-full blur-xl pointer-events-none" />
-                <span className="text-[10px] sm:text-[11px] font-mono text-amber-400 uppercase tracking-wider block font-bold">
-                  TOTAL SUSPECT
-                </span>
-                <div className="flex items-baseline gap-2 mt-1.5">
-                  <span className="text-2xl sm:text-3xl font-black text-amber-400 font-mono">
+              <div className="p-3.5 sm:p-4 rounded-xl bg-gradient-to-br from-slate-900/90 via-slate-950 to-slate-950 border border-amber-500/30 hover:border-amber-400 shadow-[0_4px_15px_rgba(245,158,11,0.1)] hover:shadow-[0_0_20px_rgba(245,158,11,0.2)] flex flex-col justify-between relative overflow-hidden group transition-all duration-300 hover:-translate-y-0.5">
+                <div className="absolute top-0 right-0 w-20 h-20 bg-amber-500/10 rounded-full blur-xl group-hover:bg-amber-500/20 transition-all pointer-events-none" />
+                <div className="z-10 flex items-center justify-between">
+                  <span className="text-[10px] sm:text-[11px] font-mono text-amber-400 uppercase tracking-wider block font-bold">
+                    TOTAL SUSPECT
+                  </span>
+                  <div className="w-8 h-8 rounded-xl bg-amber-950/80 border border-amber-800 flex items-center justify-center text-amber-400 shadow-md">
+                    <OctagonAlert className="w-4 h-4" />
+                  </div>
+                </div>
+                <div className="z-10 mt-2 flex items-baseline gap-2">
+                  <span className="text-3xl sm:text-4xl font-black text-white font-mono tracking-tight drop-shadow-[0_2px_8px_rgba(245,158,11,0.3)]">
                     {smogSectionMetrics.totalSuspect}
                   </span>
-                  <span className="text-[10px] sm:text-xs text-slate-400 font-mono">Sr. No.</span>
                 </div>
-                <div className="mt-2 text-[9px] sm:text-[10px] text-slate-400 font-mono flex items-center justify-between">
+                <div className="z-10 mt-2 text-[9px] sm:text-[10px] text-slate-400 font-mono flex items-center justify-between">
                   <span>Target Verification</span>
                   <span className="text-amber-400 font-bold">{smogSectionMetrics.recordsCount} Records</span>
                 </div>
               </div>
 
               {/* Card 2: TOTAL LEAK */}
-              <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-900/90 border border-slate-800/90 shadow-sm relative overflow-hidden group hover:border-emerald-500/40 transition-all">
-                <div className="absolute top-0 right-0 w-20 h-20 bg-emerald-500/10 rounded-full blur-xl pointer-events-none" />
-                <span className="text-[10px] sm:text-[11px] font-mono text-emerald-400 uppercase tracking-wider block font-bold">
-                  TOTAL LEAK
-                </span>
-                <div className="flex items-baseline gap-2 mt-1.5">
-                  <span className="text-2xl sm:text-3xl font-black text-emerald-400 font-mono">
+              <div className="p-3.5 sm:p-4 rounded-xl bg-gradient-to-br from-slate-900/90 via-slate-950 to-slate-950 border border-emerald-500/30 hover:border-emerald-400 shadow-[0_4px_15px_rgba(16,185,129,0.1)] hover:shadow-[0_0_20px_rgba(16,185,129,0.2)] flex flex-col justify-between relative overflow-hidden group transition-all duration-300 hover:-translate-y-0.5">
+                <div className="absolute top-0 right-0 w-20 h-20 bg-emerald-500/10 rounded-full blur-xl group-hover:bg-emerald-500/20 transition-all pointer-events-none" />
+                <div className="z-10 flex items-center justify-between">
+                  <span className="text-[10px] sm:text-[11px] font-mono text-emerald-400 uppercase tracking-wider block font-bold">
+                    TOTAL LEAK
+                  </span>
+                  <div className="w-8 h-8 rounded-xl bg-emerald-950/80 border border-emerald-800 flex items-center justify-center text-emerald-400 shadow-md">
+                    <CheckCircle2 className="w-4 h-4" />
+                  </div>
+                </div>
+                <div className="z-10 mt-2 flex items-baseline justify-between gap-2">
+                  <span className="text-3xl sm:text-4xl font-black text-white font-mono tracking-tight drop-shadow-[0_2px_8px_rgba(16,185,129,0.3)]">
                     {smogSectionMetrics.totalActual}
                   </span>
-                  <span className="text-[10px] sm:text-xs text-emerald-300/90 font-mono">Verified</span>
+                  <span className="text-[10px] sm:text-xs text-emerald-400 font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-950/80 border border-emerald-800/80">
+                    Verified
+                  </span>
                 </div>
-                <div className="mt-2 text-[9px] sm:text-[10px] text-slate-400 font-mono flex items-center justify-between">
+                <div className="z-10 mt-2 text-[9px] sm:text-[10px] text-slate-400 font-mono flex items-center justify-between">
                   <span>Passed Status</span>
                   <span className="text-emerald-400 font-bold">
                     {smogSectionMetrics.totalSuspect > 0
@@ -1004,53 +1015,46 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </div>
 
               {/* Card 3: MODEL QTY */}
-              <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-900/90 border border-slate-800/90 shadow-sm relative overflow-hidden group hover:border-cyan-500/40 transition-all">
-                <div className="flex items-center justify-between">
+              <div className="p-3.5 sm:p-4 rounded-xl bg-gradient-to-br from-slate-900/90 via-slate-950 to-slate-950 border border-cyan-500/30 hover:border-cyan-400 shadow-[0_4px_15px_rgba(6,182,212,0.1)] hover:shadow-[0_0_20px_rgba(6,182,212,0.2)] flex flex-col justify-between relative overflow-hidden group transition-all duration-300 hover:-translate-y-0.5">
+                <div className="absolute top-0 right-0 w-20 h-20 bg-cyan-500/10 rounded-full blur-xl group-hover:bg-cyan-500/20 transition-all pointer-events-none" />
+                <div className="z-10 flex items-center justify-between">
                   <span className="text-[10px] sm:text-[11px] font-mono text-cyan-400 uppercase tracking-wider block font-bold">
                     MODEL QTY
                   </span>
-                  <Layers className="w-3.5 h-3.5 text-cyan-400/80" />
+                  <div className="w-8 h-8 rounded-xl bg-cyan-950/80 border border-cyan-800 flex items-center justify-center text-cyan-300 shadow-md">
+                    <Layers className="w-4 h-4" />
+                  </div>
                 </div>
-                <div className="flex items-baseline gap-2 mt-1.5">
-                  <span className="text-2xl sm:text-3xl font-black text-cyan-300 font-mono">
+                <div className="z-10 mt-2 flex items-baseline gap-2">
+                  <span className="text-3xl sm:text-4xl font-black text-white font-mono tracking-tight drop-shadow-[0_2px_8px_rgba(6,182,212,0.3)]">
                     {smogSectionMetrics.modelQty}
                   </span>
-                  <span className="text-[10px] sm:text-xs text-slate-400 font-mono">
-                    {smogSectionMetrics.modelQty === 1 ? 'Model' : 'Models'} Scanned
-                  </span>
-                </div>
-                <div className="mt-2 text-[9px] sm:text-[10px] text-slate-400 font-mono flex items-center justify-between">
-                  <span>Scanner Data</span>
-                  <span className="text-cyan-400 font-semibold">{smogSectionMetrics.modelQty} Unique</span>
                 </div>
               </div>
 
               {/* Card 4: SMOG QTY */}
               <div 
                 onClick={onNavigateToSmog}
-                className="p-3.5 sm:p-4 rounded-2xl bg-slate-900/90 border border-slate-800/90 shadow-sm hover:border-purple-500/50 transition-all cursor-pointer group relative overflow-hidden"
+                className="p-3.5 sm:p-4 rounded-xl bg-gradient-to-br from-slate-900/90 via-slate-950 to-slate-950 border border-purple-500/30 hover:border-purple-400 shadow-[0_4px_15px_rgba(168,85,247,0.1)] hover:shadow-[0_0_20px_rgba(168,85,247,0.2)] flex flex-col justify-between relative overflow-hidden group transition-all duration-300 hover:-translate-y-0.5 cursor-pointer"
                 title="Click to open Smog Section"
               >
-                <div className="flex items-center justify-between">
+                <div className="absolute top-0 right-0 w-20 h-20 bg-purple-500/10 rounded-full blur-xl group-hover:bg-purple-500/20 transition-all pointer-events-none" />
+                <div className="z-10 flex items-center justify-between">
                   <span className="text-[10px] sm:text-[11px] font-mono text-purple-400 uppercase tracking-wider block font-bold">
                     SMOG QTY
                   </span>
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-1.5">
                     <span className="text-[9px] text-purple-400/90 font-mono group-hover:underline">Upload +</span>
-                    <Cloud className="w-3.5 h-3.5 text-purple-400/80" />
+                    <div className="w-8 h-8 rounded-xl bg-purple-950/80 border border-purple-800 flex items-center justify-center text-purple-300 shadow-md">
+                      <Cloud className="w-4 h-4" />
+                    </div>
                   </div>
                 </div>
-                <div className="flex items-baseline gap-2 mt-1.5">
-                  <span className="text-2xl sm:text-3xl font-black text-purple-300 font-mono">
+                <div className="z-10 mt-2 flex items-baseline justify-between">
+                  <span className="text-3xl sm:text-4xl font-black text-white font-mono tracking-tight drop-shadow-[0_2px_8px_rgba(168,85,247,0.3)]">
                     {smogSectionMetrics.totalSmogQty}
                   </span>
-                  <span className="text-[10px] sm:text-xs text-slate-400 font-mono">
-                    {selectedMonth === 'All' ? selectedYear : `${selectedMonth} ${selectedYear}`}
-                  </span>
-                </div>
-                <div className="mt-2 text-[9px] sm:text-[10px] text-slate-500 font-mono flex items-center justify-between">
-                  <span>Shift: All</span>
-                  <span className="text-purple-400 font-bold group-hover:underline flex items-center gap-0.5">
+                  <span className="text-[10px] sm:text-xs text-purple-400 font-bold group-hover:underline flex items-center gap-0.5">
                     Open Form →
                   </span>
                 </div>
@@ -1060,42 +1064,38 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               {(smogExtra.proQty !== 0 || smogExtra.smogPendingQty !== 0) && (
                 <>
                   {/* Card 5: PRO. QTY */}
-                  <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-900/90 border border-slate-800/90 shadow-sm relative overflow-hidden group hover:border-blue-500/40 transition-all animate-in fade-in duration-200">
-                    <div className="flex items-center justify-between">
+                  <div className="p-3.5 sm:p-4 rounded-xl bg-gradient-to-br from-slate-900/90 via-slate-950 to-slate-950 border border-blue-500/30 hover:border-blue-400 shadow-[0_4px_15px_rgba(59,130,246,0.1)] hover:shadow-[0_0_20px_rgba(59,130,246,0.2)] flex flex-col justify-between relative overflow-hidden group transition-all duration-300 hover:-translate-y-0.5 animate-in fade-in duration-200">
+                    <div className="absolute top-0 right-0 w-20 h-20 bg-blue-500/10 rounded-full blur-xl group-hover:bg-blue-500/20 transition-all pointer-events-none" />
+                    <div className="z-10 flex items-center justify-between">
                       <span className="text-[10px] sm:text-[11px] font-mono text-blue-400 uppercase tracking-wider block font-bold">
                         PRO. QTY
                       </span>
-                      <Boxes className="w-3.5 h-3.5 text-blue-400/80" />
+                      <div className="w-8 h-8 rounded-xl bg-blue-950/80 border border-blue-800 flex items-center justify-center text-blue-300 shadow-md">
+                        <Boxes className="w-4 h-4" />
+                      </div>
                     </div>
-                    <div className="flex items-baseline gap-2 mt-1.5">
-                      <span className="text-2xl sm:text-3xl font-black text-blue-400 font-mono">
+                    <div className="z-10 mt-2 flex items-baseline gap-2">
+                      <span className="text-3xl sm:text-4xl font-black text-white font-mono tracking-tight drop-shadow-[0_2px_8px_rgba(59,130,246,0.3)]">
                         {smogExtra.proQty}
                       </span>
-                      <span className="text-[10px] sm:text-xs text-slate-400 font-mono">Units</span>
-                    </div>
-                    <div className="mt-2 text-[9px] sm:text-[10px] text-slate-400 font-mono flex items-center justify-between">
-                      <span>Production Qty</span>
-                      <span className="text-blue-400 font-semibold">{smogExtra.proQty} Total</span>
                     </div>
                   </div>
 
                   {/* Card 6: SMOG PENDING QTY */}
-                  <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-900/90 border border-slate-800/90 shadow-sm relative overflow-hidden group hover:border-rose-500/40 transition-all animate-in fade-in duration-200">
-                    <div className="flex items-center justify-between">
+                  <div className="p-3.5 sm:p-4 rounded-xl bg-gradient-to-br from-slate-900/90 via-slate-950 to-slate-950 border border-rose-500/30 hover:border-rose-400 shadow-[0_4px_15px_rgba(244,63,94,0.1)] hover:shadow-[0_0_20px_rgba(244,63,94,0.2)] flex flex-col justify-between relative overflow-hidden group transition-all duration-300 hover:-translate-y-0.5 animate-in fade-in duration-200">
+                    <div className="absolute top-0 right-0 w-20 h-20 bg-rose-500/10 rounded-full blur-xl group-hover:bg-rose-500/20 transition-all pointer-events-none" />
+                    <div className="z-10 flex items-center justify-between">
                       <span className="text-[10px] sm:text-[11px] font-mono text-rose-400 uppercase tracking-wider block font-bold">
                         SMOG PENDING QTY
                       </span>
-                      <Hourglass className="w-3.5 h-3.5 text-rose-400/80" />
+                      <div className="w-8 h-8 rounded-xl bg-rose-950/80 border border-rose-800 flex items-center justify-center text-rose-300 shadow-md">
+                        <Hourglass className="w-4 h-4" />
+                      </div>
                     </div>
-                    <div className="flex items-baseline gap-2 mt-1.5">
-                      <span className="text-2xl sm:text-3xl font-black text-rose-400 font-mono">
+                    <div className="z-10 mt-2 flex items-baseline gap-2">
+                      <span className="text-3xl sm:text-4xl font-black text-white font-mono tracking-tight drop-shadow-[0_2px_8px_rgba(244,63,94,0.3)]">
                         {smogExtra.smogPendingQty}
                       </span>
-                      <span className="text-[10px] sm:text-xs text-slate-400 font-mono">Pending</span>
-                    </div>
-                    <div className="mt-2 text-[9px] sm:text-[10px] text-slate-400 font-mono flex items-center justify-between">
-                      <span>Inspection Queue</span>
-                      <span className="text-rose-400 font-semibold">{smogExtra.smogPendingQty} Remaining</span>
                     </div>
                   </div>
                 </>
