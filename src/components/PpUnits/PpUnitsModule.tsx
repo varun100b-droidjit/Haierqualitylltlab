@@ -149,7 +149,18 @@ export const PpUnitsModule: React.FC<PpUnitsModuleProps> = ({
   const actualTestingUnits = ppUnits.filter(isUnitTestingEntry);
 
   // Filter units based on section and search term
-  const sectionUnits = actualTestingUnits.filter(u => u.status === activeSection);
+  const isUnitEffectivelyFinished = (u: PpUnit) => u.status === 'finished' || (Number(u.doneHour) >= 1045 && Number(u.doneHour) > 0);
+
+  const sectionUnits = actualTestingUnits.filter(u => {
+    if (activeSection === 'finished') {
+      return isUnitEffectivelyFinished(u);
+    } else if (activeSection === 'live') {
+      return u.status === 'live' && !isUnitEffectivelyFinished(u);
+    } else {
+      return u.status === 'stopped' && !isUnitEffectivelyFinished(u);
+    }
+  });
+
   const filteredUnits = sectionUnits.filter(u => {
     const q = searchTerm.toLowerCase();
     return (
@@ -162,9 +173,9 @@ export const PpUnitsModule: React.FC<PpUnitsModuleProps> = ({
     );
   });
 
-  const liveCount = actualTestingUnits.filter(u => u.status === 'live').length;
-  const stoppedCount = actualTestingUnits.filter(u => u.status === 'stopped').length;
-  const finishedCount = actualTestingUnits.filter(u => u.status === 'finished').length;
+  const liveCount = actualTestingUnits.filter(u => u.status === 'live' && !isUnitEffectivelyFinished(u)).length;
+  const stoppedCount = actualTestingUnits.filter(u => u.status === 'stopped' && !isUnitEffectivelyFinished(u)).length;
+  const finishedCount = actualTestingUnits.filter(isUnitEffectivelyFinished).length;
   const isShiftActive = true; // PP Unit always runs continuously without shift pause
 
   return (

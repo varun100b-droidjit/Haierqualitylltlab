@@ -154,12 +154,7 @@ if (typeof window !== 'undefined') {
 export async function syncPpUnitToFirestore(unit: PpUnit) {
   if (!db || !unit || unit.id.startsWith('pp-idu-') || unit.id.startsWith('pp-odu-')) return;
   try {
-    // 1. Direct Server Upload: upload each genuine photo to server unit_photos collection
-    if (unit.photos && typeof unit.photos === 'object') {
-      await uploadUnitPhotosToServer(unit.id, 'pp', unit.photos);
-    }
-
-    // 2. Persist main unit document safely without crashing 1MB limit
+    // 1. Immediately persist main unit document to Firestore FIRST!
     const sanitized = enforceFirestoreDocSizeLimit(cleanForFirestore(unit));
     const docRef = doc(db, 'pp_units', unit.id);
     await setDoc(docRef, sanitized, { merge: true });
@@ -168,6 +163,11 @@ export async function syncPpUnitToFirestore(unit: PpUnit) {
       safeLocalStorageSet(STORAGE_KEY_PP_UNITS, ppUnitsCache);
     }
     console.log('Successfully synced PP Unit to Firebase Firestore server:', unit.id);
+
+    // 2. Upload photos asynchronously in background so unit status is never blocked
+    if (unit.photos && typeof unit.photos === 'object') {
+      uploadUnitPhotosToServer(unit.id, 'pp', unit.photos).catch(() => {});
+    }
   } catch (e) {
     console.warn('Firestore PP Unit sync note:', e);
   }
@@ -256,7 +256,41 @@ function mergeWithLocalCache(remoteUnits: PpUnit[]): PpUnit[] {
         });
         rem.photos = mergedPhotos;
       }
+
+      // CRITICAL: Protect finished / completed status from stale remote 'live' status
+      const isLocalFinished = local.status === 'finished' || Number(local.doneHour) >= 1045;
+      const isRemoteFinished = rem.status === 'finished' || Number(rem.doneHour) >= 1045;
+
+      const localUpdatedMs = local.updatedAt ? new Date(local.updatedAt.replace(' ', 'T')).getTime() : 0;
+      const remoteUpdatedMs = rem.updatedAt ? new Date(rem.updatedAt.replace(' ', 'T')).getTime() : 0;
+
+      if (isLocalFinished && !isRemoteFinished) {
+        // Stale remote status must NOT revert finished unit back to live!
+        rem.status = 'finished';
+        rem.doneHour = Math.max(Number(local.doneHour) || 0, Number(rem.doneHour) || 0, 1045);
+        rem.completedAt = local.completedAt || rem.completedAt || local.updatedAt;
+        rem.endDateTime = local.endDateTime || rem.endDateTime || local.updatedAt;
+        if (local.reportDetails?.testCompleted && local.reportDetails.testCompleted !== '-') {
+          rem.reportDetails = {
+            ...(rem.reportDetails || {}),
+            testCompleted: local.reportDetails.testCompleted
+          };
+        }
+      } else if (!isNaN(localUpdatedMs) && !isNaN(remoteUpdatedMs) && localUpdatedMs > remoteUpdatedMs) {
+        // Local is newer than remote snapshot: preserve local status, hours and timestamps
+        rem.status = local.status;
+        rem.doneHour = local.doneHour;
+        rem.updatedAt = local.updatedAt;
+        rem.endDateTime = local.endDateTime;
+        rem.completedAt = local.completedAt;
+      }
     }
+
+    // Ensure any unit that has completed 1045 hours has status 'finished'
+    if (Number(rem.doneHour) >= 1045 && rem.status !== 'stopped') {
+      rem.status = 'finished';
+    }
+
     map.set(rem.id, rem);
   });
 
@@ -484,6 +518,7 @@ function loadLocalPpUnits(): PpUnit[] {
 
           return {
             ...u,
+            status: isCompleted ? 'finished' : u.status,
             photos,
             endDateTime: isCompleted ? (u.endDateTime || machineEnd) : (isStopped ? (u.endDateTime || '') : ''),
             reportDetails: {

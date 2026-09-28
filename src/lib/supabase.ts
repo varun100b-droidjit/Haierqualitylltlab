@@ -226,6 +226,7 @@ export async function fetchLeakUnitsFromSupabase(): Promise<any[] | null> {
 
 export async function syncProtoUnitToSupabase(unit: ProtoUnit) {
   try {
+    const isCompleted = unit.status === 'finished' || Number(unit.doneHour || 0) >= 1045;
     const payload = {
       id: unit.id,
       model_name: unit.modelName || '',
@@ -235,13 +236,16 @@ export async function syncProtoUnitToSupabase(unit: ProtoUnit) {
       request_by: unit.requestBy || '',
       test_purpose: unit.testPurpose || '',
       required_hour: Number(unit.requiredHour || 0),
+      done_hour: Number(unit.doneHour || 0),
+      end_date_time: unit.endDateTime || '',
+      completed_at: unit.completedAt || '',
       report_details: unit.reportDetails || {},
       name_plate: unit.namePlate || {},
       parts_info: unit.partsInfo || {},
       photos: unit.photos || {},
       remarks: unit.remarks || '',
       observations: unit.observations || [],
-      status: unit.status || 'live',
+      status: isCompleted ? 'finished' : (unit.status || 'live'),
       created_at: safeIsoString(unit.createdAt),
       updated_at: safeIsoString(unit.updatedAt)
     };
@@ -290,25 +294,32 @@ export async function fetchProtoUnitsFromSupabase(): Promise<ProtoUnit[] | null>
     const filtered = data.filter((item: any) => !isMockId(item.id));
     if (filtered.length === 0) return null;
 
-    return filtered.map((item: any) => ({
-      id: item.id,
-      modelName: item.model_name || item.modelName || '',
-      station: item.station || 'Station 01',
-      iduSerialNumber: item.idu_serial_number || item.iduSerialNumber || '',
-      oduSerialNumber: item.odu_serial_number || item.oduSerialNumber || '',
-      requestBy: item.request_by || item.requestBy || '',
-      testPurpose: item.test_purpose || item.testPurpose || '',
-      requiredHour: Number(item.required_hour ?? item.requiredHour ?? 0),
-      reportDetails: item.report_details || item.reportDetails || {},
-      namePlate: item.name_plate || item.namePlate || {},
-      partsInfo: item.parts_info || item.partsInfo || {},
-      photos: item.photos || {},
-      remarks: item.remarks || '',
-      observations: item.observations || [],
-      status: item.status || 'live',
-      createdAt: item.created_at || item.createdAt || new Date().toISOString(),
-      updatedAt: item.updated_at || item.updatedAt || new Date().toISOString(),
-    }));
+    return filtered.map((item: any) => {
+      const parsedDoneHour = Number(item.done_hour ?? item.doneHour ?? 0);
+      const isCompleted = item.status === 'finished' || parsedDoneHour >= 1045;
+      return {
+        id: item.id,
+        modelName: item.model_name || item.modelName || '',
+        station: item.station || 'Station 01',
+        iduSerialNumber: item.idu_serial_number || item.iduSerialNumber || '',
+        oduSerialNumber: item.odu_serial_number || item.oduSerialNumber || '',
+        requestBy: item.request_by || item.requestBy || '',
+        testPurpose: item.test_purpose || item.testPurpose || '',
+        requiredHour: Number(item.required_hour ?? item.requiredHour ?? 0),
+        doneHour: parsedDoneHour,
+        endDateTime: item.end_date_time || item.endDateTime || '',
+        completedAt: item.completed_at || item.completedAt || '',
+        reportDetails: item.report_details || item.reportDetails || {},
+        namePlate: item.name_plate || item.namePlate || {},
+        partsInfo: item.parts_info || item.partsInfo || {},
+        photos: item.photos || {},
+        remarks: item.remarks || '',
+        observations: item.observations || [],
+        status: isCompleted ? 'finished' : (item.status || 'live'),
+        createdAt: item.created_at || item.createdAt || new Date().toISOString(),
+        updatedAt: item.updated_at || item.updatedAt || new Date().toISOString(),
+      };
+    });
   } catch (err) {
     console.warn('Supabase fetch error (Proto Units):', err);
     return null;
@@ -487,6 +498,7 @@ export async function fetchRDUnitsFromSupabase(): Promise<Unit[] | null> {
 
 export async function syncPpUnitToSupabase(unit: PpUnit) {
   try {
+    const isCompleted = unit.status === 'finished' || Number(unit.doneHour || 0) >= 1045;
     const payload = {
       id: unit.id,
       model_name: unit.modelName || '',
@@ -496,13 +508,16 @@ export async function syncPpUnitToSupabase(unit: PpUnit) {
       request_by: unit.requestBy || '',
       test_purpose: unit.testPurpose || '',
       required_hour: Number(unit.requiredHour || 0),
+      done_hour: Number(unit.doneHour || 0),
+      end_date_time: unit.endDateTime || '',
+      completed_at: unit.completedAt || '',
       report_details: unit.reportDetails || {},
       name_plate: unit.namePlate || {},
       parts_info: unit.partsInfo || {},
       photos: unit.photos || {},
       remarks: unit.remarks || '',
       observations: unit.observations || [],
-      status: unit.status || 'live',
+      status: isCompleted ? 'finished' : (unit.status || 'live'),
       created_at: safeIsoString(unit.createdAt),
       updated_at: safeIsoString(unit.updatedAt)
     };
@@ -538,25 +553,32 @@ export async function fetchPpUnitsFromSupabase(): Promise<PpUnit[] | null> {
     const filtered = data.filter((item: any) => !isMockId(item.id));
     if (filtered.length === 0) return null;
 
-    return filtered.map((item: any) => ({
-      id: item.id,
-      modelName: item.model_name || item.modelName || '',
-      station: item.station || 'Station 01',
-      iduSerialNumber: item.idu_serial_number || item.iduSerialNumber || '',
-      oduSerialNumber: item.odu_serial_number || item.oduSerialNumber || '',
-      requestBy: item.request_by || item.requestBy || '',
-      testPurpose: item.test_purpose || item.testPurpose || '',
-      requiredHour: Number(item.required_hour ?? item.requiredHour ?? 0),
-      reportDetails: item.report_details || item.reportDetails || {},
-      namePlate: item.name_plate || item.namePlate || {},
-      partsInfo: item.parts_info || item.partsInfo || {},
-      photos: item.photos || {},
-      remarks: item.remarks || '',
-      observations: item.observations || [],
-      status: item.status || 'live',
-      createdAt: item.created_at || item.createdAt || new Date().toISOString(),
-      updatedAt: item.updated_at || item.updatedAt || new Date().toISOString(),
-    }));
+    return filtered.map((item: any) => {
+      const parsedDoneHour = Number(item.done_hour ?? item.doneHour ?? 0);
+      const isCompleted = item.status === 'finished' || parsedDoneHour >= 1045;
+      return {
+        id: item.id,
+        modelName: item.model_name || item.modelName || '',
+        station: item.station || 'Station 01',
+        iduSerialNumber: item.idu_serial_number || item.iduSerialNumber || '',
+        oduSerialNumber: item.odu_serial_number || item.oduSerialNumber || '',
+        requestBy: item.request_by || item.requestBy || '',
+        testPurpose: item.test_purpose || item.testPurpose || '',
+        requiredHour: Number(item.required_hour ?? item.requiredHour ?? 0),
+        doneHour: parsedDoneHour,
+        endDateTime: item.end_date_time || item.endDateTime || '',
+        completedAt: item.completed_at || item.completedAt || '',
+        reportDetails: item.report_details || item.reportDetails || {},
+        namePlate: item.name_plate || item.namePlate || {},
+        partsInfo: item.parts_info || item.partsInfo || {},
+        photos: item.photos || {},
+        remarks: item.remarks || '',
+        observations: item.observations || [],
+        status: isCompleted ? 'finished' : (item.status || 'live'),
+        createdAt: item.created_at || item.createdAt || new Date().toISOString(),
+        updatedAt: item.updated_at || item.updatedAt || new Date().toISOString(),
+      };
+    });
   } catch (err) {
     console.warn('Supabase fetch error (PP Units):', err);
     return null;

@@ -675,6 +675,11 @@ No backticks, no markdown, just clean raw JSON array.`;
         if (!u.id) continue;
         const idx = existing.findIndex(e => e.id === u.id);
         if (idx >= 0) {
+          const ex = existing[idx];
+          if (ex.status === 'finished' && u.status === 'live') {
+            u.status = 'finished';
+            u.endDateTime = ex.endDateTime || u.endDateTime;
+          }
           existing[idx] = { ...existing[idx], ...u };
         } else {
           existing.unshift(u);
@@ -722,8 +727,24 @@ No backticks, no markdown, just clean raw JSON array.`;
         if (!u.id) continue;
         const idx = existing.findIndex(e => e.id === u.id);
         if (idx >= 0) {
+          const ex = existing[idx];
+          const isExFinished = ex.status === 'finished' || Number(ex.doneHour) >= 1045;
+          const isUFinished = u.status === 'finished' || Number(u.doneHour) >= 1045;
+
+          if (isExFinished && !isUFinished && u.status === 'live') {
+            u.status = 'finished';
+            u.doneHour = Math.max(Number(ex.doneHour) || 0, Number(u.doneHour) || 0, 1045);
+            u.completedAt = ex.completedAt || u.completedAt;
+            u.endDateTime = ex.endDateTime || u.endDateTime;
+          }
+          if (Number(u.doneHour) >= 1045 && u.status !== 'stopped') {
+            u.status = 'finished';
+          }
           existing[idx] = { ...existing[idx], ...u };
         } else {
+          if (Number(u.doneHour) >= 1045 && u.status !== 'stopped') {
+            u.status = 'finished';
+          }
           existing.unshift(u);
         }
       }
@@ -769,8 +790,24 @@ No backticks, no markdown, just clean raw JSON array.`;
         if (!u.id) continue;
         const idx = existing.findIndex(e => e.id === u.id);
         if (idx >= 0) {
+          const ex = existing[idx];
+          const isExFinished = ex.status === 'finished' || Number(ex.doneHour) >= 1045;
+          const isUFinished = u.status === 'finished' || Number(u.doneHour) >= 1045;
+
+          if (isExFinished && !isUFinished && u.status === 'live') {
+            u.status = 'finished';
+            u.doneHour = Math.max(Number(ex.doneHour) || 0, Number(u.doneHour) || 0, 1045);
+            u.completedAt = ex.completedAt || u.completedAt;
+            u.endDateTime = ex.endDateTime || u.endDateTime;
+          }
+          if (Number(u.doneHour) >= 1045 && u.status !== 'stopped') {
+            u.status = 'finished';
+          }
           existing[idx] = { ...existing[idx], ...u };
         } else {
+          if (Number(u.doneHour) >= 1045 && u.status !== 'stopped') {
+            u.status = 'finished';
+          }
           existing.unshift(u);
         }
       }

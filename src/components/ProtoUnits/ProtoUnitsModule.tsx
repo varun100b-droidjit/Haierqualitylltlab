@@ -97,8 +97,6 @@ export const ProtoUnitsModule: React.FC<ProtoUnitsModuleProps> = ({
 
     const nowMs = currentTime;
     liveUnits.forEach(unit => {
-      if (autoTransferredIdsRef.current.has(unit.id)) return;
-
       const reqHours = typeof unit.requiredHour === 'number' ? unit.requiredHour : parseFloat(unit.requiredHour) || 1045;
       const initialDone = typeof unit.doneHour === 'number' ? unit.doneHour : parseFloat((unit as any).doneHour) || 0;
 
@@ -116,13 +114,15 @@ export const ProtoUnitsModule: React.FC<ProtoUnitsModuleProps> = ({
         elapsedHours = initialDone + shiftCalculatedHours;
       }
 
-      // Check if machine reached 1045 hours (or target hours if >= 1045)
-      if (elapsedHours >= 1045 || (reqHours > 0 && elapsedHours >= reqHours && reqHours >= 1045)) {
-        autoTransferredIdsRef.current.add(unit.id);
+      // Check if machine reached 1045 hours (or target hours if >= 1045) or initialDone is already >= 1045
+      if (elapsedHours >= 1045 || (reqHours > 0 && elapsedHours >= reqHours && reqHours >= 1045) || initialDone >= 1045) {
+        if (!autoTransferredIdsRef.current.has(unit.id)) {
+          autoTransferredIdsRef.current.add(unit.id);
+          setToastMessage(`🎉 Machine "${unit.modelName}" ne 1045 Hours complete kar liye hain! Finished me transfer ho gaya.`);
+          setTimeout(() => setToastMessage(null), 4500);
+        }
         const finalHours = Math.max(1045, Math.round(elapsedHours));
         updateProtoUnitStatus(unit.id, 'finished', finalHours);
-        setToastMessage(`🎉 Machine "${unit.modelName}" ne 1045 Hours complete kar liye hain! Finished me transfer ho gaya.`);
-        setTimeout(() => setToastMessage(null), 4500);
       }
     });
   }, [currentTime, protoUnits, activeShift]);
@@ -197,7 +197,18 @@ export const ProtoUnitsModule: React.FC<ProtoUnitsModuleProps> = ({
   };
 
   // Filter units based on section and search term
-  const sectionUnits = protoUnits.filter(u => u.status === activeSection);
+  const isUnitEffectivelyFinished = (u: ProtoUnit) => u.status === 'finished' || Number(u.doneHour) >= 1045;
+
+  const sectionUnits = protoUnits.filter(u => {
+    if (activeSection === 'finished') {
+      return isUnitEffectivelyFinished(u);
+    } else if (activeSection === 'live') {
+      return u.status === 'live' && !isUnitEffectivelyFinished(u);
+    } else {
+      return u.status === 'stopped' && !isUnitEffectivelyFinished(u);
+    }
+  });
+
   const filteredUnits = sectionUnits.filter(u => {
     const q = searchTerm.toLowerCase();
     return (
@@ -210,10 +221,10 @@ export const ProtoUnitsModule: React.FC<ProtoUnitsModuleProps> = ({
     );
   });
 
-  const liveCount = protoUnits.filter(u => u.status === 'live').length;
+  const liveCount = protoUnits.filter(u => u.status === 'live' && !isUnitEffectivelyFinished(u)).length;
   const isShiftActive = true; // Continuous operation
-  const stoppedCount = protoUnits.filter(u => u.status === 'stopped').length;
-  const finishedCount = protoUnits.filter(u => u.status === 'finished').length;
+  const stoppedCount = protoUnits.filter(u => u.status === 'stopped' && !isUnitEffectivelyFinished(u)).length;
+  const finishedCount = protoUnits.filter(isUnitEffectivelyFinished).length;
 
   return (
     <div className="space-y-6">

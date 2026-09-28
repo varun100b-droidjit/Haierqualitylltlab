@@ -156,12 +156,7 @@ if (typeof window !== 'undefined') {
 export async function syncFieldUnitToFirestore(unit: FieldUnit) {
   if (!db || !unit || unit.id === 'field-101' || unit.id === 'field-102' || unit.id === 'field-103') return;
   try {
-    // 1. Direct Server Upload: upload each genuine photo to server unit_photos collection
-    if (unit.photos && typeof unit.photos === 'object') {
-      await uploadUnitPhotosToServer(unit.id, 'field', unit.photos);
-    }
-
-    // 2. Persist main unit document safely without crashing 1MB limit
+    // 1. Immediately persist main unit document safely to Firestore FIRST!
     const sanitized = enforceFirestoreDocSizeLimit(cleanForFirestore(unit));
     const docRef = doc(db, 'field_units', unit.id);
     await setDoc(docRef, sanitized, { merge: true });
@@ -170,6 +165,11 @@ export async function syncFieldUnitToFirestore(unit: FieldUnit) {
       safeLocalStorageSet(STORAGE_KEY_FIELD_UNITS, fieldUnitsCache);
     }
     console.log('Successfully synced Field Unit to Firebase Firestore server:', unit.id);
+
+    // 2. Upload photos asynchronously in background so status update is never blocked
+    if (unit.photos && typeof unit.photos === 'object') {
+      uploadUnitPhotosToServer(unit.id, 'field', unit.photos).catch(() => {});
+    }
   } catch (e) {
     console.warn('Firestore Field Unit sync note:', e);
   }
@@ -254,6 +254,22 @@ function mergeWithLocalCache(remoteUnits: FieldUnit[]): FieldUnit[] {
           }
         });
         rem.photos = mergedPhotos;
+      }
+
+      // Protect finished status from stale remote 'live'
+      const isLocalFinished = local.status === 'finished';
+      const isRemoteFinished = rem.status === 'finished';
+
+      const localUpdatedMs = local.updatedAt ? new Date(local.updatedAt.replace(' ', 'T')).getTime() : 0;
+      const remoteUpdatedMs = rem.updatedAt ? new Date(rem.updatedAt.replace(' ', 'T')).getTime() : 0;
+
+      if (isLocalFinished && !isRemoteFinished) {
+        rem.status = 'finished';
+        rem.endDateTime = local.endDateTime || rem.endDateTime || local.updatedAt;
+      } else if (!isNaN(localUpdatedMs) && !isNaN(remoteUpdatedMs) && localUpdatedMs > remoteUpdatedMs) {
+        rem.status = local.status;
+        rem.updatedAt = local.updatedAt;
+        rem.endDateTime = local.endDateTime;
       }
     }
     map.set(rem.id, rem);
